@@ -21,3 +21,6 @@ agent_ex-*.tar
 
 # Temporary files, for example, from tests.
 /tmp/
+
+# DETS persistent memory data files.
+/priv/data/
