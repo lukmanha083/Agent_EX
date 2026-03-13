@@ -6,17 +6,29 @@ AgentEx maps AutoGen's runtime concepts to an OTP supervision tree:
 
 ```
 AgentEx.Supervisor (:one_for_one)
-├── AgentEx.Registry        — Named process lookup (AgentId equivalent)
-├── ToolAgent (GenServer)   — Executes tools, holds tool registry
-├── ToolAgent (GenServer)   — Multiple agents can coexist
-└── ToolAgent (GenServer)   — Swarm creates one per Swarm.Agent
+├── AgentEx.Registry                           — Named process lookup (AgentId equivalent)
+│
+│   Agent Framework (dynamic)
+├── ToolAgent (GenServer)                      — Executes tools, holds tool registry
+├── ToolAgent (GenServer)                      — Multiple agents can coexist
+├── ToolAgent (GenServer)                      — Swarm creates one per Swarm.Agent
+│
+│   Memory System (static)
+├── AgentEx.Memory.SessionRegistry             — Working memory session lookup
+├── AgentEx.Memory.WorkingMemory.Supervisor    — DynamicSupervisor for sessions
+│   ├── WorkingMemory.Server {analyst, sess-1} — Per-agent, per-session GenServer
+│   ├── WorkingMemory.Server {writer, sess-1}  — Each agent gets its own process
+│   └── ...
+├── AgentEx.Memory.PersistentMemory.Store      — ETS + DETS singleton (Tier 2)
+├── AgentEx.Memory.SemanticMemory.Store        — HelixDB vector client (Tier 3)
+└── AgentEx.Memory.KnowledgeGraph.Store        — Graph operations (KG)
 ```
 
 ### Why `:one_for_one`?
 
-Each agent is independent. If a ToolAgent crashes, only that agent restarts.
-Other agents continue operating. This matches AutoGen's design where agents
-are isolated units that communicate only through messages.
+Each component is independent. If a ToolAgent crashes, only that agent restarts.
+If PersistentMemory.Store crashes, the supervisor restarts it and DETS
+rehydrates ETS automatically. Other agents and memory tiers continue operating.
 
 ## Component Roles
 
@@ -359,3 +371,93 @@ A multi-agent swarm request flows through the system like this:
    If termination: {:handoff, "user"} and analyst called transfer_to_user:
    → {:ok, generated_messages, %HandoffMessage{target: "user", source: "analyst"}}
 ```
+
+## Memory Architecture
+
+The 3-tier memory system uses OTP patterns for each tier:
+
+### Per-Agent Isolation Strategy
+
+Each memory tier implements agent isolation differently, leveraging the best
+OTP/BEAM primitive for its use case:
+
+| Tier | OTP Primitive | Isolation Key |
+|---|---|---|
+| Working Memory | Registry + DynamicSupervisor | `{agent_id, session_id}` process key |
+| Persistent Memory | ETS + DETS | `{agent_id, key}` tuple key |
+| Semantic Memory | HelixDB vectors | `agent_id` field, client-side filter |
+| Knowledge Graph | HelixDB graph | Per-agent episodes, shared entities |
+
+### Working Memory: Registry-Based Process Lookup
+
+Each agent+session combination gets a dedicated GenServer, registered via
+the `SessionRegistry`:
+
+```
+Registry Key: {agent_id, session_id}     Process
+────────────────────────────────────     ──────────────────
+{"analyst", "session-1"}          →     #PID<0.200.0>
+{"analyst", "session-2"}          →     #PID<0.201.0>
+{"writer", "session-1"}          →     #PID<0.202.0>
+```
+
+DynamicSupervisor manages process lifecycle — sessions are started on demand
+and terminated when no longer needed.
+
+### Persistent Memory: ETS Compound Keys
+
+The singleton PersistentMemory.Store uses `{agent_id, key}` tuples as ETS keys:
+
+```
+ETS Key                           Value
+──────────────────────────       ─────────────────────────────
+{"analyst", "expertise"}    →    %Entry{value: "data analysis", type: "fact"}
+{"analyst", "model"}        →    %Entry{value: "gpt-4o", type: "preference"}
+{"writer", "style"}         →    %Entry{value: "concise", type: "preference"}
+```
+
+This allows `all(agent_id)` to scan only that agent's entries using ETS
+pattern matching on the first tuple element.
+
+### Context Builder: Parallel Tier Gathering
+
+The ContextBuilder uses `Task.async` to gather from all tiers simultaneously,
+with `rescue` clauses for graceful degradation:
+
+```
+Memory.build_context("analyst", "session-1")
+     │
+     ├── Task.async → gather_persistent("analyst")       → "expertise: data analysis"
+     ├── Task.async → gather_knowledge_graph("analyst")  → "Known facts: ..."
+     ├── Task.async → gather_semantic("analyst")         → "Related: ..."
+     └── Task.async → gather_conversation("analyst")     → [{role, content}, ...]
+     │
+     └── Task.await_many → merge + truncate → LLM messages
+```
+
+### Memory Integration Points
+
+Memory integrates at two levels in the agent framework:
+
+```
+ToolCallerLoop.run(memory: %{agent_id: "analyst", session_id: "sess-1"})
+     │
+     ├─ BEFORE THINK: Memory.build_context() → inject system messages
+     ├─ BEFORE THINK: store user messages in working memory
+     │
+     ├─ [normal Sense-Think-Act loop]
+     │
+     └─ AFTER ACT: store assistant response in working memory
+
+
+Swarm.run(memory: %{session_id: "swarm-sess-1"})
+     │
+     ├─ START: Memory.start_session(name, session_id) for each agent
+     │
+     ├─ PER AGENT THINK: Memory.build_context(name, session_id) → inject
+     ├─ PER AGENT ACT: store response in agent's working memory
+     │
+     └─ END: Memory.stop_session(name, session_id) for each agent
+```
+
+For the full memory guide, see [Memory System](memory.md).

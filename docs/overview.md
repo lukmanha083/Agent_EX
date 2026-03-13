@@ -80,7 +80,14 @@ AgentEx
 │   └── Agent              — Swarm participant (name, system_message, tools, handoffs)
 ├── ModelClient         — HTTP client for OpenAI-compatible LLM APIs
 ├── Application         — OTP supervisor tree + Registry
-└── Example             — Working usage example with permissions
+├── Example             — Working usage example with permissions
+└── Memory              — 3-tier memory system + knowledge graph
+    ├── WorkingMemory       — Per-agent, per-session conversation (GenServer)
+    ├── PersistentMemory    — Key-value facts (ETS + DETS)
+    ├── SemanticMemory      — Vector-based semantic search (HelixDB)
+    ├── KnowledgeGraph      — Entity/relationship extraction + graph retrieval
+    ├── ContextBuilder      — Compose all tiers → LLM-ready messages
+    └── Embeddings          — OpenAI embedding API client
 ```
 
 ## Quick Start
@@ -135,6 +142,37 @@ gate = AgentEx.Intervention.WriteGateHandler.new(allowed_writes: ["send_email"])
 
 IO.puts(List.last(generated).content)
 ```
+
+## Memory Quick Start
+
+```elixir
+alias AgentEx.Memory
+
+# Start a session for an agent
+{:ok, _} = Memory.start_session("analyst", "session-1")
+
+# Tier 1: Working memory (conversation history)
+Memory.add_message("analyst", "session-1", "user", "Analyze AAPL")
+Memory.add_message("analyst", "session-1", "assistant", "AAPL is at $150...")
+messages = Memory.get_messages("analyst", "session-1")
+
+# Tier 2: Persistent memory (key-value facts, survives restarts)
+Memory.remember("analyst", "expertise", "financial analysis", "fact")
+{:ok, entry} = Memory.recall("analyst", "expertise")
+
+# Use memory in the tool-calling loop
+{:ok, result} = AgentEx.ToolCallerLoop.run(agent, client, messages, tools,
+  memory: %{agent_id: "analyst", session_id: "session-1"}
+)
+# Automatically injects memory context before LLM calls
+# and stores conversation turns in working memory
+
+# Clean up
+Memory.stop_session("analyst", "session-1")
+```
+
+See [Memory System](memory.md) for the full guide covering all tiers,
+knowledge graph, and multi-agent integration.
 
 ## Multi-Agent Quick Start (Swarm)
 

@@ -269,6 +269,7 @@ Uses `AgentEx.Sensing` for the sensing phase.
 | `caller_source` | `"assistant"` | Source label for assistant messages |
 | `tool_timeout` | `30_000` | Per-tool execution timeout (ms) |
 | `intervention` | `[]` | List of intervention handlers (modules or functions) |
+| `memory` | `nil` | `%{agent_id: "...", session_id: "..."}` for per-agent memory |
 
 **Returns:** `{:ok, [Message.t()]} | {:error, term()}`
 
@@ -556,6 +557,7 @@ Run the multi-agent swarm.
 | `max_iterations` | `20` | Max iterations across all agents |
 | `intervention` | `[]` | Intervention handlers for ALL tool calls |
 | `model_fn` | `nil` | Override for `ModelClient.create` (testing) |
+| `memory` | `nil` | `%{session_id: "..."}` for per-agent memory (agent name = agent_id) |
 
 **Returns:** `{:ok, generated_messages, handoff_message_or_nil}`
 
@@ -584,4 +586,273 @@ The private `swarm_loop/5` is tail-recursive with these exit conditions:
 
 OTP Application module. Starts:
 - `AgentEx.Registry` — unique-key process registry for named agent lookup
+- `AgentEx.Memory.SessionRegistry` — working memory session lookup
+- `AgentEx.Memory.WorkingMemory.Supervisor` — DynamicSupervisor for session GenServers
+- `AgentEx.Memory.PersistentMemory.Store` — ETS + DETS key-value store
+- `AgentEx.Memory.SemanticMemory.Store` — HelixDB vector client
+- `AgentEx.Memory.KnowledgeGraph.Store` — graph operations
 - `AgentEx.Supervisor` — `:one_for_one` supervisor
+
+---
+
+## AgentEx.Memory
+
+**File:** `lib/agent_ex/memory.ex`
+
+Public API facade for the 3-tier memory system. All functions take `agent_id`
+as their first parameter for per-agent isolation.
+
+### Session Management (Tier 1)
+
+| Function | Description |
+|---|---|
+| `start_session(agent_id, session_id, opts \\ [])` | Start a working memory session (spawns GenServer) |
+| `stop_session(agent_id, session_id)` | Stop and clean up a session |
+| `add_message(agent_id, session_id, role, content)` | Add a message to conversation history |
+| `get_messages(agent_id, session_id)` | Get all messages for a session |
+| `get_recent_messages(agent_id, session_id, n)` | Get last N messages |
+
+### Persistent Memory (Tier 2)
+
+| Function | Description |
+|---|---|
+| `remember(agent_id, key, value, type \\ "preference")` | Store a key-value fact |
+| `recall(agent_id, key)` | Retrieve a fact → `{:ok, entry}` or `:not_found` |
+| `recall_by_type(agent_id, type)` | Get all facts of a type |
+| `forget(agent_id, key)` | Delete a fact |
+
+### Semantic Memory (Tier 3)
+
+| Function | Description |
+|---|---|
+| `store_memory(agent_id, text, type \\ "general", session_id \\ "")` | Embed and store text |
+| `search_memory(agent_id, query, limit \\ 5)` | Semantic search by similarity |
+
+### Knowledge Graph
+
+| Function | Description |
+|---|---|
+| `ingest(agent_id, text, role \\ "user")` | Run full extraction pipeline on a conversation turn |
+| `query_entity(name)` | Query an entity by name (shared across agents) |
+| `query_related(name, hops \\ 1)` | Graph traversal from an entity |
+| `hybrid_search(agent_id, query, limit \\ 5)` | Combined vector + graph retrieval |
+
+### Context Building
+
+| Function | Description |
+|---|---|
+| `build_context(agent_id, session_id, opts \\ [])` | Compose all tiers → LLM-ready messages |
+
+Options for `build_context`:
+- `semantic_query:` — text to use for semantic/KG retrieval (default: `""`)
+- `budgets:` — map of token budgets per tier (see [Memory System](memory.md))
+
+---
+
+## AgentEx.Memory.WorkingMemory.Server
+
+**File:** `lib/agent_ex/memory/working_memory/server.ex`
+
+Per-agent, per-session GenServer holding conversation history.
+
+### State
+
+```elixir
+%{agent_id: String.t(), session_id: String.t(), messages: [Message.t()], max_messages: pos_integer()}
+```
+
+### Registration
+
+```elixir
+{:via, Registry, {AgentEx.Memory.SessionRegistry, {agent_id, session_id}}}
+```
+
+### Functions
+
+| Function | Description |
+|---|---|
+| `add_message(agent_id, session_id, role, content)` | Append message, evict oldest if over limit |
+| `get_messages(agent_id, session_id)` | All messages in chronological order |
+| `get_recent(agent_id, session_id, n)` | Last N messages |
+| `clear(agent_id, session_id)` | Remove all messages |
+| `to_context_messages(agent_id, session_id)` | Format as `[%{role: ..., content: ...}]` |
+| `token_estimate(agent_id, session_id)` | Approximate token count (`length / 4`) |
+| `whereis(agent_id, session_id)` | Find PID or nil |
+
+---
+
+## AgentEx.Memory.PersistentMemory.Store
+
+**File:** `lib/agent_ex/memory/persistent_memory/store.ex`
+
+Singleton GenServer with ETS for fast reads and DETS for disk persistence.
+
+### ETS Key Format
+
+```elixir
+{agent_id, key} => %Entry{key: key, value: value, type: type, ...}
+```
+
+### Functions
+
+| Function | Description |
+|---|---|
+| `put(agent_id, key, value, type)` | Store/update an entry |
+| `get(agent_id, key)` | Retrieve → `{:ok, entry}` or `:not_found` |
+| `get_by_type(agent_id, type)` | All entries of a type for an agent |
+| `delete(agent_id, key)` | Remove an entry |
+| `all(agent_id)` | All entries for an agent |
+| `to_context_messages(agent_id)` | Format as system message |
+
+### Crash Recovery
+
+On init: open DETS → create ETS → hydrate ETS from DETS → schedule periodic sync.
+On crash: supervisor restarts → init rehydrates from DETS automatically.
+
+---
+
+## AgentEx.Memory.SemanticMemory.Store
+
+**File:** `lib/agent_ex/memory/semantic_memory/store.ex`
+
+GenServer that embeds text via OpenAI and stores/searches vectors in HelixDB.
+
+### Functions
+
+| Function | Description |
+|---|---|
+| `store(agent_id, text, type, session_id)` | Embed text → store vector in HelixDB |
+| `search(agent_id, query, limit)` | Embed query → vector search → filter by agent_id |
+| `to_context_messages(agent_id, query)` | Search and format as system message |
+
+### Agent Isolation
+
+Vectors are tagged with `agent_id` on storage. On search, the store over-fetches
+`limit * 3` results from HelixDB, then filters client-side to only return
+results matching the requesting agent's ID.
+
+---
+
+## AgentEx.Memory.KnowledgeGraph.Store
+
+**File:** `lib/agent_ex/memory/knowledge_graph/store.ex`
+
+Orchestrates the knowledge graph ingestion pipeline and retrieval.
+
+### Functions
+
+| Function | Description |
+|---|---|
+| `ingest(agent_id, text, role)` | Full pipeline: episode → extract → resolve → store |
+| `query_entity(name)` | Find entity by name (shared) |
+| `query_related(name, hops)` | Graph traversal from entity |
+| `hybrid_search(agent_id, query, limit)` | Combined vector + graph retrieval |
+| `to_context_messages(agent_id, query)` | Format graph knowledge as system message |
+
+---
+
+## AgentEx.Memory.KnowledgeGraph.Extractor
+
+**File:** `lib/agent_ex/memory/knowledge_graph/extractor.ex`
+
+LLM-based entity and relationship extraction. Reuses `AgentEx.ModelClient`
+for API calls.
+
+### Functions
+
+| Function | Description |
+|---|---|
+| `extract(text)` | Send to LLM → parse JSON → return entities + relationships |
+
+Uses the `extraction_model` config (default: `gpt-4o-mini`) with
+`temperature: 0.0` and `response_format: json_object`.
+
+### Extracted Types
+
+- **Entities**: `{name, type, description}` where type is PERSON, ORGANIZATION, CONCEPT, EVENT, ARTIFACT, or PREFERENCE
+- **Relationships**: `{source, target, type, description, confidence}` where confidence is HIGH, MEDIUM, or LOW
+
+---
+
+## AgentEx.Memory.KnowledgeGraph.Retriever
+
+**File:** `lib/agent_ex/memory/knowledge_graph/retriever.ex`
+
+Hybrid retrieval combining vector search and graph traversal.
+
+### Functions
+
+| Function | Description |
+|---|---|
+| `retrieve(agent_id, query, limit)` | Run 3 parallel strategies, merge + rank results |
+
+### Strategies (run in parallel via `Task.async`)
+
+1. **Episode search**: Embed query → `SearchEpisodes` → filter by agent_id
+2. **Entity traversal**: Embed query → `FindEntity` → `GetEntityKnowledge`
+3. **Fact search**: Embed query → `SearchFacts`
+
+---
+
+## AgentEx.Memory.ContextBuilder
+
+**File:** `lib/agent_ex/memory/context_builder.ex`
+
+Composes all memory tiers into LLM-ready messages with token budgets.
+
+### Functions
+
+| Function | Description |
+|---|---|
+| `build(agent_id, session_id, opts)` | Gather all tiers in parallel → truncate → compose |
+
+### Default Token Budgets
+
+| Tier | Budget |
+|---|---|
+| Persistent | 500 |
+| Knowledge Graph | 1000 |
+| Semantic | 500 |
+| Conversation | 4000 |
+| Total | 8000 |
+
+---
+
+## Memory Structs
+
+### AgentEx.Memory.Message
+
+**File:** `lib/agent_ex/memory/message.ex`
+
+Timestamped conversation message for working memory.
+
+```elixir
+%{role: String.t(), content: String.t(), timestamp: DateTime.t(), metadata: map()}
+```
+
+### AgentEx.Memory.Entry
+
+**File:** `lib/agent_ex/memory/entry.ex`
+
+Persistent memory entry.
+
+```elixir
+%{key: String.t(), value: String.t(), type: String.t(),
+  created_at: DateTime.t(), updated_at: DateTime.t(), metadata: map()}
+```
+
+### AgentEx.Memory.ContextMessage
+
+**File:** `lib/agent_ex/memory/context_message.ex`
+
+LLM context message with factory functions.
+
+```elixir
+%{role: String.t(), content: String.t()}
+```
+
+| Function | Creates |
+|---|---|
+| `ContextMessage.system(content)` | System message |
+| `ContextMessage.user(content)` | User message |
+| `ContextMessage.assistant(content)` | Assistant message |

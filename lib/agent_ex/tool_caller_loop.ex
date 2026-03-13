@@ -12,17 +12,24 @@ defmodule AgentEx.ToolCallerLoop do
   ACT   → Final text response                (loop exits)
   ```
 
+  ## Memory integration
+
+  When `:memory` option is provided, the loop automatically:
+  1. Builds agent-scoped context from all memory tiers before the first THINK
+  2. Stores each conversation turn in working memory
+
+      AgentEx.ToolCallerLoop.run(tool_agent, client, messages, tools,
+        memory: %{agent_id: "analyst", session_id: "sess-1"}
+      )
+
   ## Intervention pipeline
 
   Tool calls pass through an intervention pipeline before execution:
   - `:read` tools → auto-approved (like `r--` in Linux)
   - `:write` tools → can be gated by handlers (like `-w-` permissions)
-
-      AgentEx.ToolCallerLoop.run(tool_agent, client, messages, tools,
-        intervention: [AgentEx.Intervention.PermissionHandler]
-      )
   """
 
+  alias AgentEx.Memory
   alias AgentEx.Message
   alias AgentEx.ModelClient
   alias AgentEx.Sensing
@@ -30,11 +37,14 @@ defmodule AgentEx.ToolCallerLoop do
 
   require Logger
 
+  @type memory_opts :: %{agent_id: String.t(), session_id: String.t()}
+
   @type opts :: [
           max_iterations: pos_integer(),
           caller_source: String.t(),
           tool_timeout: pos_integer(),
-          intervention: [AgentEx.Intervention.handler()]
+          intervention: [AgentEx.Intervention.handler()],
+          memory: memory_opts() | nil
         ]
 
   @doc """
@@ -48,6 +58,9 @@ defmodule AgentEx.ToolCallerLoop do
   - `:caller_source` — source label for assistant messages (default: "assistant")
   - `:tool_timeout` — per-tool execution timeout in ms (default: 30_000)
   - `:intervention` — list of intervention handlers (modules or functions)
+  - `:memory` — `%{agent_id: "...", session_id: "..."}` to enable per-agent memory.
+    When set, injects memory context before the first LLM call and stores
+    each user/assistant turn in working memory.
   """
   @spec run(GenServer.server(), ModelClient.t(), [Message.t()], [Tool.t()], opts()) ::
           {:ok, [Message.t()]} | {:error, term()}
@@ -56,9 +69,15 @@ defmodule AgentEx.ToolCallerLoop do
     caller_source = Keyword.get(opts, :caller_source, "assistant")
     tool_timeout = Keyword.get(opts, :tool_timeout, 30_000)
     intervention = Keyword.get(opts, :intervention, [])
+    memory_opts = Keyword.get(opts, :memory)
 
-    # Build tools_map for intervention to look up :kind
     tools_map = Map.new(tools, fn %Tool{name: name} = tool -> {name, tool} end)
+
+    # If memory is enabled, inject agent-scoped context as system messages
+    input_messages = maybe_inject_memory_context(input_messages, memory_opts)
+
+    # Store user messages in working memory
+    maybe_store_user_messages(input_messages, memory_opts)
 
     context = %{
       tool_agent: tool_agent,
@@ -69,10 +88,10 @@ defmodule AgentEx.ToolCallerLoop do
       caller_source: caller_source,
       max_iterations: max_iterations,
       tool_timeout: tool_timeout,
-      intervention: intervention
+      intervention: intervention,
+      memory: memory_opts
     }
 
-    # THINK: Initial LLM call — the LLM sees the user's question and available tools
     Logger.debug("ToolCallerLoop: starting THINK phase (initial)")
 
     case ModelClient.create(model_client, input_messages, tools: tools) do
@@ -93,6 +112,7 @@ defmodule AgentEx.ToolCallerLoop do
       # ACT: LLM returned text — the loop is complete
       not has_tool_calls?(last) ->
         Logger.debug("ToolCallerLoop: ACT phase — final text response (iteration #{iteration})")
+        maybe_store_assistant_response(last, context.memory)
         {:ok, generated}
 
       # STOP: Hit max iterations — prevent runaway loops
@@ -107,7 +127,6 @@ defmodule AgentEx.ToolCallerLoop do
             "#{length(last.tool_calls)} tool calls (iteration #{iteration})"
         )
 
-        # === SENSING PHASE (with intervention) ===
         {:ok, result_message, _observations} =
           Sensing.sense(context.tool_agent, last.tool_calls,
             timeout: context.tool_timeout,
@@ -116,7 +135,6 @@ defmodule AgentEx.ToolCallerLoop do
             intervention_context: %{iteration: iteration, generated_messages: generated}
           )
 
-        # === THINK PHASE ===
         all_messages = context.input_messages ++ generated ++ [result_message]
 
         Logger.debug("ToolCallerLoop: THINK phase — re-querying LLM with #{length(all_messages)} messages")
@@ -131,6 +149,36 @@ defmodule AgentEx.ToolCallerLoop do
         end
     end
   end
+
+  # -- Memory integration helpers --
+
+  defp maybe_inject_memory_context(messages, nil), do: messages
+
+  defp maybe_inject_memory_context(messages, %{agent_id: agent_id, session_id: session_id}) do
+    Memory.inject_memory_context(messages, agent_id, session_id)
+  end
+
+  defp maybe_store_user_messages(_messages, nil), do: :ok
+
+  defp maybe_store_user_messages(messages, %{agent_id: agent_id, session_id: session_id}) do
+    messages
+    |> Enum.filter(&(&1.role == :user))
+    |> Enum.each(fn msg ->
+      Memory.add_message(agent_id, session_id, "user", msg.content)
+    end)
+  end
+
+  defp maybe_store_assistant_response(_message, nil), do: :ok
+
+  defp maybe_store_assistant_response(%Message{content: content}, %{
+         agent_id: agent_id,
+         session_id: session_id
+       })
+       when is_binary(content) and content != "" do
+    Memory.add_message(agent_id, session_id, "assistant", content)
+  end
+
+  defp maybe_store_assistant_response(_, _), do: :ok
 
   defp has_tool_calls?(%Message{tool_calls: calls}) when is_list(calls) and calls != [], do: true
   defp has_tool_calls?(_), do: false

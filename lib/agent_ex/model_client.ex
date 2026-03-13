@@ -33,6 +33,8 @@ defmodule AgentEx.ModelClient do
   """
   def create(%__MODULE__{} = client, messages, opts \\ []) do
     tools = Keyword.get(opts, :tools, [])
+    temperature = Keyword.get(opts, :temperature)
+    response_format = Keyword.get(opts, :response_format)
 
     body =
       %{
@@ -40,6 +42,8 @@ defmodule AgentEx.ModelClient do
         "messages" => Enum.map(messages, &encode_message/1)
       }
       |> maybe_add_tools(tools)
+      |> maybe_add_temperature(temperature)
+      |> maybe_add_response_format(response_format)
 
     case Req.post(
            "#{client.base_url}/chat/completions",
@@ -95,6 +99,12 @@ defmodule AgentEx.ModelClient do
   defp maybe_add_tools(body, tools) do
     Map.put(body, "tools", Enum.map(tools, &Tool.to_schema/1))
   end
+
+  defp maybe_add_temperature(body, nil), do: body
+  defp maybe_add_temperature(body, temp), do: Map.put(body, "temperature", temp)
+
+  defp maybe_add_response_format(body, nil), do: body
+  defp maybe_add_response_format(body, fmt), do: Map.put(body, "response_format", fmt)
 
   # -- Parsing API response --
 

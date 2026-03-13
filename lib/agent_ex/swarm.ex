@@ -6,18 +6,19 @@ defmodule AgentEx.Swarm do
   routing: when an agent calls `transfer_to_<name>()`, the conversation
   switches to the target agent.
 
-  ```
-                      ┌──────────┐
-           handoff    │ Planner  │    handoff
-          ┌──────────▶│          │◀──────────┐
-          │           └────┬─────┘           │
-          │                │ handoff          │
-          │                ▼                 │
-     ┌────┴─────┐    ┌──────────┐    ┌──────┴────┐
-     │  Writer  │    │ Analyst  │    │   News    │
-     │          │◀───│          │───▶│  Analyst  │
-     └──────────┘    └──────────┘    └───────────┘
-  ```
+  ## Memory integration
+
+  When `:memory` option is provided, each agent in the swarm gets its own
+  memory scope. The Swarm automatically:
+  1. Starts a working memory session per agent
+  2. Injects agent-scoped memory context before each LLM call
+  3. Stores each turn in the agent's working memory
+  4. Cleans up sessions when the swarm completes
+
+      {:ok, result} = Swarm.run(agents, client, messages,
+        start: "planner",
+        memory: %{session_id: "swarm-session-1"}
+      )
 
   ## AutoGen equivalent (Python):
 
@@ -26,21 +27,9 @@ defmodule AgentEx.Swarm do
           termination_condition=HandoffTermination(target="user")
       )
       result = await team.run(task="Analyze AAPL")
-
-  ## AgentEx:
-
-      agents = [
-        Swarm.Agent.new(name: "planner", system_message: "Route tasks...", handoffs: ["analyst"]),
-        Swarm.Agent.new(name: "analyst", system_message: "Analyze...", tools: [lookup], handoffs: ["planner"]),
-      ]
-
-      {:ok, result} = Swarm.run(agents, client, messages,
-        start: "planner",
-        termination: {:handoff, "user"}
-      )
   """
 
-  alias AgentEx.{Handoff, Message, ModelClient, Sensing, Tool, ToolAgent}
+  alias AgentEx.{Handoff, Memory, Message, ModelClient, Sensing, Tool, ToolAgent}
   alias AgentEx.Handoff.HandoffMessage
 
   require Logger
@@ -71,7 +60,8 @@ defmodule AgentEx.Swarm do
           termination: termination(),
           max_iterations: pos_integer(),
           intervention: [AgentEx.Intervention.handler()],
-          model_fn: ([Message.t()], [Tool.t()] -> {:ok, Message.t()} | {:error, term()})
+          model_fn: ([Message.t()], [Tool.t()] -> {:ok, Message.t()} | {:error, term()}),
+          memory: %{session_id: String.t()} | nil
         ]
 
   @type result :: {:ok, [Message.t()], HandoffMessage.t() | nil} | {:error, term()}
@@ -86,6 +76,9 @@ defmodule AgentEx.Swarm do
   - `:max_iterations` — max total iterations across all agents (default: 20)
   - `:intervention` — intervention handlers for tool execution
   - `:model_fn` — override for ModelClient.create (useful for testing)
+  - `:memory` — `%{session_id: "..."}` to enable per-agent memory scoping.
+    Each agent uses its name as `agent_id`. The session_id is shared so
+    agents can operate within the same conversation session.
   """
   @spec run([Agent.t()], ModelClient.t(), [Message.t()], opts()) :: result()
   def run(agents, model_client, messages, opts \\ []) do
@@ -94,9 +87,15 @@ defmodule AgentEx.Swarm do
     max_iterations = Keyword.get(opts, :max_iterations, 20)
     intervention = Keyword.get(opts, :intervention, [])
     model_fn = Keyword.get(opts, :model_fn)
+    memory_opts = Keyword.get(opts, :memory)
 
     agents_map = Map.new(agents, fn %Agent{name: name} = agent -> {name, agent} end)
     tool_agents = start_tool_agents(agents)
+
+    # Start memory sessions for each agent if memory is enabled
+    if memory_opts do
+      start_memory_sessions(agents, memory_opts.session_id)
+    end
 
     context = %{
       agents_map: agents_map,
@@ -105,17 +104,26 @@ defmodule AgentEx.Swarm do
       termination: termination,
       max_iterations: max_iterations,
       intervention: intervention,
-      model_fn: model_fn
+      model_fn: model_fn,
+      memory: memory_opts
     }
 
-    case Map.fetch(agents_map, start_name) do
-      {:ok, _agent} ->
-        Logger.debug("Swarm: starting with agent '#{start_name}'")
-        swarm_loop(context, start_name, messages, [], 0)
+    result =
+      case Map.fetch(agents_map, start_name) do
+        {:ok, _agent} ->
+          Logger.debug("Swarm: starting with agent '#{start_name}'")
+          swarm_loop(context, start_name, messages, [], 0)
 
-      :error ->
-        {:error, {:unknown_agent, start_name}}
+        :error ->
+          {:error, {:unknown_agent, start_name}}
+      end
+
+    # Clean up memory sessions
+    if memory_opts do
+      stop_memory_sessions(agents, memory_opts.session_id)
     end
+
+    result
   end
 
   # -- Internal loop --
@@ -128,14 +136,13 @@ defmodule AgentEx.Swarm do
       agent = Map.fetch!(context.agents_map, current_name)
       tool_agent_pid = Map.fetch!(context.tool_agents, current_name)
 
-      # Build tools: agent's own tools + transfer tools for handoff targets
       all_tools = agent.tools ++ Handoff.transfer_tools(agent.handoffs)
       tools_map = Map.new(all_tools, fn %Tool{name: name} = t -> {name, t} end)
 
-      # Build messages: current agent's system message + input + generated
-      full_messages = [Message.system(agent.system_message) | input_messages] ++ generated
+      # Build messages: system message + memory context + input + generated
+      base_messages = [Message.system(agent.system_message) | input_messages]
+      full_messages = maybe_inject_memory(base_messages, current_name, context.memory) ++ generated
 
-      # THINK: Ask the LLM
       Logger.debug("Swarm: agent '#{current_name}' THINK (iteration #{iteration})")
 
       case think(context, full_messages, all_tools) do
@@ -154,6 +161,7 @@ defmodule AgentEx.Swarm do
 
         {:ok, %Message{} = response} ->
           Logger.debug("Swarm: agent '#{current_name}' returned text response")
+          maybe_store_turn(current_name, response, context.memory)
           {:ok, generated ++ [response], nil}
 
         {:error, reason} ->
@@ -192,6 +200,38 @@ defmodule AgentEx.Swarm do
       _ ->
         {:error, {:unknown_agent, target}}
     end
+  end
+
+  # -- Memory helpers --
+
+  defp maybe_inject_memory(messages, _agent_name, nil), do: messages
+
+  defp maybe_inject_memory(messages, agent_name, %{session_id: session_id}) do
+    Memory.inject_memory_context(messages, agent_name, session_id)
+  end
+
+  defp maybe_store_turn(_agent_name, _response, nil), do: :ok
+
+  defp maybe_store_turn(agent_name, %Message{content: content}, %{session_id: session_id})
+       when is_binary(content) and content != "" do
+    Memory.add_message(agent_name, session_id, "assistant", content)
+  end
+
+  defp maybe_store_turn(_, _, _), do: :ok
+
+  defp start_memory_sessions(agents, session_id) do
+    Enum.each(agents, fn %Agent{name: name} ->
+      case Memory.start_session(name, session_id) do
+        {:ok, _} -> :ok
+        {:error, {:already_started, _}} -> :ok
+      end
+    end)
+  end
+
+  defp stop_memory_sessions(agents, session_id) do
+    Enum.each(agents, fn %Agent{name: name} ->
+      Memory.stop_session(name, session_id)
+    end)
   end
 
   # Dispatch to model_fn override or ModelClient.create

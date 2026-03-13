@@ -34,9 +34,12 @@ Companion to the Python learning project at `../agent/`.
 - `docs/overview.md` — Project overview, motivation, and quick start
 - `docs/architecture.md` — OTP process architecture and AutoGen mapping
 - `docs/features.md` — Feature breakdown with AutoGen comparisons
+- `docs/memory.md` — 3-tier memory system, knowledge graph, per-agent isolation
 - `docs/modules.md` — Module reference (structs, functions, types)
 
 ## Module Layout
+
+### Agent Framework
 - `lib/agent_ex/message.ex` — Message types (system, user, assistant, tool calls, results)
 - `lib/agent_ex/tool.ex` — Tool definition and execution
 - `lib/agent_ex/tool_agent.ex` — GenServer that executes tools (AutoGen's ToolAgent)
@@ -46,8 +49,43 @@ Companion to the Python learning project at `../agent/`.
 - `lib/agent_ex/tool_caller_loop.ex` — Core Sense-Think-Act loop with intervention support
 - `lib/agent_ex/handoff.ex` — HandoffMessage + transfer tool generation + detection
 - `lib/agent_ex/swarm.ex` — Multi-agent Swarm orchestrator with handoff routing
-- `lib/agent_ex/model_client.ex` — LLM API client
+- `lib/agent_ex/model_client.ex` — LLM API client (also supports `temperature:` and `response_format:` opts)
 - `lib/agent_ex/example.ex` — Usage example
+
+### 3-Tier Memory System + Knowledge Graph (`AgentEx.Memory`)
+- `lib/agent_ex/memory.ex` — Public API facade
+- `lib/agent_ex/memory/tier.ex` — `@behaviour` for all memory tiers (`to_context_messages/1`, `token_estimate/1`)
+- `lib/agent_ex/memory/message.ex` — Timestamped conversation message (working memory)
+- `lib/agent_ex/memory/entry.ex` — Persistent memory entry struct
+- `lib/agent_ex/memory/context_message.ex` — LLM context message struct
+- `lib/agent_ex/memory/working_memory/supervisor.ex` — DynamicSupervisor for per-session GenServers (Tier 1)
+- `lib/agent_ex/memory/working_memory/server.ex` — Per-session conversation history (Tier 1)
+- `lib/agent_ex/memory/persistent_memory/store.ex` — ETS + DETS key-value memory (Tier 2)
+- `lib/agent_ex/memory/persistent_memory/loader.ex` — DETS ↔ ETS hydration/sync
+- `lib/agent_ex/memory/semantic_memory/client.ex` — HelixDB HTTP client (shared)
+- `lib/agent_ex/memory/semantic_memory/store.ex` — Vector embed + search (Tier 3)
+- `lib/agent_ex/memory/knowledge_graph/store.ex` — Ingestion pipeline: extract → resolve → store
+- `lib/agent_ex/memory/knowledge_graph/extractor.ex` — LLM entity/relationship extraction (reuses `ModelClient`)
+- `lib/agent_ex/memory/knowledge_graph/retriever.ex` — Hybrid graph+vector retrieval (3 parallel strategies)
+- `lib/agent_ex/memory/embeddings.ex` — OpenAI embedding API client
+- `lib/agent_ex/memory/context_builder.ex` — Compose all tiers + KG into LLM prompt
+- `helix/schema.hx` — HelixDB vector/node/edge type definitions
+- `helix/queries.hx` — HelixQL queries for CRUD + search
+
+### Memory Architecture
+```
+┌──────────────────────────────────────────────────────────────┐
+│                       ContextBuilder                          │
+│  Gathers all tiers + knowledge graph → LLM-ready messages     │
+└───┬────────────┬─────────────────┬────────────────┬──────────┘
+    │            │                 │                │
+┌───▼───┐  ┌────▼─────┐  ┌───────▼───────┐  ┌─────▼──────────┐
+│ Tier 1 │  │  Tier 2   │  │    Tier 3      │  │ Knowledge Graph│
+│Working │  │Persistent │  │   Semantic     │  │  (HelixDB      │
+│Memory  │  │ Memory    │  │   Memory       │  │   Graph+Vector)│
+│(GenSrv)│  │(ETS+DETS) │  │(HelixDB Vector)│  │                │
+└────────┘  └──────────┘  └───────────────┘  └────────────────┘
+```
 
 ## Development
 - `mix deps.get` — install dependencies

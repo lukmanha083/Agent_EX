@@ -574,3 +574,146 @@ This enables patterns like:
 `team.run(task=HandoffMessage(source="user", target="Alice", content="..."))`.
 In AgentEx, the same pattern works through the return value of `Swarm.run/4` —
 the caller inspects the `HandoffMessage` and decides how to continue.
+
+## 17. 3-Tier Agent Memory System
+
+AgentEx includes a memory system with three tiers, each using native BEAM/OTP
+primitives. All operations are scoped by `agent_id` for multi-agent isolation.
+
+### Tier 1: Working Memory (GenServer)
+
+Short-term conversation history. Each `{agent_id, session_id}` pair spawns a
+dedicated GenServer via DynamicSupervisor.
+
+```elixir
+# Per-agent, per-session — isolated by design
+Memory.start_session("analyst", "session-1")
+Memory.add_message("analyst", "session-1", "user", "Analyze AAPL")
+Memory.get_messages("analyst", "session-1")  # only analyst's messages
+Memory.stop_session("analyst", "session-1")
+```
+
+**OTP advantage**: Each session is a separate process — no shared mutable state,
+automatic cleanup via DynamicSupervisor, and process isolation means one
+session crash doesn't affect others.
+
+### Tier 2: Persistent Memory (ETS + DETS)
+
+Long-term key-value facts. ETS provides microsecond reads; DETS provides
+disk persistence. Periodic sync keeps them in agreement.
+
+```elixir
+Memory.remember("analyst", "expertise", "financial analysis", "fact")
+{:ok, entry} = Memory.recall("analyst", "expertise")
+# entry.value => "financial analysis"
+
+# Survives process restarts — DETS rehydrates ETS automatically
+```
+
+**OTP advantage**: ETS gives lock-free concurrent reads. DETS handles disk
+persistence without external dependencies. The supervisor auto-restarts the
+Store process, which rehydrates from DETS on init.
+
+### Tier 3: Semantic Memory (HelixDB Vectors)
+
+Vector-based semantic search. Text is embedded via OpenAI and stored in
+HelixDB. Search returns semantically similar results.
+
+```elixir
+Memory.store_memory("analyst", "AAPL P/E ratio is 28.5", "analysis")
+results = Memory.search_memory("analyst", "Apple valuation", 5)
+```
+
+**Agent isolation**: Vectors are tagged with `agent_id` on insert and filtered
+client-side on search (over-fetch 3x, then filter by agent_id).
+
+## 18. Knowledge Graph
+
+Entity/relationship extraction via LLM, stored as a graph in HelixDB. Enables
+richer context than vector search alone by understanding connections between
+entities.
+
+### Ingestion pipeline (per conversation turn)
+
+```
+User message → Create Episode → LLM Extraction → Entity Resolution → Store Facts
+```
+
+1. **Episode**: Stores the raw conversation turn with an embedding
+2. **Extraction**: LLM extracts entities (PERSON, CONCEPT, ARTIFACT...) and relationships
+3. **Resolution**: New entities matched against existing via vector similarity (>0.85 = merge)
+4. **Facts**: Relationships stored as graph edges with confidence levels
+
+### Hybrid retrieval (3 parallel strategies)
+
+```elixir
+Memory.hybrid_search("analyst", "testing framework", 5)
+```
+
+Runs in parallel via `Task.async`:
+- **Vector search**: Embed query → search episodes (agent-scoped)
+- **Entity traversal**: Find entities → follow graph edges (shared)
+- **Fact search**: Embed query → match relationship descriptions (shared)
+
+Results are merged, deduplicated, and ranked by recency + confidence.
+
+**Design choice**: Episodes are per-agent (private), but entities and facts
+are shared. This enables agents to build on each other's domain knowledge
+while keeping conversation history private.
+
+## 19. Memory-Integrated Agent Loops
+
+Both the single-agent ToolCallerLoop and multi-agent Swarm support automatic
+memory integration via a `:memory` option.
+
+### ToolCallerLoop with memory
+
+```elixir
+{:ok, result} = ToolCallerLoop.run(agent, client, messages, tools,
+  memory: %{agent_id: "analyst", session_id: "session-1"}
+)
+# Before THINK: injects memory context as system messages
+# After ACT: stores user + assistant messages in working memory
+```
+
+### Swarm with memory
+
+```elixir
+{:ok, msgs, handoff} = Swarm.run(agents, client, messages,
+  start: "planner",
+  memory: %{session_id: "swarm-session-1"}
+)
+# Each agent.name becomes its agent_id
+# Sessions auto-created at start, auto-cleaned at end
+# Each agent's THINK call gets its own memory context injected
+```
+
+**vs. AutoGen:** AutoGen's memory is typically managed at the `AssistantAgent`
+level via `ChatHistoryManager`. In AgentEx, memory is a separate system that
+integrates at the loop level — the ToolCallerLoop and Swarm are memory-aware,
+but the memory system is usable independently.
+
+## 20. Per-Agent Memory Isolation
+
+Every memory operation takes `agent_id` as its first parameter. Multiple agents
+sharing a session still get completely separate memory:
+
+```elixir
+# Same session, different agents — fully isolated
+Memory.start_session("analyst", "session-1")
+Memory.start_session("writer", "session-1")
+
+Memory.remember("analyst", "expertise", "data analysis", "fact")
+Memory.remember("writer", "style", "concise", "preference")
+
+Memory.recall("analyst", "expertise")  # => {:ok, %{value: "data analysis"}}
+Memory.recall("writer", "expertise")   # => :not_found
+Memory.recall("analyst", "style")      # => :not_found
+Memory.recall("writer", "style")       # => {:ok, %{value: "concise"}}
+```
+
+This enables architectures where multiple specialized agents coexist — each
+with its own personality, knowledge, and conversation history — without any
+risk of memory leaking between them.
+
+For the full memory guide, see [Memory System](memory.md).

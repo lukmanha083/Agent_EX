@@ -6,8 +6,15 @@ defmodule AgentEx.Application do
   @impl true
   def start(_type, _args) do
     children = [
-      # Registry for named tool agents — maps to AutoGen's AgentId routing
-      {Registry, keys: :unique, name: AgentEx.Registry}
+      # Agent framework: Registry for named tool agents
+      {Registry, keys: :unique, name: AgentEx.Registry},
+
+      # Memory system: Registry for per-session working memory
+      {Registry, keys: :unique, name: AgentEx.Memory.SessionRegistry},
+      AgentEx.Memory.WorkingMemory.Supervisor,
+      AgentEx.Memory.PersistentMemory.Store,
+      AgentEx.Memory.SemanticMemory.Store,
+      AgentEx.Memory.KnowledgeGraph.Store
     ]
 
     opts = [strategy: :one_for_one, name: AgentEx.Supervisor]
