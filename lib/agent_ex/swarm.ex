@@ -247,7 +247,7 @@ defmodule AgentEx.Swarm do
   defp start_tool_agents(agents) do
     Map.new(agents, fn %Agent{name: name, tools: tools, handoffs: handoffs} ->
       all_tools = tools ++ Handoff.transfer_tools(handoffs)
-      {:ok, pid} = ToolAgent.start_link(tools: all_tools)
+      {:ok, pid} = ToolAgent.start_link(tools: all_tools, agent_id: name)
       {name, pid}
     end)
   end

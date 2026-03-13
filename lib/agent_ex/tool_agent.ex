@@ -49,6 +49,11 @@ defmodule AgentEx.ToolAgent do
 
   # -- GenServer callbacks --
 
+  @doc "Get the agent ID."
+  def agent_id(agent) do
+    GenServer.call(agent, :agent_id)
+  end
+
   @impl true
   def init(opts) do
     tools =
@@ -56,7 +61,9 @@ defmodule AgentEx.ToolAgent do
       |> Keyword.get(:tools, [])
       |> Map.new(fn %Tool{name: name} = tool -> {name, tool} end)
 
-    {:ok, %{tools: tools}}
+    agent_id = Keyword.get(opts, :agent_id)
+
+    {:ok, %{tools: tools, agent_id: agent_id}}
   end
 
   @impl true
@@ -72,6 +79,10 @@ defmodule AgentEx.ToolAgent do
 
   def handle_call(:tools_map, _from, state) do
     {:reply, state.tools, state}
+  end
+
+  def handle_call(:agent_id, _from, state) do
+    {:reply, state.agent_id, state}
   end
 
   # -- Private helpers --

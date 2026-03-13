@@ -2,8 +2,10 @@ defmodule AgentEx.ModelClient do
   @moduledoc """
   LLM API client — maps to AutoGen's `ChatCompletionClient`.
 
-  Handles communication with OpenAI-compatible APIs.
-  Uses Req for HTTP requests.
+  Supports multiple providers:
+  - `:openai` — OpenAI-compatible APIs (default)
+  - `:moonshot` — Moonshot/Kimi APIs (OpenAI-compatible with built-in tools)
+  - `:anthropic` — Anthropic Claude APIs (different message format)
   """
 
   alias AgentEx.Message
@@ -11,24 +13,53 @@ defmodule AgentEx.ModelClient do
   alias AgentEx.Tool
 
   @enforce_keys [:model]
-  defstruct [:model, :api_key, base_url: "https://api.openai.com/v1"]
+  defstruct [:model, :api_key, provider: :openai, base_url: "https://api.openai.com/v1"]
+
+  @type provider :: :openai | :moonshot | :anthropic
 
   @type t :: %__MODULE__{
           model: String.t(),
           api_key: String.t() | nil,
+          provider: provider(),
           base_url: String.t()
         }
 
+  @provider_defaults %{
+    openai: "https://api.openai.com/v1",
+    moonshot: "https://api.moonshot.cn/v1",
+    anthropic: "https://api.anthropic.com"
+  }
+
+  @doc "Create a new ModelClient with explicit options."
   def new(opts) do
-    struct!(__MODULE__, opts)
+    provider = Keyword.get(opts, :provider, :openai)
+    base_url = Keyword.get(opts, :base_url, Map.fetch!(@provider_defaults, provider))
+
+    opts
+    |> Keyword.put(:base_url, base_url)
+    |> then(&struct!(__MODULE__, &1))
+  end
+
+  @doc "Create an OpenAI client."
+  def openai(model, opts \\ []) do
+    new(Keyword.merge(opts, model: model, provider: :openai))
+  end
+
+  @doc "Create a Moonshot/Kimi client."
+  def moonshot(model, opts \\ []) do
+    new(Keyword.merge(opts, model: model, provider: :moonshot))
+  end
+
+  @doc "Create an Anthropic/Claude client."
+  def anthropic(model, opts \\ []) do
+    new(Keyword.merge(opts, model: model, provider: :anthropic))
   end
 
   @doc """
   Send a chat completion request to the LLM.
 
   Returns either:
-  - `{:ok, %Message{role: :assistant, content: "text"}}` — text response
-  - `{:ok, %Message{role: :assistant, tool_calls: [%FunctionCall{}, ...]}}` — tool calls
+  - `{:ok, %Message{role: :assistant}}` — text or tool call response
   - `{:error, reason}` — API error
   """
   def create(%__MODULE__{} = client, messages, opts \\ []) do
@@ -36,22 +67,13 @@ defmodule AgentEx.ModelClient do
     temperature = Keyword.get(opts, :temperature)
     response_format = Keyword.get(opts, :response_format)
 
-    body =
-      %{
-        "model" => client.model,
-        "messages" => Enum.map(messages, &encode_message/1)
-      }
-      |> maybe_add_tools(tools)
-      |> maybe_add_temperature(temperature)
-      |> maybe_add_response_format(response_format)
+    body = encode_request(client, messages, tools, temperature, response_format)
+    headers = request_headers(client)
+    url = request_url(client)
 
-    case Req.post(
-           "#{client.base_url}/chat/completions",
-           json: body,
-           headers: [{"authorization", "Bearer #{resolve_api_key(client)}"}]
-         ) do
+    case Req.post(url, json: body, headers: headers) do
       {:ok, %{status: 200, body: resp_body}} ->
-        parse_response(resp_body)
+        parse_response(resp_body, client.provider)
 
       {:ok, %{status: status, body: resp_body}} ->
         {:error, {status, resp_body}}
@@ -61,21 +83,83 @@ defmodule AgentEx.ModelClient do
     end
   end
 
-  # -- Encoding messages for the API --
+  @doc "Parse a raw API response body into a Message struct."
+  def parse_response(body, provider \\ :openai)
 
-  defp encode_message(%Message{role: :tool, content: results}) when is_list(results) do
-    # Each tool result becomes a separate message in OpenAI format
-    # But we return a list here — caller must flatten
+  def parse_response(%{"choices" => [%{"message" => message} | _]}, provider)
+      when provider in [:openai, :moonshot] do
+    case message do
+      %{"tool_calls" => calls} when is_list(calls) and calls != [] ->
+        parsed =
+          Enum.map(calls, fn tc ->
+            %{"id" => id, "function" => %{"name" => name, "arguments" => args}} = tc
+            %FunctionCall{id: id, name: name, arguments: args}
+          end)
+
+        {:ok, Message.assistant_tool_calls(parsed)}
+
+      %{"content" => content} ->
+        {:ok, Message.assistant(content || "")}
+    end
+  end
+
+  def parse_response(%{"content" => content_blocks}, :anthropic)
+      when is_list(content_blocks) do
+    tool_uses = Enum.filter(content_blocks, &(&1["type"] == "tool_use"))
+
+    if tool_uses != [] do
+      calls =
+        Enum.map(tool_uses, fn %{"id" => id, "name" => name, "input" => input} ->
+          %FunctionCall{id: id, name: name, arguments: Jason.encode!(input)}
+        end)
+
+      {:ok, Message.assistant_tool_calls(calls)}
+    else
+      text =
+        content_blocks
+        |> Enum.filter(&(&1["type"] == "text"))
+        |> Enum.map_join("\n", & &1["text"])
+
+      {:ok, Message.assistant(text)}
+    end
+  end
+
+  def parse_response(other, _provider), do: {:error, {:unexpected_response, other}}
+
+  # -- Request encoding --
+
+  defp encode_request(%{provider: :anthropic} = client, messages, tools, temp, resp_fmt) do
+    {system_text, chat_messages} = Message.encode_for_anthropic(messages)
+
+    %{"model" => client.model, "max_tokens" => 4096, "messages" => chat_messages}
+    |> maybe_put("system", system_text)
+    |> maybe_add_tools(tools, :anthropic)
+    |> maybe_add_temperature(temp, :anthropic)
+    |> maybe_add_response_format(resp_fmt, :anthropic)
+  end
+
+  defp encode_request(%{provider: provider} = client, messages, tools, temp, resp_fmt) do
+    %{"model" => client.model, "messages" => encode_messages_openai(messages)}
+    |> maybe_add_tools(tools, provider)
+    |> maybe_add_temperature(temp, provider)
+    |> maybe_add_response_format(resp_fmt, provider)
+  end
+
+  # -- OpenAI message encoding (also used by Moonshot) --
+
+  defp encode_messages_openai(messages) do
+    Enum.flat_map(messages, &List.wrap(encode_message_openai(&1)))
+  end
+
+  defp encode_message_openai(%Message{role: :tool, content: results})
+       when is_list(results) do
     Enum.map(results, fn %Message.FunctionResult{} = r ->
-      %{
-        "role" => "tool",
-        "tool_call_id" => r.call_id,
-        "content" => r.content
-      }
+      %{"role" => "tool", "tool_call_id" => r.call_id, "content" => r.content}
     end)
   end
 
-  defp encode_message(%Message{role: :assistant, tool_calls: calls}) when is_list(calls) do
+  defp encode_message_openai(%Message{role: :assistant, tool_calls: calls})
+       when is_list(calls) do
     %{
       "role" => "assistant",
       "content" => "",
@@ -90,41 +174,83 @@ defmodule AgentEx.ModelClient do
     }
   end
 
-  defp encode_message(%Message{role: role, content: content}) do
+  defp encode_message_openai(%Message{role: role, content: content}) do
     %{"role" => to_string(role), "content" => content}
   end
 
-  defp maybe_add_tools(body, []), do: body
+  # -- Tools --
 
-  defp maybe_add_tools(body, tools) do
-    Map.put(body, "tools", Enum.map(tools, &Tool.to_schema/1))
+  defp maybe_add_tools(body, [], _provider), do: body
+
+  defp maybe_add_tools(body, tools, provider) do
+    Map.put(body, "tools", Enum.map(tools, &Tool.to_schema(&1, provider)))
   end
 
-  defp maybe_add_temperature(body, nil), do: body
-  defp maybe_add_temperature(body, temp), do: Map.put(body, "temperature", temp)
+  # -- Temperature (Moonshot/Anthropic clamp to [0, 1]) --
 
-  defp maybe_add_response_format(body, nil), do: body
-  defp maybe_add_response_format(body, fmt), do: Map.put(body, "response_format", fmt)
+  defp maybe_add_temperature(body, nil, _provider), do: body
 
-  # -- Parsing API response --
-
-  defp parse_response(%{"choices" => [%{"message" => message} | _]}) do
-    case message do
-      %{"tool_calls" => tool_calls} when is_list(tool_calls) and tool_calls != [] ->
-        calls =
-          Enum.map(tool_calls, fn %{"id" => id, "function" => %{"name" => name, "arguments" => args}} ->
-            %FunctionCall{id: id, name: name, arguments: args}
-          end)
-
-        {:ok, Message.assistant_tool_calls(calls)}
-
-      %{"content" => content} ->
-        {:ok, Message.assistant(content || "")}
-    end
+  defp maybe_add_temperature(body, temp, provider)
+       when provider in [:moonshot, :anthropic] do
+    Map.put(body, "temperature", temp |> Kernel.max(0) |> Kernel.min(1))
   end
 
-  defp parse_response(other), do: {:error, {:unexpected_response, other}}
+  defp maybe_add_temperature(body, temp, _provider) do
+    Map.put(body, "temperature", temp)
+  end
 
-  defp resolve_api_key(%{api_key: nil}), do: System.get_env("OPENAI_API_KEY") || ""
-  defp resolve_api_key(%{api_key: key}), do: key
+  # -- Response format (Moonshot does not support it) --
+
+  defp maybe_add_response_format(body, nil, _provider), do: body
+  defp maybe_add_response_format(body, _fmt, :moonshot), do: body
+
+  defp maybe_add_response_format(body, fmt, _provider) do
+    Map.put(body, "response_format", fmt)
+  end
+
+  # -- Headers --
+
+  defp request_headers(%{provider: :anthropic} = client) do
+    [
+      {"x-api-key", resolve_api_key(client)},
+      {"anthropic-version", "2023-06-01"},
+      {"content-type", "application/json"}
+    ]
+  end
+
+  defp request_headers(client) do
+    [{"authorization", "Bearer #{resolve_api_key(client)}"}]
+  end
+
+  # -- URL --
+
+  defp request_url(%{provider: :anthropic, base_url: base_url}) do
+    "#{base_url}/v1/messages"
+  end
+
+  defp request_url(%{base_url: base_url}), do: "#{base_url}/chat/completions"
+
+  # -- API key resolution (per-provider, config then env) --
+
+  defp resolve_api_key(%{api_key: key}) when is_binary(key), do: key
+
+  defp resolve_api_key(%{provider: :anthropic}) do
+    app_key(:anthropic_api_key) || System.get_env("ANTHROPIC_API_KEY") || ""
+  end
+
+  defp resolve_api_key(%{provider: :moonshot}) do
+    app_key(:moonshot_api_key) || System.get_env("MOONSHOT_API_KEY") || ""
+  end
+
+  defp resolve_api_key(_client) do
+    app_key(:openai_api_key) || System.get_env("OPENAI_API_KEY") || ""
+  end
+
+  defp app_key(key), do: Application.get_env(:agent_ex, key)
+
+  # -- Helpers --
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, _key, ""), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
 end

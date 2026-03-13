@@ -55,6 +55,9 @@ defmodule AgentEx.Sensing do
 
   @doc """
   Execute the full sensing phase: intervene → dispatch → process → feed back.
+
+  Built-in provider tools (kind: :builtin) in the tools_map are automatically
+  skipped during dispatch — they are executed server-side by the API provider.
   """
   @spec sense(GenServer.server(), [FunctionCall.t()], opts()) :: sense_result()
   def sense(tool_agent, tool_calls, opts \\ []) when is_list(tool_calls) do
@@ -65,9 +68,18 @@ defmodule AgentEx.Sensing do
     int_context = Keyword.get(opts, :intervention_context, %{iteration: 0, generated_messages: []})
 
     {approved_calls, intervention_results} = intervene(tool_calls, handlers, tools_map, int_context)
-    raw_results = dispatch(tool_agent, approved_calls, timeout: timeout, on_timeout: on_timeout)
-    dispatch_observations = process(raw_results, approved_calls)
-    observations = merge_results(tool_calls, approved_calls, dispatch_observations, intervention_results)
+
+    {local_calls, builtin_calls} = split_builtin_calls(approved_calls, tools_map)
+
+    raw_results = dispatch(tool_agent, local_calls, timeout: timeout, on_timeout: on_timeout)
+    local_observations = process(raw_results, local_calls)
+    builtin_observations = Enum.map(builtin_calls, &builtin_observation/1)
+
+    results_map =
+      (Enum.zip(local_calls, local_observations) ++ Enum.zip(builtin_calls, builtin_observations))
+      |> Map.new(fn {%FunctionCall{id: id}, obs} -> {id, obs} end)
+
+    observations = merge_results(tool_calls, results_map, intervention_results)
     result_message = feed_back(observations)
 
     Logger.debug(
@@ -172,24 +184,38 @@ defmodule AgentEx.Sensing do
     Message.tool_results(observations)
   end
 
-  # -- Merge intervention and dispatch results in original call order --
+  # -- Split approved calls into local (dispatchable) and builtin (skip) --
 
-  defp merge_results(original_calls, approved_calls, dispatch_observations, intervention_results) do
-    approved_map =
-      approved_calls
-      |> Enum.zip(dispatch_observations)
-      |> Map.new(fn {%FunctionCall{id: id}, obs} -> {id, obs} end)
+  defp split_builtin_calls(calls, tools_map) do
+    Enum.split_with(calls, fn %FunctionCall{name: name} ->
+      case Map.get(tools_map, name) do
+        %AgentEx.Tool{kind: :builtin} -> false
+        _ -> true
+      end
+    end)
+  end
 
+  defp builtin_observation(%FunctionCall{id: call_id, name: name}) do
+    %FunctionResult{
+      call_id: call_id,
+      name: name,
+      content: "Built-in tool '#{name}' — results provided by the API provider"
+    }
+  end
+
+  # -- Merge all results in original call order --
+
+  defp merge_results(original_calls, results_map, intervention_results) do
     original_calls
     |> Enum.map(fn %FunctionCall{id: call_id} ->
-      resolve_call(call_id, approved_map, intervention_results)
+      resolve_call(call_id, results_map, intervention_results)
     end)
     |> Enum.filter(&(&1 != :skip))
     |> Enum.map(fn {:keep, obs} -> obs end)
   end
 
-  defp resolve_call(call_id, approved_map, intervention_results) do
-    case Map.fetch(approved_map, call_id) do
+  defp resolve_call(call_id, results_map, intervention_results) do
+    case Map.fetch(results_map, call_id) do
       {:ok, obs} ->
         {:keep, obs}
 

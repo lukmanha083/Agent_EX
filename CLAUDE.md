@@ -29,6 +29,12 @@ Companion to the Python learning project at `../agent/`.
 | `Swarm` / `SwarmTeam` | `AgentEx.Swarm` (multi-agent orchestrator) |
 | `transfer_to_*()` tools | `AgentEx.Handoff.transfer_tools/1` (auto-generated) |
 | `HandoffTermination` | `Swarm.run(termination: {:handoff, "user"})` |
+| `ToolOverride` | `AgentEx.ToolOverride` (metadata wrapper, preserves kind) |
+| Pydantic auto-schema | `AgentEx.ToolBuilder` (param hints + `deftool` macro) |
+| `BaseToolWithState` | `AgentEx.StatefulTool` (wraps tool + PersistentMemory.Store) |
+| `Workbench` | `AgentEx.Workbench` (GenServer, dynamic registry + versioning) |
+| `StreamTool` / `run_json_stream` | `AgentEx.StreamTool` (emit/collect pattern) |
+| `mcp_server_tools` | `AgentEx.MCP.Client` + `ToolAdapter` (stdio/HTTP transport) |
 
 ## Documentation
 - `docs/overview.md` — Project overview, motivation, and quick start
@@ -50,6 +56,14 @@ Companion to the Python learning project at `../agent/`.
 - `lib/agent_ex/handoff.ex` — HandoffMessage + transfer tool generation + detection
 - `lib/agent_ex/swarm.ex` — Multi-agent Swarm orchestrator with handoff routing
 - `lib/agent_ex/model_client.ex` — LLM API client (also supports `temperature:` and `response_format:` opts)
+- `lib/agent_ex/tool_override.ex` — Wrap tools with overridden metadata (name/description)
+- `lib/agent_ex/tool_builder.ex` — Auto-generate JSON Schema from param specs + `deftool` macro
+- `lib/agent_ex/stateful_tool.ex` — Tools with persistent state across sessions (via Tier 2)
+- `lib/agent_ex/workbench.ex` — Dynamic tool collection GenServer with version tracking
+- `lib/agent_ex/stream_tool.ex` — Streaming tool results with emit/collect pattern
+- `lib/agent_ex/mcp/client.ex` — MCP JSON-RPC 2.0 client GenServer
+- `lib/agent_ex/mcp/transport.ex` — Stdio and HTTP transport adapters for MCP
+- `lib/agent_ex/mcp/tool_adapter.ex` — Convert MCP tools ↔ AgentEx tools
 - `lib/agent_ex/example.ex` — Usage example
 
 ### 3-Tier Memory System + Knowledge Graph (`AgentEx.Memory`)
