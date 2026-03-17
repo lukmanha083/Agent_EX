@@ -137,7 +137,9 @@ defmodule AgentEx.ToolCallerLoop do
 
         all_messages = context.input_messages ++ generated ++ [result_message]
 
-        Logger.debug("ToolCallerLoop: THINK phase — re-querying LLM with #{length(all_messages)} messages")
+        Logger.debug(
+          "ToolCallerLoop: THINK phase — re-querying LLM with #{length(all_messages)} messages"
+        )
 
         case ModelClient.create(context.model_client, all_messages, tools: context.tools) do
           {:ok, response} ->

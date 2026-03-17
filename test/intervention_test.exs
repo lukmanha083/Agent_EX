@@ -52,7 +52,9 @@ defmodule AgentEx.InterventionTest do
 
   describe "Tool kind" do
     test "defaults to :read" do
-      tool = Tool.new(name: "t", description: "t", parameters: %{}, function: fn _ -> {:ok, 1} end)
+      tool =
+        Tool.new(name: "t", description: "t", parameters: %{}, function: fn _ -> {:ok, 1} end)
+
       assert tool.kind == :read
       assert Tool.read?(tool)
       refute Tool.write?(tool)

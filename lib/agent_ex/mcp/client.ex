@@ -171,10 +171,11 @@ defmodule AgentEx.MCP.Client do
 
     case state.transport_mod.send_request(state.transport_state, request) do
       {:ok, %{"result" => result}, new_ts} ->
-        state = %{state |
-          transport_state: new_ts,
-          capabilities: Map.get(result, "capabilities", %{}),
-          request_id: state.request_id + 1
+        state = %{
+          state
+          | transport_state: new_ts,
+            capabilities: Map.get(result, "capabilities", %{}),
+            request_id: state.request_id + 1
         }
 
         # Send initialized notification

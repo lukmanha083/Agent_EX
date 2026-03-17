@@ -126,8 +126,12 @@ defmodule AgentEx.Memory.KnowledgeGraph.Retriever do
   end
 
   # Extracts items from HelixDB responses that use either "embeddings" or "results" keys
-  defp extract_items(%{"embeddings" => items}, mapper) when is_list(items), do: Enum.map(items, mapper)
-  defp extract_items(%{"results" => items}, mapper) when is_list(items), do: Enum.map(items, mapper)
+  defp extract_items(%{"embeddings" => items}, mapper) when is_list(items),
+    do: Enum.map(items, mapper)
+
+  defp extract_items(%{"results" => items}, mapper) when is_list(items),
+    do: Enum.map(items, mapper)
+
   defp extract_items(_, _), do: []
 
   # Gets a property from either top-level or nested "properties" map

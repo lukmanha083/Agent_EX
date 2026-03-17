@@ -154,9 +154,7 @@ defmodule AgentEx.ToolBuilder do
 
       unquote(block)
 
-      @__tool_schema__ AgentEx.ToolBuilder.params_to_schema(
-                         Enum.reverse(@__tool_params__)
-                       )
+      @__tool_schema__ AgentEx.ToolBuilder.params_to_schema(Enum.reverse(@__tool_params__))
 
       def unquote(tool_fn_name)() do
         mod = __MODULE__

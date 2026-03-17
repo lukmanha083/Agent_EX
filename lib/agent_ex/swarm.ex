@@ -141,7 +141,9 @@ defmodule AgentEx.Swarm do
 
       # Build messages: system message + memory context + input + generated
       base_messages = [Message.system(agent.system_message) | input_messages]
-      full_messages = maybe_inject_memory(base_messages, current_name, context.memory) ++ generated
+
+      full_messages =
+        maybe_inject_memory(base_messages, current_name, context.memory) ++ generated
 
       Logger.debug("Swarm: agent '#{current_name}' THINK (iteration #{iteration})")
 
@@ -157,7 +159,14 @@ defmodule AgentEx.Swarm do
 
           new_generated = generated ++ [response, result_message]
 
-          handle_tool_response(context, current_name, input_messages, new_generated, iteration, tool_calls)
+          handle_tool_response(
+            context,
+            current_name,
+            input_messages,
+            new_generated,
+            iteration,
+            tool_calls
+          )
 
         {:ok, %Message{} = response} ->
           Logger.debug("Swarm: agent '#{current_name}' returned text response")
@@ -170,7 +179,14 @@ defmodule AgentEx.Swarm do
     end
   end
 
-  defp handle_tool_response(context, current_name, input_messages, generated, iteration, tool_calls) do
+  defp handle_tool_response(
+         context,
+         current_name,
+         input_messages,
+         generated,
+         iteration,
+         tool_calls
+       ) do
     case Handoff.detect(tool_calls) do
       {:handoff, target_name, _call} ->
         handle_handoff(context, current_name, target_name, input_messages, generated, iteration)

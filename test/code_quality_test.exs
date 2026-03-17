@@ -5,20 +5,21 @@ defmodule AgentEx.CodeQualityTest do
 
   describe "ex_slop (Credo)" do
     test "no AI anti-patterns or code smells in lib/" do
-      {output, exit_code} = System.cmd("mix", ["credo", "--strict", "--format", "json"],
-        stderr_to_stdout: true,
-        env: [{"MIX_ENV", "test"}]
-      )
+      {output, exit_code} =
+        System.cmd("mix", ["credo", "--strict", "--format", "json"],
+          stderr_to_stdout: true,
+          env: [{"MIX_ENV", "test"}]
+        )
 
       case Jason.decode(output) do
         {:ok, %{"issues" => issues}} ->
           assert issues == [],
-            "Credo/ExSlop found #{length(issues)} issue(s):\n\n" <>
-              format_credo_issues(issues)
+                 "Credo/ExSlop found #{length(issues)} issue(s):\n\n" <>
+                   format_credo_issues(issues)
 
         _ ->
           assert exit_code == 0,
-            "mix credo --strict failed (exit #{exit_code}):\n#{output}"
+                 "mix credo --strict failed (exit #{exit_code}):\n#{output}"
       end
     end
   end
@@ -36,7 +37,7 @@ defmodule AgentEx.CodeQualityTest do
         end
 
       assert report.clones == [],
-        "ExDNA found #{length(report.clones)} clone(s). Run `mix ex_dna` for details."
+             "ExDNA found #{length(report.clones)} clone(s). Run `mix ex_dna` for details."
     end
   end
 

@@ -81,9 +81,10 @@ defmodule AgentEx.SwarmTest do
   describe "Swarm.run/4" do
     test "single agent returns text response" do
       # LLM returns a direct text response (no tool calls)
-      model_fn = mock_model([
-        {:ok, Message.assistant("The weather is great!")}
-      ])
+      model_fn =
+        mock_model([
+          {:ok, Message.assistant("The weather is great!")}
+        ])
 
       agents = [
         Swarm.Agent.new(name: "helper", system_message: "You are helpful")
@@ -101,13 +102,14 @@ defmodule AgentEx.SwarmTest do
 
     test "single agent uses tools then responds" do
       # LLM first calls a tool, then responds with text
-      model_fn = mock_model([
-        {:ok,
-         Message.assistant_tool_calls([
-           %FunctionCall{id: "c1", name: "get_weather", arguments: ~s({"city": "Tokyo"})}
-         ])},
-        {:ok, Message.assistant("It's sunny in Tokyo at 25°C!")}
-      ])
+      model_fn =
+        mock_model([
+          {:ok,
+           Message.assistant_tool_calls([
+             %FunctionCall{id: "c1", name: "get_weather", arguments: ~s({"city": "Tokyo"})}
+           ])},
+          {:ok, Message.assistant("It's sunny in Tokyo at 25°C!")}
+        ])
 
       agents = [
         Swarm.Agent.new(
@@ -130,20 +132,21 @@ defmodule AgentEx.SwarmTest do
 
     test "handoff transfers to another agent" do
       # Planner hands off to analyst, analyst responds
-      model_fn = mock_model([
-        # Planner: transfer to analyst
-        {:ok,
-         Message.assistant_tool_calls([
-           %FunctionCall{id: "c1", name: "transfer_to_analyst", arguments: "{}"}
-         ])},
-        # Analyst: use stock tool
-        {:ok,
-         Message.assistant_tool_calls([
-           %FunctionCall{id: "c2", name: "lookup_stock", arguments: ~s({"symbol": "AAPL"})}
-         ])},
-        # Analyst: respond with analysis
-        {:ok, Message.assistant("AAPL is trading at $150.00, looking strong.")}
-      ])
+      model_fn =
+        mock_model([
+          # Planner: transfer to analyst
+          {:ok,
+           Message.assistant_tool_calls([
+             %FunctionCall{id: "c1", name: "transfer_to_analyst", arguments: "{}"}
+           ])},
+          # Analyst: use stock tool
+          {:ok,
+           Message.assistant_tool_calls([
+             %FunctionCall{id: "c2", name: "lookup_stock", arguments: ~s({"symbol": "AAPL"})}
+           ])},
+          # Analyst: respond with analysis
+          {:ok, Message.assistant("AAPL is trading at $150.00, looking strong.")}
+        ])
 
       agents = [
         Swarm.Agent.new(
@@ -173,22 +176,23 @@ defmodule AgentEx.SwarmTest do
 
     test "handoff termination stops the swarm" do
       # Analyst finishes and hands off to "user" (termination target)
-      model_fn = mock_model([
-        # Planner: transfer to analyst
-        {:ok,
-         Message.assistant_tool_calls([
-           %FunctionCall{id: "c1", name: "transfer_to_analyst", arguments: "{}"}
-         ])},
-        # Analyst: transfer to user (termination)
-        {:ok,
-         Message.assistant_tool_calls([
-           %FunctionCall{
-             id: "c2",
-             name: "transfer_to_user",
-             arguments: ~s({"reason": "Need human approval"})
-           }
-         ])}
-      ])
+      model_fn =
+        mock_model([
+          # Planner: transfer to analyst
+          {:ok,
+           Message.assistant_tool_calls([
+             %FunctionCall{id: "c1", name: "transfer_to_analyst", arguments: "{}"}
+           ])},
+          # Analyst: transfer to user (termination)
+          {:ok,
+           Message.assistant_tool_calls([
+             %FunctionCall{
+               id: "c2",
+               name: "transfer_to_user",
+               arguments: ~s({"reason": "Need human approval"})
+             }
+           ])}
+        ])
 
       agents = [
         Swarm.Agent.new(
@@ -221,20 +225,21 @@ defmodule AgentEx.SwarmTest do
 
     test "multi-hop handoff chain" do
       # planner → analyst → writer → text response
-      model_fn = mock_model([
-        # Planner: transfer to analyst
-        {:ok,
-         Message.assistant_tool_calls([
-           %FunctionCall{id: "c1", name: "transfer_to_analyst", arguments: "{}"}
-         ])},
-        # Analyst: transfer to writer
-        {:ok,
-         Message.assistant_tool_calls([
-           %FunctionCall{id: "c2", name: "transfer_to_writer", arguments: "{}"}
-         ])},
-        # Writer: final response
-        {:ok, Message.assistant("Here's the report: AAPL looks bullish.")}
-      ])
+      model_fn =
+        mock_model([
+          # Planner: transfer to analyst
+          {:ok,
+           Message.assistant_tool_calls([
+             %FunctionCall{id: "c1", name: "transfer_to_analyst", arguments: "{}"}
+           ])},
+          # Analyst: transfer to writer
+          {:ok,
+           Message.assistant_tool_calls([
+             %FunctionCall{id: "c2", name: "transfer_to_writer", arguments: "{}"}
+           ])},
+          # Writer: final response
+          {:ok, Message.assistant("Here's the report: AAPL looks bullish.")}
+        ])
 
       agents = [
         Swarm.Agent.new(name: "planner", system_message: "Route", handoffs: ["analyst"]),
@@ -253,16 +258,17 @@ defmodule AgentEx.SwarmTest do
 
     test "handoff with tool calls executes both" do
       # Agent calls a tool AND a transfer in the same response
-      model_fn = mock_model([
-        # Helper: calls weather + transfers to analyst
-        {:ok,
-         Message.assistant_tool_calls([
-           %FunctionCall{id: "c1", name: "get_weather", arguments: ~s({"city": "Tokyo"})},
-           %FunctionCall{id: "c2", name: "transfer_to_analyst", arguments: "{}"}
-         ])},
-        # Analyst: responds
-        {:ok, Message.assistant("Tokyo weather is sunny. Market conditions favorable.")}
-      ])
+      model_fn =
+        mock_model([
+          # Helper: calls weather + transfers to analyst
+          {:ok,
+           Message.assistant_tool_calls([
+             %FunctionCall{id: "c1", name: "get_weather", arguments: ~s({"city": "Tokyo"})},
+             %FunctionCall{id: "c2", name: "transfer_to_analyst", arguments: "{}"}
+           ])},
+          # Analyst: responds
+          {:ok, Message.assistant("Tokyo weather is sunny. Market conditions favorable.")}
+        ])
 
       agents = [
         Swarm.Agent.new(
@@ -289,15 +295,16 @@ defmodule AgentEx.SwarmTest do
 
     test "max_iterations prevents infinite loops" do
       # Agent keeps calling tools forever
-      model_fn = mock_model(
-        List.duplicate(
-          {:ok,
-           Message.assistant_tool_calls([
-             %FunctionCall{id: "c1", name: "get_weather", arguments: ~s({"city": "Tokyo"})}
-           ])},
-          30
+      model_fn =
+        mock_model(
+          List.duplicate(
+            {:ok,
+             Message.assistant_tool_calls([
+               %FunctionCall{id: "c1", name: "get_weather", arguments: ~s({"city": "Tokyo"})}
+             ])},
+            30
+          )
         )
-      )
 
       agents = [
         Swarm.Agent.new(
@@ -334,12 +341,13 @@ defmodule AgentEx.SwarmTest do
     end
 
     test "handoff to unknown agent returns error" do
-      model_fn = mock_model([
-        {:ok,
-         Message.assistant_tool_calls([
-           %FunctionCall{id: "c1", name: "transfer_to_ghost", arguments: "{}"}
-         ])}
-      ])
+      model_fn =
+        mock_model([
+          {:ok,
+           Message.assistant_tool_calls([
+             %FunctionCall{id: "c1", name: "transfer_to_ghost", arguments: "{}"}
+           ])}
+        ])
 
       agents = [
         Swarm.Agent.new(
@@ -372,15 +380,16 @@ defmodule AgentEx.SwarmTest do
   describe "Swarm with intervention" do
     test "intervention gates transfer tools (they are :write kind)" do
       # PermissionHandler blocks all :write tools — including transfers
-      model_fn = mock_model([
-        # Agent tries to transfer (blocked by PermissionHandler)
-        {:ok,
-         Message.assistant_tool_calls([
-           %FunctionCall{id: "c1", name: "transfer_to_analyst", arguments: "{}"}
-         ])},
-        # Agent gets "permission denied" back, responds with text
-        {:ok, Message.assistant("I can't transfer, but here's my answer.")}
-      ])
+      model_fn =
+        mock_model([
+          # Agent tries to transfer (blocked by PermissionHandler)
+          {:ok,
+           Message.assistant_tool_calls([
+             %FunctionCall{id: "c1", name: "transfer_to_analyst", arguments: "{}"}
+           ])},
+          # Agent gets "permission denied" back, responds with text
+          {:ok, Message.assistant("I can't transfer, but here's my answer.")}
+        ])
 
       agents = [
         Swarm.Agent.new(
@@ -410,13 +419,14 @@ defmodule AgentEx.SwarmTest do
     test "WriteGateHandler can selectively allow transfers" do
       gate = WriteGateHandler.new(allowed_writes: ["transfer_to_analyst"])
 
-      model_fn = mock_model([
-        {:ok,
-         Message.assistant_tool_calls([
-           %FunctionCall{id: "c1", name: "transfer_to_analyst", arguments: "{}"}
-         ])},
-        {:ok, Message.assistant("Analysis complete.")}
-      ])
+      model_fn =
+        mock_model([
+          {:ok,
+           Message.assistant_tool_calls([
+             %FunctionCall{id: "c1", name: "transfer_to_analyst", arguments: "{}"}
+           ])},
+          {:ok, Message.assistant("Analysis complete.")}
+        ])
 
       agents = [
         Swarm.Agent.new(name: "helper", system_message: "Help", handoffs: ["analyst"]),
