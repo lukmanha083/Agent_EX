@@ -957,7 +957,7 @@ tools = ToolAdapter.list_tools(mcp)
 {:ok, agent} = ToolAgent.start_link(tools: tools ++ local_tools)
 
 # Or call tools directly
-{:ok, result} = Client.call_tool(mcp, "list_repos", %{"org" => "anthropics"})
+{:ok, result} = Client.call_tool(mcp, "list_repos", %{"org" => "anthropic"})
 ```
 
 ### Protocol support

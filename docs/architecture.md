@@ -4,7 +4,7 @@
 
 AgentEx maps AutoGen's runtime concepts to an OTP supervision tree:
 
-```
+```text
 AgentEx.Supervisor (:one_for_one)
 ├── AgentEx.Registry                           — Named process lookup (AgentId equivalent)
 │
@@ -43,7 +43,7 @@ A stateful process that:
 - Executes the matching tool and returns a `FunctionResult`
 - Handles errors gracefully (unknown tool, bad JSON, execution failure)
 
-```
+```text
 State: %{tools: %{"get_weather" => Tool.t(), "calculator" => Tool.t()}, agent_id: "analyst"}
 
 Incoming:  GenServer.call(pid, {:execute, %FunctionCall{name: "get_weather", ...}})
@@ -65,10 +65,10 @@ result = AgentEx.ToolAgent.execute(tool_agent_pid, call)
 **AutoGen equivalent:** `DefaultInterventionHandler`
 
 A pipeline that intercepts tool calls **before** execution. Like Linux file
-permissions — each tool has a `:kind` (`:read` or `:write`), and handlers
+permissions — each tool has a `:kind` (`:read`, `:write`, or `:builtin`), and handlers
 decide whether to approve, reject, modify, or drop each call.
 
-```
+```text
 LLM returns FunctionCall
      │
      ▼
@@ -111,7 +111,7 @@ a dedicated module with four composable steps:
 4. **Feed back** — Package observations as a `%Message{role: :tool}` ready to be
    appended to conversation history for the next LLM call.
 
-```
+```text
                     ┌──────────────────────────────────────────────────┐
                     │              Sensing.sense/3                     │
                     │                                                  │
@@ -157,7 +157,7 @@ The key insight: **handoffs are just tool calls in disguise**. The LLM doesn't
 need special handoff logic — it sees transfer tools alongside regular tools and
 decides which to call. The framework detects the transfer and routes accordingly.
 
-```
+```text
 LLM sees: [get_weather, lookup_stock, transfer_to_analyst, transfer_to_writer]
 LLM calls: transfer_to_analyst(reason: "needs financial analysis")
 Framework: detects "transfer_to_" prefix → switch to analyst agent
@@ -180,7 +180,7 @@ The Swarm orchestrator:
 4. Switches agents when a transfer tool is detected
 5. Terminates when a handoff targets a specific name (like `"user"`) or the LLM returns text
 
-```
+```text
 User Question
      │
      ▼
@@ -216,7 +216,7 @@ Wraps an existing `%Tool{}` with metadata overrides (name, description, paramete
 while preserving the original function and kind. The LLM sees the override;
 intervention checks the original kind.
 
-```
+```text
 Original:  %Tool{name: "search_db", kind: :read, ...}
      │
      ▼
@@ -245,7 +245,7 @@ Type mapping: `:string`, `:integer`, `:number`, `:boolean`, `{:enum, vals}`,
 Wraps a tool so its function receives persisted state and can update it.
 Uses `AgentEx.Memory.PersistentMemory.Store` (Tier 2) for persistence.
 
-```
+```text
 Tool call → load state from Tier 2 → merge into args as "__state"
      → execute original function → save new state to Tier 2 → return result
 ```
@@ -261,7 +261,7 @@ A GenServer that manages a mutable tool registry with version tracking.
 Tools can be added, removed, and updated at runtime. The version counter
 lets callers detect changes and avoid resending unchanged tool lists to the LLM.
 
-```
+```text
 State: %{tools: %{name => Tool.t()}, version: non_neg_integer(), agent_id: String.t() | nil}
 ```
 
@@ -276,7 +276,7 @@ to send chunks; the collector aggregates them. From the LLM's perspective, strea
 tools are indistinguishable from normal tools — the result is aggregated before being
 returned as a `FunctionResult`.
 
-```
+```text
 Streaming function:  fn args, emit -> emit.({:chunk, ...}); {:ok, "final"} end
      │
      ▼
@@ -294,7 +294,7 @@ Implementation uses `Task.async` + message passing for the emit callback.
 
 Bridges external MCP (Model Context Protocol) servers to AgentEx:
 
-```
+```text
 AgentEx.MCP.Client (GenServer)
      │
      ├── Transport.Stdio  →  Port.open() → subprocess stdin/stdout
@@ -358,7 +358,7 @@ server-side by the API provider (e.g., Anthropic's web search).
 
 A complete request flows through the system like this:
 
-```
+```text
 1. User builds input messages
    [Message.system("..."), Message.user("What's the weather?")]
 
@@ -435,7 +435,7 @@ results =
 
 A multi-agent swarm request flows through the system like this:
 
-```
+```text
 1. User builds agents and messages
    agents = [planner, analyst]
    messages = [Message.user("Analyze AAPL")]
@@ -502,7 +502,7 @@ OTP/BEAM primitive for its use case:
 Each agent+session combination gets a dedicated GenServer, registered via
 the `SessionRegistry`:
 
-```
+```text
 Registry Key: {agent_id, session_id}     Process
 ────────────────────────────────────     ──────────────────
 {"analyst", "session-1"}          →     #PID<0.200.0>
@@ -517,7 +517,7 @@ and terminated when no longer needed.
 
 The singleton PersistentMemory.Store uses `{agent_id, key}` tuples as ETS keys:
 
-```
+```text
 ETS Key                           Value
 ──────────────────────────       ─────────────────────────────
 {"analyst", "expertise"}    →    %Entry{value: "data analysis", type: "fact"}
@@ -533,7 +533,7 @@ pattern matching on the first tuple element.
 The ContextBuilder uses `Task.async` to gather from all tiers simultaneously,
 with `rescue` clauses for graceful degradation:
 
-```
+```text
 Memory.build_context("analyst", "session-1")
      │
      ├── Task.async → gather_persistent("analyst")       → "expertise: data analysis"
@@ -548,7 +548,7 @@ Memory.build_context("analyst", "session-1")
 
 Memory integrates at two levels in the agent framework:
 
-```
+```text
 ToolCallerLoop.run(memory: %{agent_id: "analyst", session_id: "sess-1"})
      │
      ├─ BEFORE THINK: Memory.build_context() → inject system messages
