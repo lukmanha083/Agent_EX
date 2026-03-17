@@ -127,7 +127,13 @@ defmodule AgentEx.Workbench do
     case Map.fetch(state.tools, name) do
       {:ok, tool} ->
         updated = struct(tool, changes)
-        new_state = %{state | tools: Map.put(state.tools, name, updated), version: state.version + 1}
+
+        new_state = %{
+          state
+          | tools: Map.put(state.tools, name, updated),
+            version: state.version + 1
+        }
+
         {:reply, :ok, new_state}
 
       :error ->

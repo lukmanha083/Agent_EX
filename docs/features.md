@@ -717,3 +717,327 @@ with its own personality, knowledge, and conversation history — without any
 risk of memory leaking between them.
 
 For the full memory guide, see [Memory System](memory.md).
+
+## 21. ToolOverride — Rename/Redescribe Tools
+
+Wrap an existing tool with overridden metadata without modifying the original.
+The LLM sees the override name/description; intervention checks the original kind.
+
+```elixir
+alias AgentEx.{Tool, ToolOverride}
+
+original = Tool.new(name: "search_db", description: "Search database", kind: :read, ...)
+
+# Rename
+renamed = ToolOverride.rename(original, "find_records")
+renamed.name  #=> "find_records"
+renamed.kind  #=> :read (preserved)
+
+# Redescribe
+updated = ToolOverride.redescribe(original, "Look up records in the database")
+
+# Override multiple fields
+wrapped = ToolOverride.wrap(original, name: "find", description: "Find things")
+```
+
+**vs. AutoGen:** `ToolOverride` class wraps a tool with overridden metadata.
+In AgentEx, `ToolOverride.wrap/2` creates a new `%Tool{}` with a closure that
+delegates to the original function. The original name is stored for traceability.
+
+## 22. ToolBuilder — Auto-Schema from Param Specs
+
+Auto-generate JSON Schema for tool parameters from declarative specs. Since
+Elixir lacks Python's runtime type introspection, we use a DSL approach.
+
+### Function-based builder
+
+```elixir
+tool = AgentEx.ToolBuilder.build(
+  name: "get_weather",
+  description: "Get weather for a city",
+  kind: :read,
+  params: [
+    {:city, :string, "City name"},
+    {:units, :string, "C or F", optional: true}
+  ],
+  function: fn %{"city" => city} -> {:ok, "Sunny in #{city}"} end
+)
+
+tool.parameters
+#=> %{
+#     "type" => "object",
+#     "properties" => %{
+#       "city" => %{"type" => "string", "description" => "City name"},
+#       "units" => %{"type" => "string", "description" => "C or F"}
+#     },
+#     "required" => ["city"]
+#   }
+```
+
+### Macro DSL
+
+```elixir
+defmodule MyTools do
+  import AgentEx.ToolBuilder
+
+  deftool :get_weather, "Get weather for a city", kind: :read do
+    param :city, :string, "City name"
+    param :units, :string, "C or F", optional: true
+  end
+
+  def get_weather(%{"city" => city} = _args), do: {:ok, "Sunny in #{city}"}
+end
+
+tool = MyTools.get_weather_tool()
+```
+
+### Type mapping
+
+| Elixir spec | JSON Schema |
+|---|---|
+| `:string` | `"string"` |
+| `:integer` | `"integer"` |
+| `:number` | `"number"` |
+| `:boolean` | `"boolean"` |
+| `{:enum, ["a", "b"]}` | `"string"` + `"enum"` |
+| `{:array, :string}` | `"array"` + `"items"` |
+| `{:object, [{:city, :string, "City"}]}` | nested `"object"` |
+
+**vs. AutoGen:** Uses Pydantic models to auto-generate JSON Schema from Python
+type annotations at runtime. In AgentEx, `ToolBuilder` achieves the same with
+explicit param specs (function-based) or a compile-time macro DSL.
+
+## 23. StatefulTool — Persistent Tool State
+
+Wrap a tool so its function receives persisted state and can update it across
+sessions. Uses `AgentEx.Memory.PersistentMemory.Store` (Tier 2) for storage.
+
+```elixir
+alias AgentEx.{StatefulTool, Tool}
+
+# Define a tool that tracks state
+counter_tool = Tool.new(
+  name: "increment",
+  description: "Increment a counter",
+  parameters: %{},
+  function: fn %{"__state" => %{"count" => c}} ->
+    {:ok, "count: #{c + 1}", %{"count" => c + 1}}
+  end
+)
+
+# Wrap with persistent state
+wrapped = StatefulTool.wrap(counter_tool,
+  state_key: "counter",
+  agent_id: "bot",
+  initial_state: %{"count" => 0}
+)
+
+# State persists across calls
+Tool.execute(wrapped, %{})  #=> {:ok, "count: 1"}
+Tool.execute(wrapped, %{})  #=> {:ok, "count: 2"}
+```
+
+### Return value conventions
+
+- `{:ok, result}` — no state change
+- `{:ok, result, new_state}` — state updated and persisted
+- `{:error, reason}` — error propagated, no state change
+
+### State isolation
+
+Each `{agent_id, state_key}` pair gets its own independent state. Different
+agents using the same tool with the same state_key don't interfere.
+
+**vs. AutoGen:** `BaseToolWithState` provides `save_state()`/`load_state()` methods.
+In AgentEx, `StatefulTool.wrap/2` transparently handles state loading/saving
+through the existing Tier 2 memory system — no manual save/load needed.
+
+## 24. Workbench — Dynamic Tool Collection
+
+A GenServer that manages a mutable registry of tools with version tracking.
+Tools can be added, removed, and updated at runtime.
+
+```elixir
+alias AgentEx.Workbench
+
+{:ok, wb} = Workbench.start_link()
+
+# Add/remove/update tools dynamically
+:ok = Workbench.add_tool(wb, weather_tool)
+:ok = Workbench.add_tool(wb, search_tool)
+:ok = Workbench.remove_tool(wb, "search")
+:ok = Workbench.update_tool(wb, "get_weather", description: "Updated description")
+
+# Execute tools
+result = Workbench.call_tool(wb, "get_weather", %{"city" => "Tokyo"})
+
+# Version tracking — only resend tools to LLM when they've changed
+v1 = Workbench.version(wb)
+Workbench.add_tool(wb, new_tool)
+{:changed, tools, v2} = Workbench.tools_if_changed(wb, v1)
+
+# Add tools with ToolOverride
+Workbench.add_override(wb, original_tool, name: "custom_name")
+```
+
+**vs. AutoGen:** `Workbench` protocol with `list_tools`/`call_tool`. In AgentEx,
+the Workbench is a GenServer with built-in version tracking — callers can detect
+changes and avoid unnecessary tool list updates to the LLM.
+
+## 25. StreamTool — Streaming Tool Results
+
+Tools that produce incremental results via streaming. The collector aggregates
+chunks; the final result is returned as a normal `FunctionResult` — transparent
+to the LLM.
+
+```elixir
+alias AgentEx.{StreamTool, Tool}
+
+# Define a streaming tool function (receives args + emit callback)
+stream_fn = fn %{"query" => q}, emit ->
+  for i <- 1..3 do
+    Process.sleep(100)
+    emit.({:chunk, "result #{i} for #{q}"})
+  end
+  {:ok, "3 results found for #{q}"}
+end
+
+tool = Tool.new(name: "search", description: "Search", parameters: %{},
+  function: stream_fn)
+
+# Wrap into a standard tool (transparent to LLM)
+wrapped = StreamTool.wrap(tool, timeout: 30_000, max_chunks: 100)
+
+# Or collect chunks directly
+{:ok, result} = StreamTool.collect(stream_fn, %{"query" => "elixir"},
+  on_chunk: fn chunk -> IO.inspect(chunk) end
+)
+```
+
+### Options
+
+| Option | Default | Description |
+|---|---|---|
+| `timeout` | `30_000` | Max time to wait for completion (ms) |
+| `max_chunks` | `1_000` | Max chunks before abort |
+| `on_chunk` | `nil` | Optional callback for each chunk |
+
+### Chunk types
+
+- `{:chunk, data}` — a partial result
+- `{:progress, percentage}` — progress indicator
+
+**vs. AutoGen:** `StreamTool` protocol returns an `AsyncGenerator`. In AgentEx,
+streaming uses `Task.async` + message passing for the emit callback. The
+`collect/3` function receives messages in a loop until completion or timeout.
+
+## 26. MCP Client — Model Context Protocol Bridge
+
+Connect to external MCP (Model Context Protocol) servers and use their tools
+as native AgentEx tools.
+
+```elixir
+alias AgentEx.MCP.{Client, ToolAdapter}
+
+# Connect via stdio transport (spawns subprocess)
+{:ok, mcp} = Client.start_link(
+  transport: {:stdio, "npx -y @anthropic-ai/mcp-server-github"}
+)
+
+# Or via HTTP transport
+{:ok, mcp} = Client.start_link(
+  transport: {:http, "http://localhost:3000/mcp"}
+)
+
+# Discover and convert tools
+tools = ToolAdapter.list_tools(mcp)
+#=> [%Tool{name: "list_repos", kind: :read, ...}, %Tool{name: "create_issue", kind: :write, ...}]
+
+# Use with any AgentEx component
+{:ok, agent} = ToolAgent.start_link(tools: tools ++ local_tools)
+
+# Or call tools directly
+{:ok, result} = Client.call_tool(mcp, "list_repos", %{"org" => "anthropic"})
+```
+
+### Protocol support
+
+| Method | Description |
+|---|---|
+| `initialize` | Capability negotiation |
+| `tools/list` | Discover available tools |
+| `tools/call` | Invoke a tool with arguments |
+| `resources/list` | List available resources |
+| `resources/read` | Read a resource by URI |
+
+### Transport adapters
+
+| Transport | Implementation | Use case |
+|---|---|---|
+| Stdio | `Port.open` (Erlang port) | Local MCP servers as subprocesses |
+| HTTP | `Req.post` | Remote MCP servers over HTTP |
+
+### Tool kind inference
+
+The `ToolAdapter` infers `:read` or `:write` kind from the tool name and
+description. Tools with verbs like "create", "delete", "update", "write"
+are classified as `:write`; all others default to `:read`.
+
+**vs. AutoGen:** `mcp_server_tools` function discovers and wraps MCP tools.
+In AgentEx, `MCP.Client` is a GenServer managing the connection, and
+`MCP.ToolAdapter` converts MCP tools to native `%Tool{}` structs that work
+with ToolAgent, Workbench, Sensing, and Intervention.
+
+## 27. Multi-Provider ModelClient
+
+The ModelClient supports multiple LLM providers with provider-specific encoding:
+
+```elixir
+alias AgentEx.ModelClient
+
+# OpenAI (default)
+client = ModelClient.openai("gpt-4o")
+
+# Anthropic Claude
+client = ModelClient.anthropic("claude-sonnet-4-20250514")
+
+# Moonshot/Kimi
+client = ModelClient.moonshot("moonshot-v1-8k")
+
+# Custom OpenAI-compatible endpoint
+client = ModelClient.new(
+  model: "llama3",
+  provider: :openai,
+  base_url: "http://localhost:11434/v1"
+)
+
+# With options
+{:ok, response} = ModelClient.create(client, messages,
+  tools: tools,
+  temperature: 0.7,
+  response_format: %{"type" => "json_object"}
+)
+```
+
+### Provider differences
+
+| Feature | OpenAI | Anthropic | Moonshot |
+|---|---|---|---|
+| Message format | OpenAI standard | Anthropic native | OpenAI-compatible |
+| System messages | In messages array | Separate `system` param | In messages array |
+| Tool schema | `function` wrapper | Flat `input_schema` | Same as OpenAI |
+| Temperature | Unclamped | Clamped [0, 1] | Clamped [0, 1] |
+| Response format | Supported | Supported | Not supported |
+| Built-in tools | N/A | `type` field | `builtin_function` |
+
+### Built-in tools
+
+Provider-executed server-side tools (no local function):
+
+```elixir
+# Anthropic web search
+web_search = Tool.builtin("web_search", type: "web_search_20260209")
+
+# Include alongside regular tools
+ModelClient.create(client, messages, tools: [weather_tool, web_search])
+```

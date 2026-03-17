@@ -67,7 +67,11 @@ defmodule AgentEx.ToolAgent do
   end
 
   @impl true
-  def handle_call({:execute, %FunctionCall{id: call_id, name: name, arguments: args_json}}, _from, state) do
+  def handle_call(
+        {:execute, %FunctionCall{id: call_id, name: name, arguments: args_json}},
+        _from,
+        state
+      ) do
     result = execute_call(state.tools, call_id, name, args_json)
     {:reply, result, state}
   end
@@ -94,13 +98,28 @@ defmodule AgentEx.ToolAgent do
       %FunctionResult{call_id: call_id, name: name, content: to_string(value), is_error: false}
     else
       :error ->
-        %FunctionResult{call_id: call_id, name: name, content: "Error: unknown tool '#{name}'", is_error: true}
+        %FunctionResult{
+          call_id: call_id,
+          name: name,
+          content: "Error: unknown tool '#{name}'",
+          is_error: true
+        }
 
       {:error, :invalid_json} ->
-        %FunctionResult{call_id: call_id, name: name, content: "Error: invalid JSON arguments", is_error: true}
+        %FunctionResult{
+          call_id: call_id,
+          name: name,
+          content: "Error: invalid JSON arguments",
+          is_error: true
+        }
 
       {:error, reason} ->
-        %FunctionResult{call_id: call_id, name: name, content: "Error: #{inspect(reason)}", is_error: true}
+        %FunctionResult{
+          call_id: call_id,
+          name: name,
+          content: "Error: #{inspect(reason)}",
+          is_error: true
+        }
     end
   end
 

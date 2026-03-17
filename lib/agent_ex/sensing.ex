@@ -65,9 +65,12 @@ defmodule AgentEx.Sensing do
     on_timeout = Keyword.get(opts, :on_timeout, :kill_task)
     handlers = Keyword.get(opts, :intervention, [])
     tools_map = Keyword.get(opts, :tools_map, %{})
-    int_context = Keyword.get(opts, :intervention_context, %{iteration: 0, generated_messages: []})
 
-    {approved_calls, intervention_results} = intervene(tool_calls, handlers, tools_map, int_context)
+    int_context =
+      Keyword.get(opts, :intervention_context, %{iteration: 0, generated_messages: []})
+
+    {approved_calls, intervention_results} =
+      intervene(tool_calls, handlers, tools_map, int_context)
 
     {local_calls, builtin_calls} = split_builtin_calls(approved_calls, tools_map)
 
@@ -120,7 +123,8 @@ defmodule AgentEx.Sensing do
             result = %FunctionResult{
               call_id: call_id,
               name: name,
-              content: "Error: permission denied — tool '#{name}' was rejected by intervention handler",
+              content:
+                "Error: permission denied — tool '#{name}' was rejected by intervention handler",
               is_error: true
             }
 
@@ -145,7 +149,9 @@ defmodule AgentEx.Sensing do
 
   Each call runs in its own isolated BEAM process via `Task.async_stream`.
   """
-  @spec dispatch(GenServer.server(), [FunctionCall.t()], keyword()) :: [{:ok, term()} | {:exit, term()}]
+  @spec dispatch(GenServer.server(), [FunctionCall.t()], keyword()) :: [
+          {:ok, term()} | {:exit, term()}
+        ]
   def dispatch(tool_agent, tool_calls, opts \\ [])
   def dispatch(_tool_agent, [], _opts), do: []
 

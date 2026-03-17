@@ -61,7 +61,9 @@ defmodule AgentEx.Memory.ContextBuilder do
   end
 
   defp gather_knowledge_graph(_agent_id, ""), do: ""
-  defp gather_knowledge_graph(agent_id, query), do: gather_tier(KnowledgeGraph.Store, agent_id, query)
+
+  defp gather_knowledge_graph(agent_id, query),
+    do: gather_tier(KnowledgeGraph.Store, agent_id, query)
 
   defp gather_semantic(_agent_id, ""), do: ""
   defp gather_semantic(agent_id, query), do: gather_tier(SemanticMemory.Store, agent_id, query)

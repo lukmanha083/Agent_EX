@@ -4,7 +4,7 @@
 
 AgentEx maps AutoGen's runtime concepts to an OTP supervision tree:
 
-```
+```text
 AgentEx.Supervisor (:one_for_one)
 ├── AgentEx.Registry                           — Named process lookup (AgentId equivalent)
 │
@@ -38,12 +38,13 @@ rehydrates ETS automatically. Other agents and memory tiers continue operating.
 
 A stateful process that:
 - Holds a map of registered tools (`%{name => Tool.t()}`)
+- Holds an optional `agent_id` for per-agent scoping (used by StatefulTool, Workbench)
 - Receives `FunctionCall` messages via `GenServer.call/2`
 - Executes the matching tool and returns a `FunctionResult`
 - Handles errors gracefully (unknown tool, bad JSON, execution failure)
 
-```
-State: %{tools: %{"get_weather" => Tool.t(), "calculator" => Tool.t()}}
+```text
+State: %{tools: %{"get_weather" => Tool.t(), "calculator" => Tool.t()}, agent_id: "analyst"}
 
 Incoming:  GenServer.call(pid, {:execute, %FunctionCall{name: "get_weather", ...}})
 Outgoing:  %FunctionResult{content: "Sunny, 25°C", is_error: false}
@@ -64,10 +65,10 @@ result = AgentEx.ToolAgent.execute(tool_agent_pid, call)
 **AutoGen equivalent:** `DefaultInterventionHandler`
 
 A pipeline that intercepts tool calls **before** execution. Like Linux file
-permissions — each tool has a `:kind` (`:read` or `:write`), and handlers
+permissions — each tool has a `:kind` (`:read`, `:write`, or `:builtin`), and handlers
 decide whether to approve, reject, modify, or drop each call.
 
-```
+```text
 LLM returns FunctionCall
      │
      ▼
@@ -110,7 +111,7 @@ a dedicated module with four composable steps:
 4. **Feed back** — Package observations as a `%Message{role: :tool}` ready to be
    appended to conversation history for the next LLM call.
 
-```
+```text
                     ┌──────────────────────────────────────────────────┐
                     │              Sensing.sense/3                     │
                     │                                                  │
@@ -156,7 +157,7 @@ The key insight: **handoffs are just tool calls in disguise**. The LLM doesn't
 need special handoff logic — it sees transfer tools alongside regular tools and
 decides which to call. The framework detects the transfer and routes accordingly.
 
-```
+```text
 LLM sees: [get_weather, lookup_stock, transfer_to_analyst, transfer_to_writer]
 LLM calls: transfer_to_analyst(reason: "needs financial analysis")
 Framework: detects "transfer_to_" prefix → switch to analyst agent
@@ -179,7 +180,7 @@ The Swarm orchestrator:
 4. Switches agents when a transfer tool is detected
 5. Terminates when a handoff targets a specific name (like `"user"`) or the LLM returns text
 
-```
+```text
 User Question
      │
      ▼
@@ -207,14 +208,120 @@ User Question
 Answer to User
 ```
 
+### ToolOverride (Stateless Module)
+
+**AutoGen equivalent:** `ToolOverride` wrapper class
+
+Wraps an existing `%Tool{}` with metadata overrides (name, description, parameters)
+while preserving the original function and kind. The LLM sees the override;
+intervention checks the original kind.
+
+```text
+Original:  %Tool{name: "search_db", kind: :read, ...}
+     │
+     ▼
+ToolOverride.rename(original, "find_records")
+     │
+     ▼
+Wrapped:   %Tool{name: "find_records", kind: :read, function: <delegates to original>}
+```
+
+### ToolBuilder (Stateless Module + Macro)
+
+**AutoGen equivalent:** Pydantic-based schema generation from function signatures
+
+Auto-generates JSON Schema from declarative param specs. Two modes:
+
+1. **Function-based builder** — `ToolBuilder.build/1` takes param specs and returns a `%Tool{}`
+2. **Macro DSL** — `deftool` generates a `<name>_tool/0` function at compile time
+
+Type mapping: `:string`, `:integer`, `:number`, `:boolean`, `{:enum, vals}`,
+`{:array, type}`, `{:object, fields}`.
+
+### StatefulTool (Stateless Module)
+
+**AutoGen equivalent:** `BaseToolWithState` with `save_state()`/`load_state()`
+
+Wraps a tool so its function receives persisted state and can update it.
+Uses `AgentEx.Memory.PersistentMemory.Store` (Tier 2) for persistence.
+
+```text
+Tool call → load state from Tier 2 → merge into args as "__state"
+     → execute original function → save new state to Tier 2 → return result
+```
+
+The function returns `{:ok, result}` (no change) or `{:ok, result, new_state}` (persist).
+Each `{agent_id, state_key}` pair gets its own isolated state.
+
+### Workbench (GenServer)
+
+**AutoGen equivalent:** `Workbench` protocol with `list_tools/call_tool`
+
+A GenServer that manages a mutable tool registry with version tracking.
+Tools can be added, removed, and updated at runtime. The version counter
+lets callers detect changes and avoid resending unchanged tool lists to the LLM.
+
+```text
+State: %{tools: %{name => Tool.t()}, version: non_neg_integer(), agent_id: String.t() | nil}
+```
+
+Integrates with ToolOverride via `add_override/3`.
+
+### StreamTool (Stateless Module)
+
+**AutoGen equivalent:** `StreamTool` protocol with `run_json_stream` returning `AsyncGenerator`
+
+Tools that produce incremental results. The streaming function uses an `emit` callback
+to send chunks; the collector aggregates them. From the LLM's perspective, streaming
+tools are indistinguishable from normal tools — the result is aggregated before being
+returned as a `FunctionResult`.
+
+```text
+Streaming function:  fn args, emit -> emit.({:chunk, ...}); {:ok, "final"} end
+     │
+     ▼
+StreamTool.wrap(tool)  →  standard tool that collects chunks internally
+     │
+     ▼
+LLM sees:  {:ok, "final"}  (aggregated, transparent)
+```
+
+Implementation uses `Task.async` + message passing for the emit callback.
+
+### MCP Client (GenServer + Transport)
+
+**AutoGen equivalent:** `mcp_server_tools` integration
+
+Bridges external MCP (Model Context Protocol) servers to AgentEx:
+
+```text
+AgentEx.MCP.Client (GenServer)
+     │
+     ├── Transport.Stdio  →  Port.open() → subprocess stdin/stdout
+     └── Transport.HTTP   →  Req.post() → HTTP endpoint
+     │
+     ▼
+AgentEx.MCP.ToolAdapter  →  converts MCP tools to %AgentEx.Tool{} structs
+```
+
+JSON-RPC 2.0 protocol: `initialize` → `tools/list` → `tools/call`.
+The `ToolAdapter` wraps each MCP tool as an AgentEx tool where the function
+closure calls `MCP.Client.call_tool/3`.
+
 ### ModelClient (Struct)
 
 **AutoGen equivalent:** `ChatCompletionClient`
 
-A data struct (not a process) that holds API configuration:
-- `model` — e.g., `"gpt-4o"`
-- `api_key` — explicit or read from `OPENAI_API_KEY` env var
-- `base_url` — defaults to OpenAI, can point to any compatible API
+A data struct (not a process) that holds API configuration. Supports multiple providers:
+
+- `:openai` — OpenAI-compatible APIs (default)
+- `:anthropic` — Anthropic Claude APIs (different message format)
+- `:moonshot` — Moonshot/Kimi APIs (OpenAI-compatible with built-in tools)
+
+Also supports:
+- `temperature:` option (clamped to [0,1] for Moonshot/Anthropic)
+- `response_format:` option (not supported on Moonshot)
+- Built-in tools (`:builtin` kind) — provider-executed server-side tools
 
 Uses `Req` for HTTP. Stateless — each `create/3` call is independent.
 
@@ -239,17 +346,19 @@ Elixir structs with pattern matching replace Python's class hierarchy:
 Combines schema and implementation in one struct:
 - `name`, `description`, `parameters` — sent to LLM as JSON schema
 - `function` — the actual `fn` to execute (`(map -> {:ok, v} | {:error, r})`)
-- `kind` — `:read` (default) or `:write`, used by intervention handlers
+- `kind` — `:read` (default), `:write`, or `:builtin` (provider-executed)
+- `type` — optional provider-specific type string (for built-in tools)
 
 The `:kind` field is an AgentEx addition (AutoGen has no equivalent). It enables
 Linux-style permission semantics: read tools gather information (sensing), write
-tools change the world (acting).
+tools change the world (acting). Built-in tools (`:builtin`) are executed
+server-side by the API provider (e.g., Anthropic's web search).
 
 ## Message Flow
 
 A complete request flows through the system like this:
 
-```
+```text
 1. User builds input messages
    [Message.system("..."), Message.user("What's the weather?")]
 
@@ -326,7 +435,7 @@ results =
 
 A multi-agent swarm request flows through the system like this:
 
-```
+```text
 1. User builds agents and messages
    agents = [planner, analyst]
    messages = [Message.user("Analyze AAPL")]
@@ -393,7 +502,7 @@ OTP/BEAM primitive for its use case:
 Each agent+session combination gets a dedicated GenServer, registered via
 the `SessionRegistry`:
 
-```
+```text
 Registry Key: {agent_id, session_id}     Process
 ────────────────────────────────────     ──────────────────
 {"analyst", "session-1"}          →     #PID<0.200.0>
@@ -408,7 +517,7 @@ and terminated when no longer needed.
 
 The singleton PersistentMemory.Store uses `{agent_id, key}` tuples as ETS keys:
 
-```
+```text
 ETS Key                           Value
 ──────────────────────────       ─────────────────────────────
 {"analyst", "expertise"}    →    %Entry{value: "data analysis", type: "fact"}
@@ -424,7 +533,7 @@ pattern matching on the first tuple element.
 The ContextBuilder uses `Task.async` to gather from all tiers simultaneously,
 with `rescue` clauses for graceful degradation:
 
-```
+```text
 Memory.build_context("analyst", "session-1")
      │
      ├── Task.async → gather_persistent("analyst")       → "expertise: data analysis"
@@ -439,7 +548,7 @@ Memory.build_context("analyst", "session-1")
 
 Memory integrates at two levels in the agent framework:
 
-```
+```text
 ToolCallerLoop.run(memory: %{agent_id: "analyst", session_id: "sess-1"})
      │
      ├─ BEFORE THINK: Memory.build_context() → inject system messages

@@ -162,8 +162,8 @@ defmodule AgentEx.ToolBuilderTest do
       import AgentEx.ToolBuilder
 
       deftool :greet, "Greet someone" do
-        param :name, :string, "Person's name"
-        param :greeting, :string, "Custom greeting", optional: true
+        param(:name, :string, "Person's name")
+        param(:greeting, :string, "Custom greeting", optional: true)
       end
 
       def greet(%{"name" => name} = args) do

@@ -127,10 +127,11 @@ defmodule AgentEx.MCP.ClientTest do
 
       case MockTransport.send_request(transport_state, request) do
         {:ok, %{"result" => result}, new_ts} ->
-          state = %{state |
-            transport_state: new_ts,
-            capabilities: Map.get(result, "capabilities", %{}),
-            request_id: 2
+          state = %{
+            state
+            | transport_state: new_ts,
+              capabilities: Map.get(result, "capabilities", %{}),
+              request_id: 2
           }
 
           {:ok, state}

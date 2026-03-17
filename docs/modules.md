@@ -66,28 +66,41 @@ defstruct [:call_id, :name, :content, is_error: false]
 ### Struct
 
 ```elixir
-@enforce_keys [:name, :description, :parameters, :function]
-defstruct [:name, :description, :parameters, :function, kind: :read]
+@enforce_keys [:name]
+defstruct [:name, :description, :parameters, :function, :type, kind: :read]
 ```
 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `name` | `String.t()` | (required) | Tool identifier |
-| `description` | `String.t()` | (required) | Human-readable description (sent to LLM) |
-| `parameters` | `map()` | (required) | JSON Schema for input parameters |
-| `function` | `(map() -> {:ok, term()} \| {:error, term()})` | (required) | Implementation |
-| `kind` | `:read \| :write` | `:read` | Permission kind (like Linux `r--` / `rw-`) |
+| `description` | `String.t() \| nil` | `nil` | Human-readable description (sent to LLM) |
+| `parameters` | `map() \| nil` | `nil` | JSON Schema for input parameters |
+| `function` | `(map() -> {:ok, term()} \| {:error, term()}) \| nil` | `nil` | Implementation (nil for built-in tools) |
+| `kind` | `:read \| :write \| :builtin` | `:read` | Tool kind: `:read` = sensing/auto-approved, `:write` = acting/gated by intervention, `:builtin` = provider-executed server-side (no local function, e.g., Anthropic web search) |
+| `type` | `String.t() \| nil` | `nil` | Provider-specific type string (e.g., `"web_search_20260209"` for Anthropic) |
 
 ### Functions
 
 #### `new(opts)`
 Factory that validates all required keys are present.
 
+#### `builtin(name, opts \\ [])`
+Create a built-in provider tool (executed server-side, no local function).
+Options: `:type`, `:description`.
+
+```elixir
+Tool.builtin("$web_search")
+Tool.builtin("web_search", type: "web_search_20260209")
+```
+
 #### `read?(tool) -> boolean()`
 Returns `true` if the tool is read-only (sensing).
 
 #### `write?(tool) -> boolean()`
 Returns `true` if the tool has side effects (acting).
+
+#### `builtin?(tool) -> boolean()`
+Returns `true` if the tool is a provider built-in.
 
 #### `to_schema(tool) -> map()`
 Converts to OpenAI function-calling format:
@@ -102,9 +115,15 @@ Converts to OpenAI function-calling format:
 }
 ```
 
+#### `to_schema(tool, provider) -> map()`
+Converts to provider-specific tool schema. Handles built-in tools differently per provider:
+- `:moonshot` — `%{"type" => "builtin_function", ...}`
+- `:anthropic` — `%{"type" => tool.type, "name" => tool.name}`
+- Regular tools use Anthropic's `input_schema` key instead of `parameters`
+
 #### `execute(tool, arguments) -> {:ok, term()} | {:error, String.t()}`
 Invokes `tool.function` with the argument map. Rescues any exception and
-returns `{:error, message}`.
+returns `{:error, message}`. Returns an error for `:builtin` tools (provider-side execution).
 
 ---
 
@@ -118,7 +137,7 @@ A GenServer that holds a registry of tools and executes them on demand.
 ### State
 
 ```elixir
-%{tools: %{String.t() => Tool.t()}}
+%{tools: %{String.t() => Tool.t()}, agent_id: String.t() | nil}
 ```
 
 ### Public API
@@ -127,6 +146,7 @@ A GenServer that holds a registry of tools and executes them on demand.
 Starts the GenServer. Options:
 - `tools:` — list of `AgentEx.Tool` structs to register
 - `name:` — optional process name for registration
+- `agent_id:` — optional agent identifier for scoping (used by StatefulTool)
 
 #### `execute(agent, %FunctionCall{}) -> %FunctionResult{}`
 Sends a tool call to the agent and waits for the result (synchronous).
@@ -141,12 +161,16 @@ Returns all registered tools.
 #### `tools_map(agent) -> %{String.t() => Tool.t()}`
 Returns the internal `%{name => tool}` map. Useful for passing to intervention handlers.
 
+#### `agent_id(agent) -> String.t() | nil`
+Returns the agent's identifier, or `nil` if not set.
+
 ### GenServer Callbacks
 
-- `init/1` — Builds `%{name => tool}` map from the tools list
+- `init/1` — Builds `%{name => tool}` map from the tools list, reads `agent_id` from opts
 - `handle_call({:execute, call}, ...)` — Looks up tool, decodes JSON args, executes
 - `handle_call(:list_tools, ...)` — Returns tool list
 - `handle_call(:tools_map, ...)` — Returns the raw tools map
+- `handle_call(:agent_id, ...)` — Returns the agent_id
 
 ---
 
@@ -290,50 +314,77 @@ The private `loop/3` is tail-recursive with three exit conditions:
 **File:** `lib/agent_ex/model_client.ex`
 **AutoGen equivalent:** `ChatCompletionClient`
 
+Multi-provider LLM client supporting OpenAI, Anthropic, and Moonshot APIs.
+
 ### Struct
 
 ```elixir
 @enforce_keys [:model]
-defstruct [:model, :api_key, base_url: "https://api.openai.com/v1"]
+defstruct [:model, :api_key, provider: :openai, base_url: "https://api.openai.com/v1"]
 ```
 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `model` | `String.t()` | (required) | Model identifier |
 | `api_key` | `String.t() \| nil` | `nil` | API key (falls back to env var) |
-| `base_url` | `String.t()` | `"https://api.openai.com/v1"` | API base URL |
+| `provider` | `:openai \| :moonshot \| :anthropic` | `:openai` | LLM provider |
+| `base_url` | `String.t()` | per-provider default | API base URL (see note below) |
+
+**Note on `base_url` default:** The defstruct hardcodes `"https://api.openai.com/v1"` as
+the fallback, but the `new/1` factory function overrides this based on the `:provider` value.
+Always use the factory functions (`new/1`, `openai/2`, `anthropic/2`, `moonshot/2`) rather
+than constructing the struct directly.
+
+Provider defaults (set by factory):
+- `:openai` → `https://api.openai.com/v1`
+- `:moonshot` → `https://api.moonshot.cn/v1`
+- `:anthropic` → `https://api.anthropic.com`
 
 ### Functions
 
 #### `new(opts)`
-Factory function.
+Factory function. Auto-sets `base_url` from provider if not explicitly given.
+
+#### `openai(model, opts \\ [])`
+Shorthand for creating an OpenAI client.
+
+#### `moonshot(model, opts \\ [])`
+Shorthand for creating a Moonshot/Kimi client.
+
+#### `anthropic(model, opts \\ [])`
+Shorthand for creating an Anthropic/Claude client.
 
 #### `create(client, messages, opts \\ [])`
 Sends a chat completion request.
 
 **Options:**
 - `tools:` — list of `Tool.t()` to include as available tools
+- `temperature:` — sampling temperature (clamped to `[0, 1]` for Moonshot/Anthropic)
+- `response_format:` — response format map (ignored for Moonshot)
 
 **Returns:**
 - `{:ok, %Message{role: :assistant, content: "..."}}` — text response
 - `{:ok, %Message{role: :assistant, tool_calls: [...]}}` — tool call request
 - `{:error, reason}` — API or network error
 
+#### `parse_response(body, provider \\ :openai)`
+Parse a raw API response body into a Message struct. Handles both OpenAI/Moonshot
+and Anthropic response formats.
+
 ### Message Encoding
 
-Handles three message formats for the OpenAI API:
+Per-provider message encoding:
 
-1. **Tool result messages** (`:tool` role) — expanded to per-result messages
-   with `tool_call_id`
-2. **Assistant tool-call messages** — include `tool_calls` array with
-   function name and JSON arguments
-3. **Standard messages** — simple `{role, content}` objects
+- **OpenAI/Moonshot:** Standard `messages` array with `tool_calls` and `tool_call_id`
+- **Anthropic:** Separates system message, uses `content` blocks and `tool_use`/`tool_result` types
 
 ### API Key Resolution
 
+Per-provider key resolution:
 1. If `api_key` is provided in the struct → use it
-2. Otherwise → read `OPENAI_API_KEY` environment variable
-3. If neither → empty string (will fail at API)
+2. Application config: `:openai_api_key`, `:anthropic_api_key`, `:moonshot_api_key`
+3. Environment variable: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `MOONSHOT_API_KEY`
+4. If none → empty string (will fail at API)
 
 ---
 
@@ -856,3 +907,446 @@ LLM context message with factory functions.
 | `ContextMessage.system(content)` | System message |
 | `ContextMessage.user(content)` | User message |
 | `ContextMessage.assistant(content)` | Assistant message |
+
+---
+
+## AgentEx.ToolOverride
+
+**File:** `lib/agent_ex/tool_override.ex`
+**AutoGen equivalent:** `ToolOverride` wrapper class
+
+Wraps an existing tool with overridden metadata (name, description, parameters)
+while preserving the original kind and function. The LLM sees the override;
+intervention checks the original kind.
+
+### Functions
+
+#### `wrap(tool, overrides) -> Tool.t()`
+
+Create a new `%Tool{}` with overridden fields. Supported override keys:
+`:name`, `:description`, `:parameters`. The `:kind` and `:function` are always
+preserved from the original.
+
+```elixir
+wrapped = ToolOverride.wrap(tool, name: "find", description: "Find things")
+```
+
+#### `rename(tool, new_name) -> Tool.t()`
+
+Shorthand: override only the name.
+
+```elixir
+renamed = ToolOverride.rename(tool, "find_records")
+renamed.name  #=> "find_records"
+renamed.kind  #=> :read  (preserved)
+```
+
+#### `redescribe(tool, new_desc) -> Tool.t()`
+
+Shorthand: override only the description.
+
+#### `original_name(tool) -> String.t() | nil`
+
+Get the original name of a wrapped tool. Returns `nil` if the tool was not
+wrapped via ToolOverride. Uses the process dictionary keyed by the new tool name.
+
+### Traceability
+
+The original name is stored in the process dictionary at
+`{AgentEx.ToolOverride, :original_name, new_name}`. This avoids modifying the
+Tool struct while keeping an audit trail.
+
+---
+
+## AgentEx.ToolBuilder
+
+**File:** `lib/agent_ex/tool_builder.ex`
+**AutoGen equivalent:** Pydantic-based schema generation from function signatures
+
+Auto-generates JSON Schema for tool parameters from declarative param specs.
+Two modes: function-based builder and compile-time macro DSL.
+
+### Types
+
+```elixir
+@type param_type ::
+  :string | :integer | :number | :boolean |
+  {:enum, [String.t()]} | {:array, param_type()} | {:object, [param_spec()]}
+
+@type param_spec ::
+  {atom(), param_type(), String.t()} |
+  {atom(), param_type(), String.t(), keyword()}
+```
+
+### Functions
+
+#### `build(opts) -> Tool.t()`
+
+Build a tool with auto-generated JSON Schema.
+
+**Options:**
+- `:name` — tool name (required)
+- `:description` — tool description (required)
+- `:params` — list of param specs (required)
+- `:function` — tool function (required)
+- `:kind` — `:read` (default) or `:write`
+
+```elixir
+tool = ToolBuilder.build(
+  name: "get_weather",
+  description: "Get weather for a city",
+  params: [
+    {:city, :string, "City name"},
+    {:units, :string, "C or F", optional: true}
+  ],
+  function: &MyTools.get_weather/1
+)
+```
+
+#### `params_to_schema(params) -> map()`
+
+Convert a list of param specs to a JSON Schema object.
+
+```elixir
+ToolBuilder.params_to_schema([{:city, :string, "City name"}])
+#=> %{"type" => "object", "properties" => %{"city" => ...}, "required" => ["city"]}
+```
+
+#### `type_to_schema(type) -> map()`
+
+Convert a single type spec to its JSON Schema representation.
+
+| Elixir type | JSON Schema |
+|---|---|
+| `:string` | `%{"type" => "string"}` |
+| `:integer` | `%{"type" => "integer"}` |
+| `:number` | `%{"type" => "number"}` |
+| `:boolean` | `%{"type" => "boolean"}` |
+| `{:enum, vals}` | `%{"type" => "string", "enum" => vals}` |
+| `{:array, type}` | `%{"type" => "array", "items" => ...}` |
+| `{:object, fields}` | Nested `"object"` with `"properties"` |
+
+### Macro: `deftool`
+
+```elixir
+import AgentEx.ToolBuilder
+
+deftool :get_weather, "Get weather" do
+  param :city, :string, "City name"
+  param :units, :string, "C or F", optional: true
+end
+
+# Generates `get_weather_tool/0` returning a %Tool{}
+# The tool function must be separately defined as `get_weather/1`
+```
+
+Options: `kind:` (default `:read`).
+
+### Macro: `param`
+
+Declares a parameter inside a `deftool` block. Accumulates into the
+`@__tool_params__` module attribute.
+
+---
+
+## AgentEx.StatefulTool
+
+**File:** `lib/agent_ex/stateful_tool.ex`
+**AutoGen equivalent:** `BaseToolWithState` with `save_state()`/`load_state()`
+
+Wraps a tool so its function receives persisted state and can update it.
+Uses `AgentEx.Memory.PersistentMemory.Store` (Tier 2) for persistence.
+
+### Functions
+
+#### `wrap(tool, opts) -> Tool.t()`
+
+Wrap a tool with persistent state.
+
+**Options:**
+- `:state_key` — unique key for this tool's state (required)
+- `:agent_id` — agent scope for persistence (required)
+- `:initial_state` — default state when none exists (default: `%{}`)
+- `:store` — custom module implementing `get/2` and `put/3` (default: `PersistentMemory.Store`)
+
+### Stateful Function Signature
+
+The wrapped function receives a `"__state"` key merged into its arguments:
+
+```elixir
+fn %{"query" => q, "__state" => %{"history" => h}} ->
+  new_history = [q | h]
+  {:ok, "searched: #{q}", %{"history" => new_history}}
+end
+```
+
+**Return values:**
+- `{:ok, result}` — no state change
+- `{:ok, result, new_state}` — state updated and persisted
+- `{:error, reason}` — error, no state change
+
+### State Storage
+
+State is stored in Tier 2 memory at key `"tool_state:<state_key>"` scoped
+by `agent_id`. The default store uses ETS+DETS; a custom `:store` module
+can be provided for testing or alternative backends.
+
+---
+
+## AgentEx.Workbench
+
+**File:** `lib/agent_ex/workbench.ex`
+**AutoGen equivalent:** `Workbench` protocol with `list_tools`/`call_tool`
+
+A GenServer managing a mutable registry of tools with version tracking.
+Tools can be added, removed, and updated at runtime.
+
+### State
+
+```elixir
+%AgentEx.Workbench{tools: %{String.t() => Tool.t()}, version: non_neg_integer(), agent_id: String.t() | nil}
+```
+
+### Public API
+
+#### `start_link(opts \\ [])`
+Options: `:name`, `:tools` (initial list), `:agent_id`.
+
+#### Registry Operations
+
+| Function | Returns | Description |
+|---|---|---|
+| `add_tool(wb, tool)` | `:ok \| {:error, :already_exists}` | Add a tool |
+| `remove_tool(wb, name)` | `:ok \| {:error, :not_found}` | Remove by name |
+| `update_tool(wb, name, changes)` | `:ok \| {:error, :not_found}` | Update fields |
+| `list_tools(wb)` | `[Tool.t()]` | All tools |
+| `get_tool(wb, name)` | `{:ok, Tool.t()} \| :not_found` | Get by name |
+
+#### Execution
+
+#### `call_tool(wb, name, args) -> FunctionResult.t()`
+Execute a tool by name with arguments. Returns a `%FunctionResult{}` with
+auto-generated `call_id`.
+
+#### Version Tracking
+
+| Function | Returns | Description |
+|---|---|---|
+| `version(wb)` | `non_neg_integer()` | Current version number |
+| `tools_if_changed(wb, since)` | `{:changed, tools, ver} \| :unchanged` | Tools only if version changed |
+
+Version increments on every `add_tool`, `remove_tool`, or `update_tool` call.
+Use this to avoid resending unchanged tool lists to the LLM.
+
+#### ToolOverride Integration
+
+#### `add_override(wb, tool, overrides) -> :ok | {:error, :already_exists}`
+Add a tool with overrides applied via `ToolOverride.wrap/2`.
+
+---
+
+## AgentEx.StreamTool
+
+**File:** `lib/agent_ex/stream_tool.ex`
+**AutoGen equivalent:** `StreamTool` protocol with `run_json_stream` returning `AsyncGenerator`
+
+Tools that produce incremental results via streaming. The collector aggregates
+chunks; the final aggregated result is returned as a normal `FunctionResult` —
+transparent to the LLM.
+
+### Types
+
+```elixir
+@type chunk :: {:chunk, term()} | {:progress, number()}
+```
+
+### Functions
+
+#### `wrap(tool, opts \\ []) -> Tool.t()`
+
+Convert a streaming tool function into a standard tool. The original function
+must accept `(args, emit)` where `emit` is a callback function.
+
+**Options:**
+- `:timeout` — max time in ms (default: `30_000`)
+- `:max_chunks` — max chunks to collect (default: `1_000`)
+- `:on_chunk` — optional `fn chunk -> :ok end` callback for side effects
+
+```elixir
+stream_fn = fn %{"query" => q}, emit ->
+  for i <- 1..3 do
+    emit.({:chunk, "result #{i}"})
+  end
+  {:ok, "done"}
+end
+
+tool = Tool.new(name: "search", description: "Search", parameters: %{}, function: stream_fn)
+wrapped = StreamTool.wrap(tool)
+```
+
+#### `collect(stream_fn, args, opts \\ []) -> {:ok, term()} | {:error, term()}`
+
+Run a streaming function, collect chunks, and return the final result.
+Uses `Task.async` + message passing internally.
+
+**Options:** same as `wrap/2`.
+
+**Error returns:**
+- `{:error, {:max_chunks_exceeded, limit}}` — too many chunks
+- `{:error, :timeout}` — timed out
+- `{:error, {:stream_crashed, reason}}` — streaming task crashed
+
+### Streaming Function Contract
+
+```elixir
+fn args, emit ->
+  emit.({:chunk, "partial result"})   # incremental data
+  emit.({:progress, 50})              # progress percentage
+  {:ok, "final result"}               # final return value
+end
+```
+
+The `emit` callback sends `{:stream_chunk, pid, chunk}` to the collector.
+
+---
+
+## AgentEx.MCP.Client
+
+**File:** `lib/agent_ex/mcp/client.ex`
+**AutoGen equivalent:** `mcp_server_tools` integration
+
+GenServer managing a connection to an MCP (Model Context Protocol) server.
+Handles JSON-RPC 2.0 communication for tool discovery and invocation.
+
+### State
+
+```elixir
+%AgentEx.MCP.Client{
+  transport_mod: module(),
+  transport_state: term(),
+  capabilities: map(),
+  request_id: pos_integer()
+}
+```
+
+### Public API
+
+#### `start_link(opts)`
+Options:
+- `:transport` — `{:stdio, command}` or `{:http, url}` (required)
+- `:name` — optional GenServer name
+
+Performs `initialize` handshake on start.
+
+#### `list_tools(server) -> {:ok, [map()]} | {:error, term()}`
+Discover tools from the MCP server via `tools/list`.
+
+#### `call_tool(server, name, args \\ %{}) -> {:ok, term()} | {:error, term()}`
+Invoke a tool on the MCP server via `tools/call`.
+
+#### `list_resources(server) -> {:ok, [map()]} | {:error, term()}`
+List available resources via `resources/list`.
+
+#### `read_resource(server, uri) -> {:ok, term()} | {:error, term()}`
+Read a resource by URI via `resources/read`.
+
+#### `close(server) -> :ok`
+Close the MCP connection (stops the GenServer).
+
+### Protocol
+
+MCP JSON-RPC 2.0 methods:
+- `initialize` — capability negotiation + `notifications/initialized`
+- `tools/list` — discover available tools
+- `tools/call` — invoke a tool with arguments
+- `resources/list` — list available resources
+- `resources/read` — read a resource by URI
+
+---
+
+## AgentEx.MCP.Transport
+
+**File:** `lib/agent_ex/mcp/transport.ex`
+
+Behaviour for MCP transport adapters.
+
+### Callbacks
+
+```elixir
+@callback send_request(state :: term(), request :: map()) ::
+            {:ok, map(), term()} | {:error, term()}
+@callback close(state :: term()) :: :ok
+```
+
+### AgentEx.MCP.Transport.Stdio
+
+Stdio transport — spawns a subprocess and communicates via stdin/stdout
+using Erlang ports.
+
+#### `open(command) -> {:ok, state} | {:error, term()}`
+Splits command into executable + args. Uses `System.find_executable/1` to
+validate the binary exists before spawning. Returns
+`{:error, {:executable_not_found, cmd}}` if not found.
+
+Port options: `:binary`, `:stream`, `:exit_status`, `{:line, 1_048_576}`.
+
+#### `send_request(state, request) -> {:ok, response, state} | {:error, term()}`
+Encodes request as JSON + newline, sends via `Port.command/2`, waits for
+a line response (30s timeout).
+
+#### `close(state) -> :ok`
+Closes the port. Rescues if already closed.
+
+### AgentEx.MCP.Transport.HTTP
+
+HTTP transport — sends JSON-RPC requests to an HTTP endpoint using `Req`.
+
+#### `open(url) -> {:ok, state}`
+Creates state with the target URL.
+
+#### `send_request(state, request) -> {:ok, response, state} | {:error, term()}`
+`Req.post/2` with JSON body. Returns `{:error, {:http_error, status, body}}`
+for non-200 responses.
+
+#### `close(state) -> :ok`
+No-op.
+
+---
+
+## AgentEx.MCP.ToolAdapter
+
+**File:** `lib/agent_ex/mcp/tool_adapter.ex`
+
+Converts MCP tools to AgentEx tools and vice versa.
+
+### Functions
+
+#### `list_tools(mcp) -> [Tool.t()]`
+
+Discover tools from an MCP server and convert them to AgentEx `%Tool{}` structs.
+Each tool's function is a closure that calls `MCP.Client.call_tool/3`.
+
+```elixir
+tools = MCP.ToolAdapter.list_tools(mcp)
+{:ok, agent} = ToolAgent.start_link(tools: tools)
+```
+
+#### `to_agent_ex_tool(mcp_tool, mcp_pid) -> Tool.t()`
+
+Convert a single MCP tool definition (map) to an AgentEx Tool.
+The returned tool's function calls the MCP server when executed.
+Kind is inferred from name/description heuristics.
+
+#### `to_mcp_tool(tool) -> map()`
+
+Convert an AgentEx Tool to MCP tool format (for serving as an MCP server):
+```elixir
+%{"name" => ..., "description" => ..., "inputSchema" => ...}
+```
+
+### Kind Inference
+
+Write indicators checked in tool name + description:
+`create`, `delete`, `update`, `write`, `remove`, `modify`, `set`, `put`, `post`, `patch`.
+
+If any indicator is found → `:write`, otherwise → `:read`.
