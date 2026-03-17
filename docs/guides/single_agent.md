@@ -486,9 +486,10 @@ write_file = Tool.new(
     "required" => ["path", "content"]
   },
   function: fn %{"path" => path, "content" => content} ->
-    File.mkdir_p!(Path.dirname(path))
-    case File.write(path, content) do
-      :ok -> {:ok, "Written #{byte_size(content)} bytes to #{path}"}
+    with :ok <- File.mkdir_p(Path.dirname(path)),
+         :ok <- File.write(path, content) do
+      {:ok, "Written #{byte_size(content)} bytes to #{path}"}
+    else
       {:error, reason} -> {:error, "Cannot write #{path}: #{reason}"}
     end
   end
@@ -676,7 +677,8 @@ defmodule CommandBlocklist do
   def on_call(%{name: "bash_exec"} = call, _tool, _context) do
     case Jason.decode(call.arguments) do
       {:ok, %{"command" => command}} ->
-        if Enum.any?(@blocked, &String.contains?(command, &1)) do
+        tokens = String.split(command)
+        if Enum.any?(@blocked, fn cmd -> cmd in tokens end) do
           :reject
         else
           :approve
@@ -987,6 +989,8 @@ ToolCallerLoop.run(tool_agent, model_client, input_messages, tools, opts \\ [])
 | `ModelClient.anthropic("claude-sonnet-4-20250514")` | `:anthropic` | `https://api.anthropic.com` |
 | `ModelClient.moonshot("moonshot-v1-8k")` | `:moonshot` | `https://api.moonshot.cn/v1` |
 
+The named constructors (`openai/2`, `anthropic/2`, `moonshot/2`) take the model as the first argument and an optional keyword list as the second — e.g., `ModelClient.anthropic("claude-sonnet-4-20250514", api_key: "sk-...")`. `ModelClient.new/1` takes all options as keywords.
+
 All constructors accept these options:
 
 | Option | Type | Default | Description |
@@ -1010,7 +1014,7 @@ All constructors accept these options:
 | `on_timeout` | `:kill_task \| :exit` | `:kill_task` | What to do when a tool times out |
 | `intervention` | `[handler()]` | `[]` | Intervention handlers |
 | `tools_map` | `map()` | `%{}` | `%{name => Tool}` for intervention lookups |
-| `intervention_context` | `context()` | `%{}` | Context passed to intervention handlers |
+| `intervention_context` | `context()` | `%{iteration: 0, generated_messages: []}` | Context passed to intervention handlers |
 
 ### Intervention handler types
 
