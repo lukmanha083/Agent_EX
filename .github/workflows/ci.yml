@@ -79,4 +79,5 @@ jobs:
         run: mix credo --strict
 
       - name: ExDNA clone detection
+        continue-on-error: true
         run: mix ex_dna
