@@ -72,6 +72,9 @@ jobs:
       - name: Install dependencies
         run: mix deps.get
 
+      - name: Compile
+        run: mix compile
+
       - name: Check formatting
         run: mix format --check-formatted
 
@@ -79,5 +82,6 @@ jobs:
         run: mix credo --strict
 
       - name: ExDNA clone detection
+        # Non-blocking: ExDNA crashes on certain Elixir 1.18 AST patterns (atom_to_binary bug)
         continue-on-error: true
         run: mix ex_dna
