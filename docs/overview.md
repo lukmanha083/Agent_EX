@@ -66,8 +66,15 @@ AgentEx
 ├── Message             — Message types (system, user, assistant, tool)
 │   ├── FunctionCall       — LLM's request to invoke a tool
 │   └── FunctionResult     — Result of executing a tool (observation)
-├── Tool                — Tool definition with :kind (:read/:write)
+├── Tool                — Tool definition with :kind (:read/:write/:builtin)
+│                          :read = sensing (auto-approved), :write = acting (gated),
+│                          :builtin = provider-executed server-side (e.g., Anthropic web search)
 ├── ToolAgent           — GenServer that holds and executes registered tools
+├── ToolOverride        — Wrap tools with renamed/redescribed metadata
+├── ToolBuilder         — Auto-generate JSON Schema from param specs + deftool macro
+├── StatefulTool        — Tools with persistent state across sessions (via Tier 2)
+├── Workbench           — Dynamic tool collection GenServer with version tracking
+├── StreamTool          — Streaming tool results with emit/collect pattern
 ├── Sensing             — Sensing phase: intervene → dispatch → process → feed back
 ├── Intervention        — Behaviour + pipeline for gating tool calls
 │   ├── PermissionHandler  — Block all :write tools (chmod 444)
@@ -78,7 +85,11 @@ AgentEx
 │   └── HandoffMessage     — Conversation transfer between agents
 ├── Swarm               — Multi-agent orchestration via handoffs
 │   └── Agent              — Swarm participant (name, system_message, tools, handoffs)
-├── ModelClient         — HTTP client for OpenAI-compatible LLM APIs
+├── ModelClient         — Multi-provider LLM client (OpenAI, Anthropic, Moonshot)
+├── MCP                 — Model Context Protocol bridge
+│   ├── Client             — JSON-RPC 2.0 GenServer (stdio/HTTP transport)
+│   ├── Transport          — Stdio and HTTP transport adapters
+│   └── ToolAdapter        — Convert MCP tools ↔ AgentEx tools
 ├── Application         — OTP supervisor tree + Registry
 ├── Example             — Working usage example with permissions
 └── Memory              — 3-tier memory system + knowledge graph
@@ -123,7 +134,7 @@ tools = [read_tool, write_tool]
 # 2. Start the ToolAgent (GenServer)
 {:ok, tool_agent} = AgentEx.ToolAgent.start_link(tools: tools)
 
-# 3. Create the LLM client
+# 3. Create the LLM client (supports :openai, :anthropic, :moonshot)
 client = AgentEx.ModelClient.new(model: "gpt-4o")
 
 # 4. Build messages
@@ -173,6 +184,91 @@ Memory.stop_session("analyst", "session-1")
 
 See [Memory System](memory.md) for the full guide covering all tiers,
 knowledge graph, and multi-agent integration.
+
+## ToolBuilder Quick Start
+
+```elixir
+alias AgentEx.ToolBuilder
+
+# Function-based builder — auto-generates JSON Schema from param specs
+tool = ToolBuilder.build(
+  name: "get_weather",
+  description: "Get weather for a city",
+  kind: :read,                        # defaults to :read if omitted
+  params: [
+    {:city, :string, "City name"},
+    {:units, :string, "C or F", optional: true}
+  ],
+  function: fn %{"city" => city} -> {:ok, "Sunny in #{city}"} end
+)
+
+# Or use the macro DSL in a module
+defmodule MyTools do
+  import AgentEx.ToolBuilder
+
+  deftool :get_weather, "Get weather for a city", kind: :read do
+    param :city, :string, "City name"
+    param :units, :string, "C or F", optional: true
+  end
+
+  def get_weather(%{"city" => city} = _args), do: {:ok, "Sunny in #{city}"}
+end
+
+tool = MyTools.get_weather_tool()
+```
+
+## ToolOverride Quick Start
+
+```elixir
+alias AgentEx.{Tool, ToolOverride}
+
+# Wrap an existing tool with new name/description
+original = Tool.new(name: "search_db", description: "Search database", ...)
+renamed = ToolOverride.rename(original, "find_records")
+renamed.name   #=> "find_records"
+renamed.kind   #=> :read (preserved from original)
+
+# Or override multiple fields at once
+wrapped = ToolOverride.wrap(original, name: "find", description: "Find things")
+```
+
+## Workbench Quick Start
+
+```elixir
+alias AgentEx.Workbench
+
+# Dynamic tool collection with version tracking
+{:ok, wb} = Workbench.start_link()
+
+:ok = Workbench.add_tool(wb, weather_tool)
+:ok = Workbench.add_tool(wb, search_tool)
+
+# Execute tools
+result = Workbench.call_tool(wb, "get_weather", %{"city" => "Tokyo"})
+
+# Version tracking — avoid resending unchanged tools to LLM
+v1 = Workbench.version(wb)
+Workbench.add_tool(wb, new_tool)
+{:changed, tools, v2} = Workbench.tools_if_changed(wb, v1)
+```
+
+## MCP Quick Start
+
+```elixir
+alias AgentEx.MCP.{Client, ToolAdapter}
+
+# Connect to an MCP server (stdio or HTTP transport)
+{:ok, mcp} = Client.start_link(
+  transport: {:stdio, "npx -y @anthropic-ai/mcp-server-github"}
+)
+
+# Auto-discover tools and convert to AgentEx format
+tools = ToolAdapter.list_tools(mcp)
+#=> [%Tool{name: "list_repos", kind: :read, ...}, ...]
+
+# Use discovered tools with any AgentEx component
+{:ok, agent} = AgentEx.ToolAgent.start_link(tools: tools ++ local_tools)
+```
 
 ## Multi-Agent Quick Start (Swarm)
 

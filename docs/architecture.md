@@ -38,12 +38,13 @@ rehydrates ETS automatically. Other agents and memory tiers continue operating.
 
 A stateful process that:
 - Holds a map of registered tools (`%{name => Tool.t()}`)
+- Holds an optional `agent_id` for per-agent scoping (used by StatefulTool, Workbench)
 - Receives `FunctionCall` messages via `GenServer.call/2`
 - Executes the matching tool and returns a `FunctionResult`
 - Handles errors gracefully (unknown tool, bad JSON, execution failure)
 
 ```
-State: %{tools: %{"get_weather" => Tool.t(), "calculator" => Tool.t()}}
+State: %{tools: %{"get_weather" => Tool.t(), "calculator" => Tool.t()}, agent_id: "analyst"}
 
 Incoming:  GenServer.call(pid, {:execute, %FunctionCall{name: "get_weather", ...}})
 Outgoing:  %FunctionResult{content: "Sunny, 25°C", is_error: false}
@@ -207,14 +208,120 @@ User Question
 Answer to User
 ```
 
+### ToolOverride (Stateless Module)
+
+**AutoGen equivalent:** `ToolOverride` wrapper class
+
+Wraps an existing `%Tool{}` with metadata overrides (name, description, parameters)
+while preserving the original function and kind. The LLM sees the override;
+intervention checks the original kind.
+
+```
+Original:  %Tool{name: "search_db", kind: :read, ...}
+     │
+     ▼
+ToolOverride.rename(original, "find_records")
+     │
+     ▼
+Wrapped:   %Tool{name: "find_records", kind: :read, function: <delegates to original>}
+```
+
+### ToolBuilder (Stateless Module + Macro)
+
+**AutoGen equivalent:** Pydantic-based schema generation from function signatures
+
+Auto-generates JSON Schema from declarative param specs. Two modes:
+
+1. **Function-based builder** — `ToolBuilder.build/1` takes param specs and returns a `%Tool{}`
+2. **Macro DSL** — `deftool` generates a `<name>_tool/0` function at compile time
+
+Type mapping: `:string`, `:integer`, `:number`, `:boolean`, `{:enum, vals}`,
+`{:array, type}`, `{:object, fields}`.
+
+### StatefulTool (Stateless Module)
+
+**AutoGen equivalent:** `BaseToolWithState` with `save_state()`/`load_state()`
+
+Wraps a tool so its function receives persisted state and can update it.
+Uses `AgentEx.Memory.PersistentMemory.Store` (Tier 2) for persistence.
+
+```
+Tool call → load state from Tier 2 → merge into args as "__state"
+     → execute original function → save new state to Tier 2 → return result
+```
+
+The function returns `{:ok, result}` (no change) or `{:ok, result, new_state}` (persist).
+Each `{agent_id, state_key}` pair gets its own isolated state.
+
+### Workbench (GenServer)
+
+**AutoGen equivalent:** `Workbench` protocol with `list_tools/call_tool`
+
+A GenServer that manages a mutable tool registry with version tracking.
+Tools can be added, removed, and updated at runtime. The version counter
+lets callers detect changes and avoid resending unchanged tool lists to the LLM.
+
+```
+State: %{tools: %{name => Tool.t()}, version: non_neg_integer(), agent_id: String.t() | nil}
+```
+
+Integrates with ToolOverride via `add_override/3`.
+
+### StreamTool (Stateless Module)
+
+**AutoGen equivalent:** `StreamTool` protocol with `run_json_stream` returning `AsyncGenerator`
+
+Tools that produce incremental results. The streaming function uses an `emit` callback
+to send chunks; the collector aggregates them. From the LLM's perspective, streaming
+tools are indistinguishable from normal tools — the result is aggregated before being
+returned as a `FunctionResult`.
+
+```
+Streaming function:  fn args, emit -> emit.({:chunk, ...}); {:ok, "final"} end
+     │
+     ▼
+StreamTool.wrap(tool)  →  standard tool that collects chunks internally
+     │
+     ▼
+LLM sees:  {:ok, "final"}  (aggregated, transparent)
+```
+
+Implementation uses `Task.async` + message passing for the emit callback.
+
+### MCP Client (GenServer + Transport)
+
+**AutoGen equivalent:** `mcp_server_tools` integration
+
+Bridges external MCP (Model Context Protocol) servers to AgentEx:
+
+```
+AgentEx.MCP.Client (GenServer)
+     │
+     ├── Transport.Stdio  →  Port.open() → subprocess stdin/stdout
+     └── Transport.HTTP   →  Req.post() → HTTP endpoint
+     │
+     ▼
+AgentEx.MCP.ToolAdapter  →  converts MCP tools to %AgentEx.Tool{} structs
+```
+
+JSON-RPC 2.0 protocol: `initialize` → `tools/list` → `tools/call`.
+The `ToolAdapter` wraps each MCP tool as an AgentEx tool where the function
+closure calls `MCP.Client.call_tool/3`.
+
 ### ModelClient (Struct)
 
 **AutoGen equivalent:** `ChatCompletionClient`
 
-A data struct (not a process) that holds API configuration:
-- `model` — e.g., `"gpt-4o"`
-- `api_key` — explicit or read from `OPENAI_API_KEY` env var
-- `base_url` — defaults to OpenAI, can point to any compatible API
+A data struct (not a process) that holds API configuration. Supports multiple providers:
+
+- `:openai` — OpenAI-compatible APIs (default)
+- `:anthropic` — Anthropic Claude APIs (different message format)
+- `:moonshot` — Moonshot/Kimi APIs (OpenAI-compatible with built-in tools)
+
+Also supports:
+- `temperature:` option (clamped to [0,1] for Moonshot/Anthropic)
+- `response_format:` option (not supported on Moonshot)
+- Built-in tools (`:builtin` kind) — provider-executed server-side tools
 
 Uses `Req` for HTTP. Stateless — each `create/3` call is independent.
 
@@ -239,11 +346,13 @@ Elixir structs with pattern matching replace Python's class hierarchy:
 Combines schema and implementation in one struct:
 - `name`, `description`, `parameters` — sent to LLM as JSON schema
 - `function` — the actual `fn` to execute (`(map -> {:ok, v} | {:error, r})`)
-- `kind` — `:read` (default) or `:write`, used by intervention handlers
+- `kind` — `:read` (default), `:write`, or `:builtin` (provider-executed)
+- `type` — optional provider-specific type string (for built-in tools)
 
 The `:kind` field is an AgentEx addition (AutoGen has no equivalent). It enables
 Linux-style permission semantics: read tools gather information (sensing), write
-tools change the world (acting).
+tools change the world (acting). Built-in tools (`:builtin`) are executed
+server-side by the API provider (e.g., Anthropic's web search).
 
 ## Message Flow
 
