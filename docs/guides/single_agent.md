@@ -103,7 +103,7 @@ bash_tool = Tool.new(
 
 # Create the LLM client (defaults to OpenAI)
 client = ModelClient.new(model: "gpt-4o")
-# Or: client = ModelClient.anthropic("claude-sonnet-4-20250514")
+# Or: client = ModelClient.anthropic("claude-sonnet-4-6")
 
 # Build input messages
 messages = [
@@ -1186,10 +1186,10 @@ ToolCallerLoop.run(tool_agent, model_client, input_messages, tools, opts \\ [])
 |---|---|---|
 | `ModelClient.new(model: "gpt-4o")` | `:openai` | `https://api.openai.com/v1` |
 | `ModelClient.openai("gpt-4o")` | `:openai` | `https://api.openai.com/v1` |
-| `ModelClient.anthropic("claude-sonnet-4-20250514")` | `:anthropic` | `https://api.anthropic.com` |
+| `ModelClient.anthropic("claude-sonnet-4-6")` | `:anthropic` | `https://api.anthropic.com` |
 | `ModelClient.moonshot("moonshot-v1-8k")` | `:moonshot` | `https://api.moonshot.cn/v1` |
 
-The named constructors (`openai/2`, `anthropic/2`, `moonshot/2`) take the model as the first argument and an optional keyword list as the second — e.g., `ModelClient.anthropic("claude-sonnet-4-20250514", api_key: "sk-...")`. `ModelClient.new/1` takes all options as keywords.
+The named constructors (`openai/2`, `anthropic/2`, `moonshot/2`) take the model as the first argument and an optional keyword list as the second — e.g., `ModelClient.anthropic("claude-sonnet-4-6", api_key: "sk-...")`. `ModelClient.new/1` takes all options as keywords.
 
 All constructors accept these options:
 
