@@ -17,7 +17,7 @@ export OPENAI_API_KEY="sk-..."
 export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
-### How to run the examples
+## How to run the examples
 
 This guide uses two patterns. Each section tells you which one to use.
 
@@ -337,7 +337,7 @@ IO.puts(List.last(generated).content)
 
 ### Run it
 
-Use IEx or a script file as in Section 1. Paste all three blocks in order:
+Use IEx or a script file as in Section 1. Paste both blocks in order:
 "Define the tools" → "Run the multi-tool agent". Or combine them into
 `examples/02_multi_tool_agent.exs` and run with `mix run`.
 
