@@ -325,7 +325,7 @@ that returns the `%Tool{}` struct. You define the tool function separately:
 defmodule ComputerTools do
   import AgentEx.ToolBuilder
 
-  deftool :bash_exec, "Execute a bash command and return stdout", kind: :read do
+  deftool :bash_exec, "Execute a bash command and return stdout", kind: :write do
     param :command, :string, "The bash command to execute"
   end
 
