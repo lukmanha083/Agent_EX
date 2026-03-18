@@ -787,7 +787,7 @@ The context map contains:
 ## 6. Error Handling & Resilience
 
 **Scenario:** What happens when commands fail, files don't exist, or tools
-timeout?
+time out?
 
 ### Error classification
 
