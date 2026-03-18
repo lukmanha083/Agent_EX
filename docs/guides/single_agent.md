@@ -5,8 +5,44 @@ from a minimal shell executor to a fully sandboxed, memory-integrated computer-u
 agent. Each section is self-contained with real, runnable code.
 
 **Prerequisites:**
-- An LLM API key (`OPENAI_API_KEY` or `ANTHROPIC_API_KEY` environment variable)
-- `iex -S mix` for running examples interactively
+- Elixir 1.18+ installed (`elixir --version` to check)
+- Dependencies fetched: `mix deps.get`
+- An LLM API key set as an environment variable:
+
+```bash
+# OpenAI (default)
+export OPENAI_API_KEY="sk-..."
+
+# Or Anthropic
+export ANTHROPIC_API_KEY="sk-ant-..."
+```
+
+## How to run the examples
+
+This guide uses two patterns. Each section tells you which one to use.
+
+**Pattern A — IEx (interactive).** Paste code blocks directly into a running
+IEx session. Best for experimentation — you can inspect variables between steps.
+
+```bash
+# Start IEx with the project loaded
+iex -S mix
+```
+
+Then paste each code block in order. Variables from earlier blocks (like
+`bash_tool`) stay in scope for later blocks within the same section.
+
+**Pattern B — Script file.** Save the full example to a `.exs` file and run it
+with `mix run`. Best for repeatable, end-to-end execution.
+
+```bash
+# Save the example (combine all code blocks from a section into one file)
+mix run examples/01_minimal_agent.exs
+```
+
+For sections that define **modules** (like `defmodule ComputerTools`), paste the
+module into IEx first, or save it to a file and `Code.require_file/1` it before
+running the usage code.
 
 **Table of Contents**
 
@@ -67,7 +103,7 @@ bash_tool = Tool.new(
 
 # Create the LLM client (defaults to OpenAI)
 client = ModelClient.new(model: "gpt-4o")
-# Or: client = ModelClient.anthropic("claude-sonnet-4-20250514")
+# Or: client = ModelClient.anthropic("claude-sonnet-4-6")
 
 # Build input messages
 messages = [
@@ -79,6 +115,66 @@ messages = [
 {:ok, generated} = ToolCallerLoop.run(agent, client, messages, [bash_tool])
 
 IO.puts(List.last(generated).content)
+```
+
+### Run it
+
+**Option A — IEx:** Start `iex -S mix`, then paste the "Define a real tool"
+block followed by the "Wire up the agent" block:
+
+```bash
+$ iex -S mix
+
+iex(1)> alias AgentEx.{Message, ModelClient, Tool, ToolAgent, ToolCallerLoop}
+iex(2)> bash_tool = Tool.new(name: "bash_exec", ...)   # paste full block
+iex(3)> {:ok, agent} = ToolAgent.start_link(tools: [bash_tool])
+iex(4)> client = ModelClient.new(model: "gpt-4o")
+iex(5)> messages = [Message.system("..."), Message.user("...")]
+iex(6)> {:ok, generated} = ToolCallerLoop.run(agent, client, messages, [bash_tool])
+iex(7)> IO.puts(List.last(generated).content)
+# => "You're running Linux 6.x ... with 50GB available on /dev/sda1"
+```
+
+**Option B — Script file:** Combine both code blocks into one file and run it:
+
+```bash
+# Save both blocks (Define a real tool + Wire up the agent) to a file
+cat > examples/01_minimal_agent.exs << 'EOF'
+alias AgentEx.{Message, ModelClient, Tool, ToolAgent, ToolCallerLoop}
+
+bash_tool = Tool.new(
+  name: "bash_exec",
+  description: "Execute a bash command and return stdout. Use for system queries.",
+  kind: :write,
+  parameters: %{
+    "type" => "object",
+    "properties" => %{
+      "command" => %{"type" => "string", "description" => "The bash command to execute"}
+    },
+    "required" => ["command"]
+  },
+  function: fn %{"command" => command} ->
+    case System.cmd("bash", ["-c", command], stderr_to_stdout: true) do
+      {output, 0} -> {:ok, output}
+      {output, code} -> {:ok, "exit code #{code}:\n#{output}"}
+    end
+  end
+)
+
+{:ok, agent} = ToolAgent.start_link(tools: [bash_tool])
+client = ModelClient.new(model: "gpt-4o")
+
+messages = [
+  Message.system("You are a system administration assistant. Use bash_exec to answer questions about the user's machine."),
+  Message.user("What OS am I running and how much disk space is available?")
+]
+
+{:ok, generated} = ToolCallerLoop.run(agent, client, messages, [bash_tool])
+IO.puts(List.last(generated).content)
+EOF
+
+# Run it
+mix run examples/01_minimal_agent.exs
 ```
 
 ### Under the hood — one loop iteration
@@ -239,6 +335,12 @@ messages = [
 IO.puts(List.last(generated).content)
 ```
 
+### Run it
+
+Use IEx or a script file as in Section 1. Paste both blocks in order:
+"Define the tools" → "Run the multi-tool agent". Or combine them into
+`examples/02_multi_tool_agent.exs` and run with `mix run`.
+
 ### Under the hood — multi-iteration flow
 
 The LLM typically needs multiple iterations to search, then read, then analyze:
@@ -373,7 +475,74 @@ defmodule ComputerTools do
 end
 ```
 
-Usage:
+### Run it — compiling a module
+
+Module definitions (`defmodule`) need to be compiled before you can call their
+functions. Two ways:
+
+**IEx:** Paste the entire `defmodule ComputerTools do ... end` block directly
+into IEx. Elixir compiles it in-memory immediately:
+
+```bash
+iex(1)> defmodule ComputerTools do
+...(1)>   import AgentEx.ToolBuilder
+...(1)>   # ... paste the full module ...
+...(1)> end
+{:module, ComputerTools, ...}
+
+iex(2)> ComputerTools.bash_exec_tool()
+%AgentEx.Tool{name: "bash_exec", kind: :write, ...}
+```
+
+**Script file:** Save the module and usage code together in one `.exs` file:
+
+```bash
+cat > examples/03_deftool.exs << 'EOF'
+defmodule ComputerTools do
+  import AgentEx.ToolBuilder
+
+  deftool :bash_exec, "Execute a bash command and return stdout", kind: :write do
+    param :command, :string, "The bash command to execute"
+  end
+
+  def bash_exec(%{"command" => command}) do
+    case System.cmd("bash", ["-c", command], stderr_to_stdout: true) do
+      {output, 0} -> {:ok, output}
+      {output, code} -> {:ok, "exit code #{code}:\n#{output}"}
+    end
+  end
+
+  deftool :read_file, "Read the full contents of a file" do
+    param :path, :string, "Absolute file path"
+  end
+
+  def read_file(%{"path" => path}) do
+    case File.read(path) do
+      {:ok, content} -> {:ok, content}
+      {:error, reason} -> {:error, "Cannot read #{path}: #{reason}"}
+    end
+  end
+end
+
+alias AgentEx.{Message, ModelClient, ToolAgent, ToolCallerLoop}
+
+tools = [ComputerTools.bash_exec_tool(), ComputerTools.read_file_tool()]
+{:ok, agent} = ToolAgent.start_link(tools: tools)
+client = ModelClient.new(model: "gpt-4o")
+
+messages = [
+  Message.system("You are a helpful assistant."),
+  Message.user("What Elixir version is installed?")
+]
+
+{:ok, generated} = ToolCallerLoop.run(agent, client, messages, tools)
+IO.puts(List.last(generated).content)
+EOF
+
+mix run examples/03_deftool.exs
+```
+
+Usage (if pasting in IEx separately):
 
 ```elixir
 # Each deftool generates a <name>_tool/0 function
@@ -606,6 +775,12 @@ IO.puts(List.last(generated).content)
 # If it tries bash_exec or write_file, those get rejected.
 ```
 
+### Run it
+
+Paste all blocks from this section into IEx in order: "Define tools with kinds"
+→ "Complete example". Or combine them into `examples/04_permissions.exs` and run
+with `mix run`.
+
 ### Permission decision matrix
 
 | Tool | Kind | `PermissionHandler` | `WriteGateHandler.new(allowed_writes: ["copy_file"])` |
@@ -759,6 +934,17 @@ gate = WriteGateHandler.new(allowed_writes: ["write_file", "copy_file"])
   ]
 )
 ```
+
+### Run it
+
+This section mixes closures and a module handler. In IEx, paste the blocks in
+order: `path_sandbox` → `CommandBlocklist` module → `path_rewriter` →
+"Composing the pipeline". The `defmodule CommandBlocklist` block compiles
+in-memory when pasted into IEx.
+
+For a script file, combine all blocks into `examples/05_sandbox.exs`. Place the
+`defmodule CommandBlocklist` block before any code that references it, then run
+with `mix run examples/05_sandbox.exs`.
 
 Pipeline evaluation order matters. Each handler sees the (potentially modified)
 call from the previous handler. First non-`:approve` decision short-circuits —
@@ -917,6 +1103,10 @@ messages = [
 )
 ```
 
+**Run it:** Paste the block into IEx, or save to `examples/07_memory.exs` and
+run with `mix run`. The tool variables (`read_file_tool`, etc.) must be defined
+first — reuse the definitions from Section 2, or define them inline.
+
 With the `memory` option, `ToolCallerLoop` automatically:
 1. Calls `Memory.inject_memory_context/3` to prepend memory context as system
    messages before the first LLM call
@@ -996,10 +1186,10 @@ ToolCallerLoop.run(tool_agent, model_client, input_messages, tools, opts \\ [])
 |---|---|---|
 | `ModelClient.new(model: "gpt-4o")` | `:openai` | `https://api.openai.com/v1` |
 | `ModelClient.openai("gpt-4o")` | `:openai` | `https://api.openai.com/v1` |
-| `ModelClient.anthropic("claude-sonnet-4-20250514")` | `:anthropic` | `https://api.anthropic.com` |
+| `ModelClient.anthropic("claude-sonnet-4-6")` | `:anthropic` | `https://api.anthropic.com` |
 | `ModelClient.moonshot("moonshot-v1-8k")` | `:moonshot` | `https://api.moonshot.cn/v1` |
 
-The named constructors (`openai/2`, `anthropic/2`, `moonshot/2`) take the model as the first argument and an optional keyword list as the second — e.g., `ModelClient.anthropic("claude-sonnet-4-20250514", api_key: "sk-...")`. `ModelClient.new/1` takes all options as keywords.
+The named constructors (`openai/2`, `anthropic/2`, `moonshot/2`) take the model as the first argument and an optional keyword list as the second — e.g., `ModelClient.anthropic("claude-sonnet-4-6", api_key: "sk-...")`. `ModelClient.new/1` takes all options as keywords.
 
 All constructors accept these options:
 
