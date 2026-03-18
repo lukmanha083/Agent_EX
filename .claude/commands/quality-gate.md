@@ -11,17 +11,17 @@ You are running AgentEx's quality gate pipeline. Execute these steps in order:
 Run these three commands simultaneously:
 
 1. **Credo + ExSlop** (strict mode, JSON output):
-   ```
+   ```bash
    mix credo --strict --format json
    ```
 
 2. **ExDNA** clone detection:
-   ```
+   ```bash
    mix ex_dna
    ```
 
 3. **Elixir compiler warnings** (type checking + unused vars + pattern match):
-   ```
+   ```bash
    mix compile --warnings-as-errors --force
    ```
 

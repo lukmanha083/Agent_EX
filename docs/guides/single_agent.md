@@ -85,7 +85,7 @@ IO.puts(List.last(generated).content)
 
 When you call `ToolCallerLoop.run/5`, here's what happens step by step:
 
-```
+```text
 messages = [system, user]     ← you provide these
      │
      ▼
@@ -243,7 +243,7 @@ IO.puts(List.last(generated).content)
 
 The LLM typically needs multiple iterations to search, then read, then analyze:
 
-```
+```text
 Iteration 1: THINK → "I need to find GenServer files"
              SENSE → grep_search("use GenServer", "lib/")
                      → returns list of matching files
@@ -651,7 +651,9 @@ path_sandbox = fn call, _tool, _context ->
       paths = [args["path"], args["source"], args["destination"]]
               |> Enum.reject(&is_nil/1)
 
-      if Enum.all?(paths, &String.starts_with?(&1, sandbox_root)) do
+      sandbox_prefix = Path.expand(sandbox_root) <> "/"
+
+      if Enum.all?(paths, fn p -> String.starts_with?(Path.expand(p), sandbox_prefix) end) do
         :approve
       else
         :reject
@@ -677,7 +679,11 @@ defmodule CommandBlocklist do
   def on_call(%{name: "bash_exec"} = call, _tool, _context) do
     case Jason.decode(call.arguments) do
       {:ok, %{"command" => command}} ->
-        tokens = String.split(command)
+        tokens =
+          command
+          |> String.split(~r/[^a-zA-Z0-9_.\/-]+/)
+          |> Enum.map(fn t -> t |> Path.basename() |> String.downcase() end)
+
         if Enum.any?(@blocked, fn cmd -> cmd in tokens end) do
           :reject
         else
@@ -822,7 +828,7 @@ read_file = Tool.new(
 
 When the LLM calls `read_file` on a nonexistent path:
 
-```
+```text
 Iteration 1: THINK → calls read_file("/tmp/missing.txt")
              SENSE → FunctionResult{content: "File not found: /tmp/missing.txt",
                                     is_error: true}
@@ -836,7 +842,7 @@ Iteration 2: THINK → "That file doesn't exist, let me try listing the director
 Each tool call dispatched by `Sensing.dispatch/3` runs in its own process via
 `Task.async_stream`. If one tool crashes, the others continue executing:
 
-```
+```text
 dispatch([read_file("/a"), read_file("/b"), read_file("/c")])
      │           │           │
      ▼           ▼           ▼

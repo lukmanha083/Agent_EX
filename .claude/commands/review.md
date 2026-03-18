@@ -13,22 +13,22 @@ Run `git diff` (or `git diff --cached` if staged) to see what changed. If a spec
 ### Step 2: Run quality gates in parallel
 
 1. **Credo + ExSlop** (strict mode):
-   ```
+   ```bash
    mix credo --strict --format json
    ```
 
 2. **ExDNA** clone detection:
-   ```
+   ```bash
    mix ex_dna
    ```
 
 3. **Compiler warnings**:
-   ```
+   ```bash
    mix compile --warnings-as-errors --force
    ```
 
 4. **Test suite**:
-   ```
+   ```bash
    mix test
    ```
 

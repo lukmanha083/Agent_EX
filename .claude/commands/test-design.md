@@ -12,7 +12,7 @@ Read the module(s) specified in the arguments. If no arguments given, identify m
 
 Analyze:
 - Public API surface (all public functions)
-- Edge cases from pattern matching clauses
+- Edge cases from pattern-matching clauses
 - GenServer callbacks and state transitions
 - Behaviour implementations (Tier, Transport, Intervention)
 - Error paths and boundary conditions
@@ -25,7 +25,7 @@ Read 2-3 existing test files to match the project's conventions:
 - `test/mcp/client_test.exs` — MockTransport pattern for behaviours
 
 Key conventions to follow:
-- Use `async: true` unless the test needs named GenServers or shared ETS/DETS state
+- Use `async: true` unless the test needs to use named GenServers or shared ETS/DETS state
 - Mock LLM responses with `Agent`-based stateful helpers (see `mock_model/1` pattern in swarm_test)
 - Mock behaviours with in-test modules (see `MockTransport` pattern)
 - No `Mox` library — use plain process-based stubs
@@ -46,17 +46,17 @@ Write comprehensive tests covering:
 After writing tests, run these checks in parallel:
 
 1. **Run the new tests**:
-   ```
+   ```bash
    mix test <test_file_path> --trace
    ```
 
 2. **Credo + ExSlop on the new test file**:
-   ```
+   ```bash
    mix credo --strict --files-included <test_file_path>
    ```
 
 3. **Compile check**:
-   ```
+   ```bash
    mix compile --warnings-as-errors
    ```
 
@@ -64,7 +64,7 @@ Fix any issues found and re-run until clean.
 
 ### Step 5: Run the full test suite
 
-```
+```bash
 mix test
 ```
 
