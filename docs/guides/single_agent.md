@@ -39,7 +39,7 @@ alias AgentEx.{Message, ModelClient, Tool, ToolAgent, ToolCallerLoop}
 bash_tool = Tool.new(
   name: "bash_exec",
   description: "Execute a bash command and return stdout. Use for system queries.",
-  kind: :read,
+  kind: :write,
   parameters: %{
     "type" => "object",
     "properties" => %{
@@ -142,7 +142,7 @@ alias AgentEx.{Message, ModelClient, Tool, ToolAgent, ToolCallerLoop}
 bash_tool = Tool.new(
   name: "bash_exec",
   description: "Execute a bash command. Use for find, ls, wc, and other system commands.",
-  kind: :read,
+  kind: :write,
   parameters: %{
     "type" => "object",
     "properties" => %{
@@ -647,13 +647,17 @@ sandbox_root = "/tmp/sandbox"
 
 path_sandbox = fn call, _tool, _context ->
   case Jason.decode(call.arguments) do
-    {:ok, args} ->
+    {:ok, %{} = args} ->
       paths = [args["path"], args["source"], args["destination"]]
               |> Enum.reject(&is_nil/1)
 
-      sandbox_prefix = Path.expand(sandbox_root) <> "/"
+      expanded_root = Path.expand(sandbox_root)
+      sandbox_prefix = expanded_root <> "/"
 
-      if Enum.all?(paths, fn p -> String.starts_with?(Path.expand(p), sandbox_prefix) end) do
+      if Enum.all?(paths, fn p ->
+        expanded = Path.expand(p)
+        expanded == expanded_root or String.starts_with?(expanded, sandbox_prefix)
+      end) do
         :approve
       else
         :reject
@@ -708,7 +712,7 @@ sandbox_root = "/tmp/sandbox"
 
 path_rewriter = fn call, _tool, _context ->
   case Jason.decode(call.arguments) do
-    {:ok, args} ->
+    {:ok, %{} = args} ->
       rewrite = fn
         nil -> nil
         "/" <> _ = abs -> abs
