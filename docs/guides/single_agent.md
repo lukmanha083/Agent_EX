@@ -783,13 +783,268 @@ with `mix run`.
 
 ### Permission decision matrix
 
-| Tool | Kind | `PermissionHandler` | `WriteGateHandler.new(allowed_writes: ["copy_file"])` |
+Below is every handler scenario with the five tools defined above. Each scenario
+includes the expected decision for every tool and a runnable code example.
+
+#### Scenario 1 — No intervention (default)
+
+All tools are approved regardless of kind. This is the default when you omit
+the `intervention` option.
+
+| Tool | Kind | Decision |
+|---|---|---|
+| `read_file` | `:read` | approve |
+| `grep_search` | `:read` | approve |
+| `write_file` | `:write` | approve |
+| `copy_file` | `:write` | approve |
+| `bash_exec` | `:write` | approve |
+
+```elixir
+# No intervention — everything runs
+ToolCallerLoop.run(agent, client, messages, tools)
+```
+
+#### Scenario 2 — LogHandler only
+
+`LogHandler` logs every tool call at INFO level but always returns `:approve`.
+Useful as an audit trail without restricting anything.
+
+| Tool | Kind | LogHandler | Decision |
+|---|---|---|---|
+| `read_file` | `:read` | approve (logged) | approve |
+| `grep_search` | `:read` | approve (logged) | approve |
+| `write_file` | `:write` | approve (logged) | approve |
+| `copy_file` | `:write` | approve (logged) | approve |
+| `bash_exec` | `:write` | approve (logged) | approve |
+
+```elixir
+# Log everything, block nothing
+ToolCallerLoop.run(agent, client, messages, tools,
+  intervention: [LogHandler]
+)
+# Log output:
+# Intervention [LOG] iteration=0 tool=read_file kind=read call_id=... args=...
+# Intervention [LOG] iteration=0 tool=bash_exec kind=write call_id=... args=...
+```
+
+#### Scenario 3 — PermissionHandler only
+
+Blocks **all** `:write` tools. Think of it as `chmod 444` — read-only mode.
+
+| Tool | Kind | PermissionHandler | Decision |
 |---|---|---|---|
 | `read_file` | `:read` | approve | approve |
 | `grep_search` | `:read` | approve | approve |
 | `write_file` | `:write` | **reject** | **reject** |
-| `copy_file` | `:write` | **reject** | approve |
+| `copy_file` | `:write` | **reject** | **reject** |
 | `bash_exec` | `:write` | **reject** | **reject** |
+
+```elixir
+# Total lockdown — no write tools allowed
+ToolCallerLoop.run(agent, client, messages, tools,
+  intervention: [PermissionHandler]
+)
+# LLM sees: "Error: permission denied" for any write tool call
+```
+
+#### Scenario 4 — WriteGateHandler with empty allowlist
+
+`WriteGateHandler.new(allowed_writes: [])` behaves identically to
+`PermissionHandler` — all writes are rejected because none appear in the
+allowlist.
+
+| Tool | Kind | WriteGateHandler (`[]`) | Decision |
+|---|---|---|---|
+| `read_file` | `:read` | approve | approve |
+| `grep_search` | `:read` | approve | approve |
+| `write_file` | `:write` | **reject** | **reject** |
+| `copy_file` | `:write` | **reject** | **reject** |
+| `bash_exec` | `:write` | **reject** | **reject** |
+
+```elixir
+# Same effect as PermissionHandler
+gate = WriteGateHandler.new(allowed_writes: [])
+
+ToolCallerLoop.run(agent, client, messages, tools,
+  intervention: [gate]
+)
+```
+
+#### Scenario 5 — WriteGateHandler with single allowed write
+
+Only `copy_file` is allowlisted. Other `:write` tools are rejected.
+
+| Tool | Kind | WriteGateHandler (`["copy_file"]`) | Decision |
+|---|---|---|---|
+| `read_file` | `:read` | approve | approve |
+| `grep_search` | `:read` | approve | approve |
+| `write_file` | `:write` | **reject** | **reject** |
+| `copy_file` | `:write` | approve (in allowlist) | approve |
+| `bash_exec` | `:write` | **reject** | **reject** |
+
+```elixir
+# Allow copying files, block everything else that writes
+gate = WriteGateHandler.new(allowed_writes: ["copy_file"])
+
+ToolCallerLoop.run(agent, client, messages, tools,
+  intervention: [gate]
+)
+```
+
+#### Scenario 6 — WriteGateHandler with multiple allowed writes
+
+Both `write_file` and `copy_file` are allowlisted. Only `bash_exec` is rejected.
+
+| Tool | Kind | WriteGateHandler (`["write_file", "copy_file"]`) | Decision |
+|---|---|---|---|
+| `read_file` | `:read` | approve | approve |
+| `grep_search` | `:read` | approve | approve |
+| `write_file` | `:write` | approve (in allowlist) | approve |
+| `copy_file` | `:write` | approve (in allowlist) | approve |
+| `bash_exec` | `:write` | **reject** | **reject** |
+
+```elixir
+# Allow file writes and copies, block shell execution
+gate = WriteGateHandler.new(allowed_writes: ["write_file", "copy_file"])
+
+ToolCallerLoop.run(agent, client, messages, tools,
+  intervention: [gate]
+)
+```
+
+#### Scenario 7 — WriteGateHandler allowing all writes
+
+When every `:write` tool is in the allowlist, nothing is blocked. Equivalent
+to no intervention, but with debug logging for write approvals.
+
+| Tool | Kind | WriteGateHandler (`["write_file", "copy_file", "bash_exec"]`) | Decision |
+|---|---|---|---|
+| `read_file` | `:read` | approve | approve |
+| `grep_search` | `:read` | approve | approve |
+| `write_file` | `:write` | approve (in allowlist) | approve |
+| `copy_file` | `:write` | approve (in allowlist) | approve |
+| `bash_exec` | `:write` | approve (in allowlist) | approve |
+
+```elixir
+# All writes allowed — explicit opt-in to full access
+gate = WriteGateHandler.new(allowed_writes: ["write_file", "copy_file", "bash_exec"])
+
+ToolCallerLoop.run(agent, client, messages, tools,
+  intervention: [gate]
+)
+```
+
+#### Scenario 8 — Pipeline: LogHandler + PermissionHandler
+
+Handlers run left-to-right. `LogHandler` always approves (and logs), then
+`PermissionHandler` makes the real decision. First non-`:approve` short-circuits.
+
+| Tool | Kind | LogHandler | PermissionHandler | Final Decision |
+|---|---|---|---|---|
+| `read_file` | `:read` | approve (logged) | approve | approve |
+| `grep_search` | `:read` | approve (logged) | approve | approve |
+| `write_file` | `:write` | approve (logged) | **reject** | **reject** |
+| `copy_file` | `:write` | approve (logged) | **reject** | **reject** |
+| `bash_exec` | `:write` | approve (logged) | **reject** | **reject** |
+
+```elixir
+# Log all calls, then enforce read-only
+ToolCallerLoop.run(agent, client, messages, tools,
+  intervention: [LogHandler, PermissionHandler]
+)
+# Log output shows both approved and rejected calls
+# But only :read tools actually execute
+```
+
+#### Scenario 9 — Pipeline: LogHandler + WriteGateHandler
+
+Audit logging combined with selective write permissions.
+
+| Tool | Kind | LogHandler | WriteGateHandler (`["copy_file"]`) | Final Decision |
+|---|---|---|---|---|
+| `read_file` | `:read` | approve (logged) | approve | approve |
+| `grep_search` | `:read` | approve (logged) | approve | approve |
+| `write_file` | `:write` | approve (logged) | **reject** | **reject** |
+| `copy_file` | `:write` | approve (logged) | approve (in allowlist) | approve |
+| `bash_exec` | `:write` | approve (logged) | **reject** | **reject** |
+
+```elixir
+# Log everything + allow only copy_file writes
+gate = WriteGateHandler.new(allowed_writes: ["copy_file"])
+
+ToolCallerLoop.run(agent, client, messages, tools,
+  intervention: [LogHandler, gate]
+)
+```
+
+#### Scenario 10 — Pipeline: PermissionHandler + WriteGateHandler
+
+When `PermissionHandler` runs first, it rejects all `:write` tools before
+`WriteGateHandler` ever sees them. The allowlist has no effect — `PermissionHandler`
+short-circuits the pipeline.
+
+| Tool | Kind | PermissionHandler | WriteGateHandler (`["copy_file"]`) | Final Decision |
+|---|---|---|---|---|
+| `read_file` | `:read` | approve | approve | approve |
+| `grep_search` | `:read` | approve | approve | approve |
+| `write_file` | `:write` | **reject** ⚡ | *(skipped)* | **reject** |
+| `copy_file` | `:write` | **reject** ⚡ | *(skipped)* | **reject** |
+| `bash_exec` | `:write` | **reject** ⚡ | *(skipped)* | **reject** |
+
+⚡ = short-circuits the pipeline; remaining handlers are never called.
+
+```elixir
+# ⚠️ Ordering mistake — PermissionHandler blocks everything before
+# WriteGateHandler can approve copy_file
+gate = WriteGateHandler.new(allowed_writes: ["copy_file"])
+
+ToolCallerLoop.run(agent, client, messages, tools,
+  intervention: [PermissionHandler, gate]
+)
+# copy_file is REJECTED — PermissionHandler runs first and short-circuits
+```
+
+> **Ordering matters.** Place more permissive handlers (like `WriteGateHandler`)
+> before stricter ones (like `PermissionHandler`) to avoid unintended lockouts.
+> `LogHandler` should always go first since it never blocks.
+
+#### Scenario 11 — Custom function handler
+
+A closure handler that approves `:read` tools, allows `:write` tools only
+during the first 10 iterations, and rejects after that (rate-limiting writes):
+
+| Tool | Kind | Iteration ≤ 10 | Iteration > 10 |
+|---|---|---|---|
+| `read_file` | `:read` | approve | approve |
+| `grep_search` | `:read` | approve | approve |
+| `write_file` | `:write` | approve | **reject** |
+| `copy_file` | `:write` | approve | **reject** |
+| `bash_exec` | `:write` | approve | **reject** |
+
+```elixir
+# Allow writes only in the first 10 iterations
+write_rate_limiter = fn _call, tool, context ->
+  if tool && AgentEx.Tool.write?(tool) && context.iteration > 10 do
+    :reject
+  else
+    :approve
+  end
+end
+
+ToolCallerLoop.run(agent, client, messages, tools,
+  intervention: [LogHandler, write_rate_limiter]
+)
+```
+
+#### Summary — handler quick reference
+
+| Handler | Type | Read tools | Write tools | Configurable? |
+|---|---|---|---|---|
+| *(none)* | — | approve | approve | — |
+| `LogHandler` | Module | approve (logged) | approve (logged) | No |
+| `PermissionHandler` | Module | approve | **reject all** | No |
+| `WriteGateHandler.new(allowed_writes: [...])` | Function | approve | approve if in allowlist, **reject** otherwise | Yes — via allowlist |
+| Custom closure | Function | *(your logic)* | *(your logic)* | Yes — arbitrary |
 
 ---
 
