@@ -220,10 +220,15 @@ defmodule AgentEx.PipeTest do
       end
 
       result =
-        Pipe.route("Analyze AAPL stock", router, nil, model_fn: fn messages, tools ->
-          system_msg = hd(messages).content
-          if system_msg =~ "Finance", do: finance_fn.(messages, tools), else: tech_fn.(messages, tools)
-        end)
+        Pipe.route("Analyze AAPL stock", router, nil,
+          model_fn: fn messages, tools ->
+            system_msg = hd(messages).content
+
+            if system_msg =~ "Finance",
+              do: finance_fn.(messages, tools),
+              else: tech_fn.(messages, tools)
+          end
+        )
 
       assert result == "Finance analysis complete"
     end

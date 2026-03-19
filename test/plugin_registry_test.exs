@@ -119,7 +119,9 @@ defmodule AgentEx.PluginRegistryTest do
 
     test "rejects duplicate attachment", %{reg: reg} do
       :ok = PluginRegistry.attach(reg, SimplePlugin, %{"greeting" => "Hello"})
-      assert {:error, :already_attached} = PluginRegistry.attach(reg, SimplePlugin, %{"greeting" => "Hi"})
+
+      assert {:error, :already_attached} =
+               PluginRegistry.attach(reg, SimplePlugin, %{"greeting" => "Hi"})
     end
 
     test "rejects missing required config", %{reg: reg} do

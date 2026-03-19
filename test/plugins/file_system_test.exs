@@ -5,7 +5,9 @@ defmodule AgentEx.Plugins.FileSystemTest do
   alias AgentEx.Tool
 
   setup do
-    tmp_dir = Path.join(System.tmp_dir!(), "agent_ex_fs_test_#{System.unique_integer([:positive])}")
+    tmp_dir =
+      Path.join(System.tmp_dir!(), "agent_ex_fs_test_#{System.unique_integer([:positive])}")
+
     File.mkdir_p!(tmp_dir)
     File.write!(Path.join(tmp_dir, "hello.txt"), "Hello, World!")
     File.mkdir_p!(Path.join(tmp_dir, "subdir"))
