@@ -136,8 +136,13 @@ defmodule AgentEx.PluginRegistry do
   defp run_plugin_cleanup(info, plugin_name) do
     if function_exported?(info.module, :cleanup, 1) do
       case safe_callback(info.module, :cleanup, [info.child_pid]) do
-        {:ok, _} -> :ok
-        {:error, reason} -> Logger.warning("PluginRegistry: cleanup failed for '#{plugin_name}': #{inspect(reason)}")
+        {:ok, _} ->
+          :ok
+
+        {:error, reason} ->
+          Logger.warning(
+            "PluginRegistry: cleanup failed for '#{plugin_name}': #{inspect(reason)}"
+          )
       end
     end
 

@@ -82,7 +82,10 @@ defmodule AgentEx.ToolPlugin do
   defp valid_type?(value, :integer), do: is_integer(value)
   defp valid_type?(value, :boolean), do: is_boolean(value)
   defp valid_type?(value, :float), do: is_float(value)
-  defp valid_type?(value, {:array, inner}), do: is_list(value) and Enum.all?(value, &valid_type?(&1, inner))
+
+  defp valid_type?(value, {:array, inner}),
+    do: is_list(value) and Enum.all?(value, &valid_type?(&1, inner))
+
   defp valid_type?(_value, _type), do: true
 
   @doc "Prefix tool names with the plugin name."
