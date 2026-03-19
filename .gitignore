@@ -24,3 +24,6 @@ agent_ex-*.tar
 
 # DETS persistent memory data files.
 /priv/data/
+
+# Secret config (API keys for local dev).
+/config/*.secret.exs

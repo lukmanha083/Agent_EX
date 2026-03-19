@@ -26,8 +26,8 @@ bash_tool = Tool.new(
 )
 
 {:ok, agent} = ToolAgent.start_link(tools: [bash_tool])
-client = ModelClient.new(model: "gpt-4o")
-# Or: client = ModelClient.anthropic("claude-sonnet-4-6")
+# client = ModelClient.new(model: "gpt-4o")
+client = ModelClient.anthropic("claude-haiku-4-5-20251001")
 
 messages = [
   Message.system("You are a system administration assistant. Use bash_exec to answer questions about the user's machine."),
