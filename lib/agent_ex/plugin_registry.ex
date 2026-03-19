@@ -50,7 +50,7 @@ defmodule AgentEx.PluginRegistry do
   end
 
   @doc "Detach a plugin by name, removing its tools."
-  @spec detach(GenServer.server(), String.t()) :: :ok | {:error, :not_attached}
+  @spec detach(GenServer.server(), String.t()) :: :ok | {:error, :not_found}
   def detach(registry, plugin_name) when is_binary(plugin_name) do
     GenServer.call(registry, {:detach, plugin_name})
   end
@@ -62,7 +62,7 @@ defmodule AgentEx.PluginRegistry do
   end
 
   @doc "Get info for a specific plugin."
-  @spec get_plugin(GenServer.server(), String.t()) :: {:ok, PluginInfo.t()} | :not_found
+  @spec get_plugin(GenServer.server(), String.t()) :: {:ok, PluginInfo.t()} | {:error, :not_found}
   def get_plugin(registry, plugin_name) when is_binary(plugin_name) do
     GenServer.call(registry, {:get_plugin, plugin_name})
   end
@@ -96,7 +96,7 @@ defmodule AgentEx.PluginRegistry do
         {:reply, :ok, %{state | plugins: Map.delete(state.plugins, plugin_name)}}
 
       :error ->
-        {:reply, {:error, :not_attached}, state}
+        {:reply, {:error, :not_found}, state}
     end
   end
 
@@ -107,7 +107,7 @@ defmodule AgentEx.PluginRegistry do
   def handle_call({:get_plugin, plugin_name}, _from, state) do
     case Map.fetch(state.plugins, plugin_name) do
       {:ok, info} -> {:reply, {:ok, info}, state}
-      :error -> {:reply, :not_found, state}
+      :error -> {:reply, {:error, :not_found}, state}
     end
   end
 

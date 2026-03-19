@@ -115,11 +115,29 @@ defmodule AgentEx.Plugins.FileSystemTest do
   end
 
   describe "path traversal protection" do
-    test "blocks path traversal", %{tmp_dir: tmp_dir} do
+    test "blocks path traversal on read_file", %{tmp_dir: tmp_dir} do
       {:ok, tools} = FileSystem.init(%{"root_path" => tmp_dir})
       read_tool = Enum.find(tools, &(&1.name == "read_file"))
 
       assert {:error, msg} = Tool.execute(read_tool, %{"path" => "../../etc/passwd"})
+      assert msg =~ "path traversal"
+    end
+
+    test "blocks path traversal on list_dir", %{tmp_dir: tmp_dir} do
+      {:ok, tools} = FileSystem.init(%{"root_path" => tmp_dir})
+      list_tool = Enum.find(tools, &(&1.name == "list_dir"))
+
+      assert {:error, msg} = Tool.execute(list_tool, %{"path" => "../../etc"})
+      assert msg =~ "path traversal"
+    end
+
+    test "blocks path traversal on write_file", %{tmp_dir: tmp_dir} do
+      {:ok, tools} = FileSystem.init(%{"root_path" => tmp_dir, "allow_write" => true})
+      write_tool = Enum.find(tools, &(&1.name == "write_file"))
+
+      assert {:error, msg} =
+               Tool.execute(write_tool, %{"path" => "../../tmp/escape.txt", "content" => "bad"})
+
       assert msg =~ "path traversal"
     end
   end

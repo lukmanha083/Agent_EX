@@ -71,6 +71,37 @@ defmodule AgentEx.PluginRegistryTest do
     end
   end
 
+  defmodule StatefulPlugin do
+    @behaviour AgentEx.ToolPlugin
+
+    @impl true
+    def manifest do
+      %{
+        name: "stateful",
+        version: "1.0.0",
+        description: "A stateful test plugin",
+        config_schema: []
+      }
+    end
+
+    @impl true
+    def init(_config) do
+      tool =
+        Tool.new(
+          name: "ping",
+          description: "Ping",
+          parameters: %{},
+          function: fn _ -> {:ok, "pong"} end
+        )
+
+      child_spec = %{id: __MODULE__, start: {Agent, :start_link, [fn -> :ok end]}}
+      {:stateful, [tool], child_spec}
+    end
+
+    @impl true
+    def cleanup(_pid), do: :ok
+  end
+
   defmodule FailingPlugin do
     @behaviour AgentEx.ToolPlugin
 
@@ -148,7 +179,20 @@ defmodule AgentEx.PluginRegistryTest do
     end
 
     test "returns error for unknown plugin", %{reg: reg} do
-      assert {:error, :not_attached} = PluginRegistry.detach(reg, "nonexistent")
+      assert {:error, :not_found} = PluginRegistry.detach(reg, "nonexistent")
+    end
+
+    test "terminates supervised child for stateful plugin", %{reg: reg, wb: wb} do
+      :ok = PluginRegistry.attach(reg, StatefulPlugin)
+
+      {:ok, info} = PluginRegistry.get_plugin(reg, "stateful")
+      assert is_pid(info.child_pid)
+      assert Process.alive?(info.child_pid)
+      assert length(Workbench.list_tools(wb)) == 1
+
+      :ok = PluginRegistry.detach(reg, "stateful")
+      refute Process.alive?(info.child_pid)
+      assert Workbench.list_tools(wb) == []
     end
   end
 
@@ -179,7 +223,7 @@ defmodule AgentEx.PluginRegistryTest do
     end
 
     test "returns :not_found for unknown plugin", %{reg: reg} do
-      assert :not_found = PluginRegistry.get_plugin(reg, "nonexistent")
+      assert {:error, :not_found} = PluginRegistry.get_plugin(reg, "nonexistent")
     end
   end
 end
