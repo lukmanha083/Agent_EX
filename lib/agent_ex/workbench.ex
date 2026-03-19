@@ -83,6 +83,18 @@ defmodule AgentEx.Workbench do
     GenServer.call(wb, {:tools_if_changed, since_version})
   end
 
+  @doc "Add multiple tools at once. Skips tools that already exist."
+  @spec add_tools(GenServer.server(), [Tool.t()]) :: :ok
+  def add_tools(wb, tools) when is_list(tools) do
+    GenServer.call(wb, {:add_tools, tools})
+  end
+
+  @doc "Remove multiple tools by name. Skips tools that don't exist."
+  @spec remove_tools(GenServer.server(), [String.t()]) :: :ok
+  def remove_tools(wb, names) when is_list(names) do
+    GenServer.call(wb, {:remove_tools, names})
+  end
+
   @doc "Add a tool with overrides applied via ToolOverride."
   @spec add_override(GenServer.server(), Tool.t(), keyword()) :: :ok | {:error, :already_exists}
   def add_override(wb, %Tool{} = tool, overrides) do
@@ -183,6 +195,22 @@ defmodule AgentEx.Workbench do
       end
 
     {:reply, result, state}
+  end
+
+  def handle_call({:add_tools, tools}, _from, state) do
+    new_tools =
+      Enum.reduce(tools, state.tools, fn %Tool{name: name} = tool, acc ->
+        if Map.has_key?(acc, name), do: acc, else: Map.put(acc, name, tool)
+      end)
+
+    new_state = %{state | tools: new_tools, version: state.version + 1}
+    {:reply, :ok, new_state}
+  end
+
+  def handle_call({:remove_tools, names}, _from, state) do
+    new_tools = Map.drop(state.tools, names)
+    new_state = %{state | tools: new_tools, version: state.version + 1}
+    {:reply, :ok, new_state}
   end
 
   def handle_call(:version, _from, state) do

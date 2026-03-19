@@ -16,7 +16,7 @@ that decides which pipe pattern to compose.
 # ...informed by Tier 3 memory of past successful workflows
 ```
 
-**Status:** Planning complete, implementation not started.
+**Status:** Phases 1–3 implemented (2026-03-19). Phase 4+ pending.
 
 **Table of Contents**
 
