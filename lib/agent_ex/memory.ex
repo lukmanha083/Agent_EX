@@ -31,6 +31,7 @@ defmodule AgentEx.Memory do
     ContextBuilder,
     KnowledgeGraph,
     PersistentMemory,
+    Promotion,
     SemanticMemory,
     WorkingMemory
   }
@@ -103,6 +104,18 @@ defmodule AgentEx.Memory do
 
   def hybrid_search(agent_id, query, limit \\ 5) do
     KnowledgeGraph.Store.hybrid_search(agent_id, query, limit)
+  end
+
+  # --- Memory Promotion ---
+
+  @doc "Close a session and promote a summary to Tier 3."
+  def close_session_with_summary(agent_id, session_id, model_client, opts \\ []) do
+    Promotion.close_session_with_summary(agent_id, session_id, model_client, opts)
+  end
+
+  @doc "Build a save_memory tool for an agent."
+  def save_memory_tool(opts) do
+    Promotion.save_memory_tool(opts)
   end
 
   # --- Context Building ---
