@@ -98,7 +98,7 @@ Both patterns coexist. Both are LLM-driven.
 
 Tier 3 semantic memory enables smarter workflow decisions:
 
-```
+```text
 Session starts
     │
     ├── ContextBuilder.build(agent_id, session_id)
@@ -129,7 +129,7 @@ and in what order.
 
 ## Phase Dependency Graph
 
-```
+```text
 Phase 1 (ToolPlugin)  ──────┐
                              ├──▶ Phase 3 (Pipe) ──▶ Phase 6 (Pipeline Builder UI)
 Phase 2 (Memory Promotion) ─┘        │
@@ -263,7 +263,7 @@ start with no long-term context.
 Two promotion mechanisms that populate Tier 3, which then automatically informs
 future sessions via `ContextBuilder`:
 
-```
+```text
 Session N:
   Agent works → saves facts (save_memory tool) → Tier 3
   Session closes → LLM summarizes → summary stored in Tier 3
@@ -527,7 +527,7 @@ end
 
 Memory flow across a pipeline:
 
-```
+```text
 Session start → ContextBuilder queries Tier 3
                 → "Relevant Past Context" injected as system messages
 
@@ -609,7 +609,7 @@ end
 Each `Pipe.through/4` and `Pipe.fan_out/4` broadcasts stage events so the UI
 can show pipeline progress in real-time:
 
-```
+```text
 Pipeline: planner → [researcher, analyst] → writer
             │              │        │           │
 UI shows:   ●──────────────●────────●───────────●
@@ -789,7 +789,7 @@ Only Phase 4 adds hex packages. Phases 1–3 need **zero new dependencies**.
 
 ### Complete File Tree
 
-```
+```text
 lib/agent_ex/
 ├── tool_plugin.ex                          # Phase 1
 ├── plugin_registry.ex                      # Phase 1
@@ -859,7 +859,7 @@ test/
 
 ### Modified Files
 
-```
+```text
 mix.exs                            # Phase 4 (deps)
 .gitignore                         # Phase 4 (assets)
 lib/agent_ex/application.ex        # Phase 1 + Phase 4
@@ -877,7 +877,7 @@ config/runtime.exs                 # Phase 4
 
 ### Pipes All the Way Down
 
-```
+```text
 Level 1: Tool
   input ──▶ Tool.execute ──▶ output
 
@@ -907,7 +907,7 @@ Level 5: LLM-Composed (Orchestrator with delegate tools)
 
 ### Memory-Informed Workflow Selection
 
-```
+```text
 ┌────────────────────────────────────────────────────────┐
 │ Session Start                                          │
 │                                                        │
@@ -935,7 +935,7 @@ Level 5: LLM-Composed (Orchestrator with delegate tools)
 
 ### Orchestration Pattern Comparison
 
-```
+```text
 Pattern       │ Module         │ Boundaries    │ Who Decides  │ Use Case
 ──────────────┼────────────────┼───────────────┼──────────────┼────────────────────
 Single Agent  │ ToolCallerLoop │ N/A           │ N/A          │ One agent + tools
@@ -947,7 +947,7 @@ Swarm         │ Swarm          │ Shared convo  │ LLM          │ Dynamic 
 
 ### Router Map
 
-```
+```text
 /                    → ChatLive              (Phase 4)
 /tools               → ToolWorkshopLive      (Phase 5)
 /permissions         → PermissionBuilderLive (Phase 5)
