@@ -83,8 +83,9 @@ defmodule AgentEx.Workbench do
     GenServer.call(wb, {:tools_if_changed, since_version})
   end
 
-  @doc "Add multiple tools at once. Skips tools that already exist."
-  @spec add_tools(GenServer.server(), [Tool.t()]) :: :ok
+  @doc "Add multiple tools at once. Returns which tools were inserted vs skipped."
+  @spec add_tools(GenServer.server(), [Tool.t()]) ::
+          {:ok, %{inserted: [String.t()], skipped: [String.t()]}}
   def add_tools(wb, tools) when is_list(tools) do
     GenServer.call(wb, {:add_tools, tools})
   end
@@ -198,15 +199,21 @@ defmodule AgentEx.Workbench do
   end
 
   def handle_call({:add_tools, tools}, _from, state) do
-    new_tools =
-      Enum.reduce(tools, state.tools, fn %Tool{name: name} = tool, acc ->
-        if Map.has_key?(acc, name), do: acc, else: Map.put(acc, name, tool)
+    {new_tools, inserted, skipped} =
+      Enum.reduce(tools, {state.tools, [], []}, fn %Tool{name: name} = tool, {acc, ins, skip} ->
+        if Map.has_key?(acc, name) do
+          {acc, ins, [name | skip]}
+        else
+          {Map.put(acc, name, tool), [name | ins], skip}
+        end
       end)
 
+    result = {:ok, %{inserted: Enum.reverse(inserted), skipped: Enum.reverse(skipped)}}
+
     if new_tools == state.tools do
-      {:reply, :ok, state}
+      {:reply, result, state}
     else
-      {:reply, :ok, %{state | tools: new_tools, version: state.version + 1}}
+      {:reply, result, %{state | tools: new_tools, version: state.version + 1}}
     end
   end
 

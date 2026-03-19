@@ -77,37 +77,20 @@ defmodule AgentEx.PluginRegistry do
 
   @impl true
   def handle_call({:attach, module, config}, _from, state) do
-    manifest = module.manifest()
-    plugin_name = manifest.name
-
-    if Map.has_key?(state.plugins, plugin_name) do
-      {:reply, {:error, :already_attached}, state}
+    with {:ok, manifest} <- safe_manifest(module),
+         :ok <- check_not_attached(state, manifest.name),
+         :ok <- validate_plugin_config(module, config) do
+      do_attach(module, manifest, config, state)
     else
-      case ToolPlugin.validate_config(module, config) do
-        {:error, errors} ->
-          {:reply, {:error, {:config_invalid, errors}}, state}
-
-        :ok ->
-          do_attach(module, manifest, config, state)
-      end
+      {:error, reason} -> {:reply, {:error, reason}, state}
     end
   end
 
   def handle_call({:detach, plugin_name}, _from, state) do
     case Map.fetch(state.plugins, plugin_name) do
       {:ok, info} ->
-        # Remove tools from workbench
         Workbench.remove_tools(state.workbench, info.tool_names)
-
-        # Run cleanup before termination so callback can interact with live process
-        if function_exported?(info.module, :cleanup, 1) do
-          info.module.cleanup(info.child_pid)
-        end
-
-        # Stop child process if stateful
-        if info.child_pid do
-          DynamicSupervisor.terminate_child(AgentEx.PluginSupervisor, info.child_pid)
-        end
+        run_plugin_cleanup(info, plugin_name)
 
         Logger.info("PluginRegistry: detached plugin '#{plugin_name}'")
         {:reply, :ok, %{state | plugins: Map.delete(state.plugins, plugin_name)}}
@@ -130,45 +113,91 @@ defmodule AgentEx.PluginRegistry do
 
   # -- Private --
 
+  defp safe_manifest(module) do
+    case safe_callback(module, :manifest, []) do
+      {:ok, manifest} -> {:ok, manifest}
+      {:error, reason} -> {:error, {:callback_failed, module, :manifest, reason}}
+    end
+  end
+
+  defp validate_plugin_config(module, config) do
+    case ToolPlugin.validate_config(module, config) do
+      :ok -> :ok
+      {:error, errors} -> {:error, {:config_invalid, errors}}
+    end
+  end
+
+  defp check_not_attached(state, plugin_name) do
+    if Map.has_key?(state.plugins, plugin_name),
+      do: {:error, :already_attached},
+      else: :ok
+  end
+
+  defp run_plugin_cleanup(info, plugin_name) do
+    if function_exported?(info.module, :cleanup, 1) do
+      case safe_callback(info.module, :cleanup, [info.child_pid]) do
+        {:ok, _} -> :ok
+        {:error, reason} -> Logger.warning("PluginRegistry: cleanup failed for '#{plugin_name}': #{inspect(reason)}")
+      end
+    end
+
+    if info.child_pid do
+      DynamicSupervisor.terminate_child(AgentEx.PluginSupervisor, info.child_pid)
+    end
+  end
+
+  defp safe_callback(module, function, args) do
+    {:ok, apply(module, function, args)}
+  rescue
+    e -> {:error, {Exception.message(e), __STACKTRACE__}}
+  catch
+    kind, reason -> {:error, {kind, reason}}
+  end
+
   defp do_attach(module, manifest, config, state) do
+    case safe_callback(module, :init, [config]) do
+      {:ok, result} -> do_attach_result(result, module, manifest, state)
+      {:error, reason} -> {:reply, {:error, {:callback_failed, module, :init, reason}}, state}
+    end
+  end
+
+  defp do_attach_result(result, module, manifest, state) do
     plugin_name = manifest.name
 
-    case module.init(config) do
+    case result do
       {:ok, tools} ->
         prefixed = ToolPlugin.prefix_tools(plugin_name, tools)
-        Workbench.add_tools(state.workbench, prefixed)
-        tool_names = Enum.map(prefixed, & &1.name)
+        {:ok, %{inserted: inserted}} = Workbench.add_tools(state.workbench, prefixed)
 
         info = %PluginInfo{
           module: module,
           name: plugin_name,
           version: manifest.version,
           description: manifest.description,
-          tool_names: tool_names,
+          tool_names: inserted,
           child_pid: nil
         }
 
-        Logger.info("PluginRegistry: attached '#{plugin_name}' with #{length(tools)} tools")
+        Logger.info("PluginRegistry: attached '#{plugin_name}' with #{length(inserted)} tools")
         {:reply, :ok, %{state | plugins: Map.put(state.plugins, plugin_name, info)}}
 
       {:stateful, tools, child_spec} ->
         case DynamicSupervisor.start_child(AgentEx.PluginSupervisor, child_spec) do
           {:ok, child_pid} ->
             prefixed = ToolPlugin.prefix_tools(plugin_name, tools)
-            Workbench.add_tools(state.workbench, prefixed)
-            tool_names = Enum.map(prefixed, & &1.name)
+            {:ok, %{inserted: inserted}} = Workbench.add_tools(state.workbench, prefixed)
 
             info = %PluginInfo{
               module: module,
               name: plugin_name,
               version: manifest.version,
               description: manifest.description,
-              tool_names: tool_names,
+              tool_names: inserted,
               child_pid: child_pid
             }
 
             Logger.info(
-              "PluginRegistry: attached stateful '#{plugin_name}' with #{length(tools)} tools"
+              "PluginRegistry: attached stateful '#{plugin_name}' with #{length(inserted)} tools"
             )
 
             {:reply, :ok, %{state | plugins: Map.put(state.plugins, plugin_name, info)}}

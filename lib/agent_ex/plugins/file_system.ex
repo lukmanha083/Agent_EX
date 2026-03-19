@@ -122,10 +122,28 @@ defmodule AgentEx.Plugins.FileSystem do
     expanded = Path.expand(joined)
     root_prefix = String.trim_trailing(root, "/") <> "/"
 
-    if expanded == root or String.starts_with?(expanded, root_prefix) do
-      {:ok, expanded}
-    else
-      {:error, "path traversal attempt: #{relative}"}
+    cond do
+      not (expanded == root or String.starts_with?(expanded, root_prefix)) ->
+        {:error, "path traversal attempt: #{relative}"}
+
+      contains_symlink?(expanded, root) ->
+        {:error, "symlinks not allowed in sandbox: #{relative}"}
+
+      true ->
+        {:ok, expanded}
     end
+  end
+
+  defp contains_symlink?(path, root) do
+    relative = Path.relative_to(path, root)
+
+    Path.split(relative)
+    |> Enum.scan(root, fn part, acc -> Path.join(acc, part) end)
+    |> Enum.any?(fn component ->
+      case File.lstat(component) do
+        {:ok, %File.Stat{type: :symlink}} -> true
+        _ -> false
+      end
+    end)
   end
 end

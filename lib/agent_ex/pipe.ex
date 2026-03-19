@@ -86,6 +86,7 @@ defmodule AgentEx.Pipe do
 
     memory_opts =
       case opts[:memory] do
+        %{agent_id: aid, session_id: sid} -> %{agent_id: aid, session_id: sid}
         %{session_id: sid} -> %{agent_id: agent.name, session_id: sid}
         _ -> nil
       end

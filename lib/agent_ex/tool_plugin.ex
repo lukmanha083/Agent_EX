@@ -54,16 +54,22 @@ defmodule AgentEx.ToolPlugin do
     schema = plugin_module.manifest().config_schema
 
     errors =
-      schema
-      |> Enum.reject(fn param ->
-        {name, _type, _desc, opts} = normalize_param(param)
+      Enum.flat_map(schema, fn param ->
+        {name, type, _desc, opts} = normalize_param(param)
         key = Atom.to_string(name)
         optional = Keyword.get(opts, :optional, false)
-        optional or Map.has_key?(config, key)
-      end)
-      |> Enum.map(fn param ->
-        {name, _type, _desc, _opts} = normalize_param(param)
-        "missing required config: #{name}"
+        value = Map.get(config, key)
+
+        cond do
+          value == nil and not optional ->
+            ["missing required config: #{name}"]
+
+          value != nil and not valid_type?(value, type) ->
+            ["invalid type for config: #{name}, expected #{inspect(type)}"]
+
+          true ->
+            []
+        end
       end)
 
     case errors do
@@ -71,6 +77,13 @@ defmodule AgentEx.ToolPlugin do
       errs -> {:error, errs}
     end
   end
+
+  defp valid_type?(value, :string), do: is_binary(value)
+  defp valid_type?(value, :integer), do: is_integer(value)
+  defp valid_type?(value, :boolean), do: is_boolean(value)
+  defp valid_type?(value, :float), do: is_float(value)
+  defp valid_type?(value, {:array, inner}), do: is_list(value) and Enum.all?(value, &valid_type?(&1, inner))
+  defp valid_type?(_value, _type), do: true
 
   @doc "Prefix tool names with the plugin name."
   @spec prefix_tools(String.t(), [AgentEx.Tool.t()]) :: [AgentEx.Tool.t()]

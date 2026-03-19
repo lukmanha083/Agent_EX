@@ -61,19 +61,19 @@ defmodule AgentEx.Memory.Promotion do
       Memory.stop_session(agent_id, session_id)
       {:ok, ""}
     else
-      transcript =
-        messages
-        |> Enum.take(-max_messages)
-        |> Enum.map_join("\n", fn msg ->
-          "#{msg.role}: #{msg.content}"
-        end)
+      try do
+        transcript =
+          messages
+          |> Enum.take(-max_messages)
+          |> Enum.map_join("\n", fn msg ->
+            "#{msg.role}: #{msg.content}"
+          end)
 
-      summary_messages = [
-        Message.system(@summary_system_prompt),
-        Message.user("Summarize this conversation:\n\n#{transcript}")
-      ]
+        summary_messages = [
+          Message.system(@summary_system_prompt),
+          Message.user("Summarize this conversation:\n\n#{transcript}")
+        ]
 
-      result =
         with {:ok, %Message{content: summary}} when is_binary(summary) and summary != "" <-
                ModelClient.create(model_client, summary_messages),
              {:ok, _} <-
@@ -92,9 +92,9 @@ defmodule AgentEx.Memory.Promotion do
           {:error, reason} ->
             {:error, {:summary_failed, reason}}
         end
-
-      Memory.stop_session(agent_id, session_id)
-      result
+      after
+        Memory.stop_session(agent_id, session_id)
+      end
     end
   end
 
@@ -140,10 +140,10 @@ defmodule AgentEx.Memory.Promotion do
         case Memory.store_memory(agent_id, fact, category) do
           {:ok, _} ->
             Logger.debug(
-              "Promotion: agent #{agent_id} saved memory: #{String.slice(fact, 0, 50)}"
+              "Promotion: agent #{agent_id} saved memory [#{category}] (#{byte_size(fact)} bytes)"
             )
 
-            {:ok, "Saved to long-term memory: #{fact}"}
+            {:ok, "Saved to long-term memory (#{category})"}
 
           {:error, reason} ->
             {:error, "Failed to save memory: #{inspect(reason)}"}
