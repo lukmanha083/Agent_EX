@@ -73,26 +73,28 @@ defmodule AgentEx.Memory.Promotion do
         Message.user("Summarize this conversation:\n\n#{transcript}")
       ]
 
-      case ModelClient.create(model_client, summary_messages) do
-        {:ok, %Message{content: summary}} when is_binary(summary) and summary != "" ->
-          Memory.store_memory(
-            agent_id,
-            "Session summary (#{session_id}):\n#{summary}",
-            "session_summary",
-            session_id
-          )
-
-          Memory.stop_session(agent_id, session_id)
+      result =
+        with {:ok, %Message{content: summary}} when is_binary(summary) and summary != "" <-
+               ModelClient.create(model_client, summary_messages),
+             {:ok, _} <-
+               Memory.store_memory(
+                 agent_id,
+                 "Session summary (#{session_id}):\n#{summary}",
+                 "session_summary",
+                 session_id
+               ) do
           Logger.info("Promotion: summarized session #{session_id} for agent #{agent_id}")
           {:ok, summary}
+        else
+          {:ok, %Message{}} ->
+            {:error, :empty_summary}
 
-        {:ok, _} ->
-          Memory.stop_session(agent_id, session_id)
-          {:error, :empty_summary}
+          {:error, reason} ->
+            {:error, {:summary_failed, reason}}
+        end
 
-        {:error, reason} ->
-          {:error, {:summary_failed, reason}}
-      end
+      Memory.stop_session(agent_id, session_id)
+      result
     end
   end
 
@@ -137,7 +139,10 @@ defmodule AgentEx.Memory.Promotion do
 
         case Memory.store_memory(agent_id, fact, category) do
           {:ok, _} ->
-            Logger.debug("Promotion: agent #{agent_id} saved memory: #{String.slice(fact, 0, 50)}")
+            Logger.debug(
+              "Promotion: agent #{agent_id} saved memory: #{String.slice(fact, 0, 50)}"
+            )
+
             {:ok, "Saved to long-term memory: #{fact}"}
 
           {:error, reason} ->

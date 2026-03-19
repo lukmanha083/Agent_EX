@@ -36,7 +36,7 @@ Companion to the Python learning project at `../agent/`.
 | `StreamTool` / `run_json_stream` | `AgentEx.StreamTool` (emit/collect pattern) |
 | `mcp_server_tools` | `AgentEx.MCP.Client` + `ToolAdapter` (stdio/HTTP transport) |
 | Plugin system | `AgentEx.ToolPlugin` (behaviour) + `AgentEx.PluginRegistry` (lifecycle) |
-| Pipeline composition | `AgentEx.Pipe` (through/fan_out/merge/delegate_tool) |
+| Pipeline composition | `AgentEx.Pipe` (through/fan_out/merge/route/delegate_tool) |
 | Memory promotion | `AgentEx.Memory.Promotion` (session summaries + save_memory tool) |
 
 ## Documentation

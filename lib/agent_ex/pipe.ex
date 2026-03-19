@@ -100,9 +100,11 @@ defmodule AgentEx.Pipe do
       max_iterations: agent.max_iterations
     }
 
-    result = run_loop(ctx, messages, memory_opts)
-    GenServer.stop(tool_agent)
-    result
+    try do
+      run_loop(ctx, messages, memory_opts)
+    after
+      GenServer.stop(tool_agent)
+    end
   end
 
   @doc """

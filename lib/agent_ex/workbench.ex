@@ -203,14 +203,21 @@ defmodule AgentEx.Workbench do
         if Map.has_key?(acc, name), do: acc, else: Map.put(acc, name, tool)
       end)
 
-    new_state = %{state | tools: new_tools, version: state.version + 1}
-    {:reply, :ok, new_state}
+    if new_tools == state.tools do
+      {:reply, :ok, state}
+    else
+      {:reply, :ok, %{state | tools: new_tools, version: state.version + 1}}
+    end
   end
 
   def handle_call({:remove_tools, names}, _from, state) do
     new_tools = Map.drop(state.tools, names)
-    new_state = %{state | tools: new_tools, version: state.version + 1}
-    {:reply, :ok, new_state}
+
+    if new_tools == state.tools do
+      {:reply, :ok, state}
+    else
+      {:reply, :ok, %{state | tools: new_tools, version: state.version + 1}}
+    end
   end
 
   def handle_call(:version, _from, state) do

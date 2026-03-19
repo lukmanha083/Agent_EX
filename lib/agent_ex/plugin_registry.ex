@@ -99,14 +99,14 @@ defmodule AgentEx.PluginRegistry do
         # Remove tools from workbench
         Workbench.remove_tools(state.workbench, info.tool_names)
 
+        # Run cleanup before termination so callback can interact with live process
+        if function_exported?(info.module, :cleanup, 1) do
+          info.module.cleanup(info.child_pid)
+        end
+
         # Stop child process if stateful
         if info.child_pid do
           DynamicSupervisor.terminate_child(AgentEx.PluginSupervisor, info.child_pid)
-        end
-
-        # Run cleanup if defined
-        if function_exported?(info.module, :cleanup, 1) do
-          info.module.cleanup(info.child_pid)
         end
 
         Logger.info("PluginRegistry: detached plugin '#{plugin_name}'")

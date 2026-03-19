@@ -2,11 +2,12 @@ defmodule AgentEx.Plugins.ShellExec do
   @moduledoc """
   Built-in plugin for sandboxed shell command execution.
 
-  Supports an allowlist of permitted commands and a configurable timeout.
+  Supports an allowlist of permitted command binaries and a configurable timeout.
+  Commands are executed directly (not via `sh -c`) to prevent shell injection.
 
   ## Config
 
-  - `"allowed_commands"` — list of allowed command prefixes (required)
+  - `"allowed_commands"` — list of allowed command binaries (required)
   - `"timeout"` — execution timeout in ms (optional, default: 10000)
   - `"working_dir"` — working directory for commands (optional)
   """
@@ -22,7 +23,7 @@ defmodule AgentEx.Plugins.ShellExec do
       version: "1.0.0",
       description: "Sandboxed shell command execution with allowlist",
       config_schema: [
-        {:allowed_commands, {:array, :string}, "List of allowed command prefixes"},
+        {:allowed_commands, {:array, :string}, "List of allowed command binaries"},
         {:timeout, :integer, "Execution timeout in ms", optional: true},
         {:working_dir, :string, "Working directory for commands", optional: true}
       ]
@@ -39,48 +40,55 @@ defmodule AgentEx.Plugins.ShellExec do
     {:ok, tools}
   end
 
-  defp run_command_tool(allowed, _timeout, working_dir) do
+  defp run_command_tool(allowed, timeout, working_dir) do
     Tool.new(
       name: "run_command",
-      description:
-        "Execute a shell command. Allowed commands: #{Enum.join(allowed, ", ")}",
+      description: "Execute a command. Allowed binaries: #{Enum.join(allowed, ", ")}",
       parameters: %{
         "type" => "object",
         "properties" => %{
           "command" => %{
             "type" => "string",
-            "description" => "The shell command to execute"
+            "description" => "The command to execute (e.g. 'ls -la /tmp')"
           }
         },
         "required" => ["command"]
       },
       kind: :write,
       function: fn %{"command" => command} ->
-        if command_allowed?(command, allowed) do
-          opts = [stderr_to_stdout: true]
-          opts = if working_dir, do: [{:cd, working_dir} | opts], else: opts
+        case parse_command(command) do
+          {binary, args} ->
+            if binary in allowed do
+              opts = [stderr_to_stdout: true]
+              opts = if working_dir, do: [{:cd, working_dir} | opts], else: opts
 
-          try do
-            {output, exit_code} = System.cmd("sh", ["-c", command], opts)
+              task = Task.async(fn -> System.cmd(binary, args, opts) end)
 
-            if exit_code == 0 do
-              {:ok, output}
+              case Task.yield(task, timeout) || Task.shutdown(task, :brutal_kill) do
+                {:ok, {output, 0}} ->
+                  {:ok, output}
+
+                {:ok, {output, exit_code}} ->
+                  {:error, "Command exited with code #{exit_code}: #{output}"}
+
+                nil ->
+                  {:error, "Command timed out after #{timeout}ms"}
+              end
             else
-              {:error, "Command exited with code #{exit_code}: #{output}"}
+              {:error, "Command '#{binary}' not allowed. Permitted: #{Enum.join(allowed, ", ")}"}
             end
-          catch
-            :error, reason ->
-              {:error, "Command failed: #{inspect(reason)}"}
-          end
-        else
-          {:error, "Command not allowed. Permitted: #{Enum.join(allowed, ", ")}"}
+
+          :error ->
+            {:error, "Empty command"}
         end
       end
     )
   end
 
-  defp command_allowed?(command, allowed) do
-    cmd = String.trim(command)
-    Enum.any?(allowed, fn prefix -> String.starts_with?(cmd, prefix) end)
+  defp parse_command(command) do
+    case String.split(String.trim(command)) do
+      [binary | args] -> {binary, args}
+      [] -> :error
+    end
   end
 end

@@ -56,11 +56,11 @@ defmodule AgentEx.Plugins.FileSystem do
       },
       kind: :read,
       function: fn %{"path" => path} ->
-        full_path = safe_path(root, path)
-
-        case File.read(full_path) do
-          {:ok, content} -> {:ok, content}
-          {:error, reason} -> {:error, "Cannot read #{path}: #{reason}"}
+        with {:ok, full_path} <- safe_path(root, path) do
+          case File.read(full_path) do
+            {:ok, content} -> {:ok, content}
+            {:error, reason} -> {:error, "Cannot read #{path}: #{reason}"}
+          end
         end
       end
     )
@@ -82,11 +82,11 @@ defmodule AgentEx.Plugins.FileSystem do
       },
       kind: :read,
       function: fn args ->
-        dir_path = safe_path(root, Map.get(args, "path", "."))
-
-        case File.ls(dir_path) do
-          {:ok, entries} -> {:ok, Enum.join(entries, "\n")}
-          {:error, reason} -> {:error, "Cannot list directory: #{reason}"}
+        with {:ok, dir_path} <- safe_path(root, Map.get(args, "path", ".")) do
+          case File.ls(dir_path) do
+            {:ok, entries} -> {:ok, Enum.join(entries, "\n")}
+            {:error, reason} -> {:error, "Cannot list directory: #{reason}"}
+          end
         end
       end
     )
@@ -106,12 +106,11 @@ defmodule AgentEx.Plugins.FileSystem do
       },
       kind: :write,
       function: fn %{"path" => path, "content" => content} ->
-        full_path = safe_path(root, path)
-        dir = Path.dirname(full_path)
-        File.mkdir_p!(dir)
-
-        case File.write(full_path, content) do
-          :ok -> {:ok, "Written to #{path}"}
+        with {:ok, full_path} <- safe_path(root, path),
+             :ok <- File.mkdir_p(Path.dirname(full_path)),
+             :ok <- File.write(full_path, content) do
+          {:ok, "Written to #{path}"}
+        else
           {:error, reason} -> {:error, "Cannot write #{path}: #{reason}"}
         end
       end
@@ -121,11 +120,12 @@ defmodule AgentEx.Plugins.FileSystem do
   defp safe_path(root, relative) do
     joined = Path.join(root, relative)
     expanded = Path.expand(joined)
+    root_prefix = String.trim_trailing(root, "/") <> "/"
 
-    unless String.starts_with?(expanded, root) do
-      raise ArgumentError, "path traversal attempt: #{relative}"
+    if expanded == root or String.starts_with?(expanded, root_prefix) do
+      {:ok, expanded}
+    else
+      {:error, "path traversal attempt: #{relative}"}
     end
-
-    expanded
   end
 end
