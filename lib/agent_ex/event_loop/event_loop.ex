@@ -168,9 +168,11 @@ defmodule AgentEx.EventLoop do
   defp preview(_), do: nil
 
   defp final_content(generated) do
-    case List.last(generated) do
-      %{content: content} when is_binary(content) -> content
+    generated
+    |> Enum.reverse()
+    |> Enum.find_value(fn
+      %{content: content} when is_binary(content) and content != "" -> content
       _ -> nil
-    end
+    end)
   end
 end
