@@ -17,26 +17,38 @@ defmodule AgentExWeb.ChatLive do
   }
 
   @impl true
-  def mount(_params, _session, socket) do
+  def mount(_params, session, socket) do
     default_provider = Application.get_env(:agent_ex, :chat_provider, "openai")
 
     default_model =
       Application.get_env(:agent_ex, :chat_model, default_model_for(default_provider))
 
-    session_id = "session-#{System.unique_integer([:positive])}"
+    session_id = session["chat_session_id"]
 
-    case Memory.start_session(@agent_id, session_id) do
-      {:ok, _} -> :ok
-      {:error, reason} -> Logger.warning("Failed to start memory session: #{inspect(reason)}")
-    end
+    # Start or reuse memory session
+    {messages, run_id, events} =
+      case Memory.start_session(@agent_id, session_id) do
+        {:ok, _} ->
+          # New session
+          {[], nil, []}
+
+        {:error, {:already_started, _}} ->
+          # Reconnect — restore conversation from working memory
+          restored = restore_messages(session_id)
+          {restored, nil, []}
+
+        {:error, reason} ->
+          Logger.warning("Failed to start memory session: #{inspect(reason)}")
+          {[], nil, []}
+      end
 
     {:ok,
      assign(socket,
-       messages: [],
-       events: [],
+       messages: messages,
+       events: events,
        stages: [],
        thinking: false,
-       run_id: nil,
+       run_id: run_id,
        input: "",
        provider: default_provider,
        model: default_model,
@@ -276,5 +288,23 @@ defmodule AgentExWeb.ChatLive do
       if e.type == :tool_result and e.data[:call_id] == call_id,
         do: e.data[:content]
     end)
+  end
+
+  defp restore_messages(session_id) do
+    Memory.get_messages(@agent_id, session_id)
+    |> Enum.map(fn msg ->
+      role =
+        case msg.role do
+          r when is_atom(r) -> r
+          "user" -> :user
+          "assistant" -> :assistant
+          "system" -> :system
+          other -> String.to_existing_atom(other)
+        end
+
+      %{role: role, content: msg.content}
+    end)
+  rescue
+    _ -> []
   end
 end
