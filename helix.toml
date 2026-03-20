@@ -1,0 +1,10 @@
+[project]
+name = "agent_ex"
+queries = "./helix/"
+container_runtime = "docker"
+
+[local.dev]
+port = 7969
+build_mode = "dev"
+
+[cloud]

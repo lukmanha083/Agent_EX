@@ -1,7 +1,7 @@
 // === VECTORS (for semantic search) ===
 V::Memory {
     content: String,
-    type: String,
+    memory_type: String,
     agent_id: String,
     session_id: String,
     created_at: String
@@ -43,17 +43,45 @@ N::Episode {
 
 // === EDGES (relationships) ===
 E::Fact {
-    fact_type: String,
-    description: String,
-    confidence: String,
-    t_valid: String,
-    t_invalid: String
+    From: Entity,
+    To: Entity,
+    Properties: {
+        fact_type: String,
+        description: String,
+        confidence: String,
+        t_valid: String,
+        t_invalid: String
+    }
 }
 
 E::MentionedIn {
-    extraction_confidence: String
+    From: Entity,
+    To: Episode,
+    Properties: {
+        extraction_confidence: String
+    }
 }
 
-E::HasEmbedding {}
-E::HasEpisodeEmbedding {}
-E::HasFactEmbedding {}
+E::HasEmbedding {
+    From: Entity,
+    To: EntityEmbedding,
+    Properties: {
+        linked_at: String
+    }
+}
+
+E::HasEpisodeEmbedding {
+    From: Episode,
+    To: EpisodeEmbedding,
+    Properties: {
+        linked_at: String
+    }
+}
+
+E::HasFactEmbedding {
+    From: Entity,
+    To: FactEmbedding,
+    Properties: {
+        linked_at: String
+    }
+}

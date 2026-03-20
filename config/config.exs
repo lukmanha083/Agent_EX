@@ -1,7 +1,7 @@
 import Config
 
 config :agent_ex,
-  helix_db_url: "http://localhost:6969",
+  helix_db_url: "http://localhost:7969",
   embedding_model: "text-embedding-3-small",
   embedding_dimensions: 1536,
   extraction_model: "gpt-4o-mini",
