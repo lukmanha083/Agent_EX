@@ -80,11 +80,11 @@ defmodule AgentEx.ToolCallerLoop do
 
     tools_map = Map.new(tools, fn %Tool{name: name} = tool -> {name, tool} end)
 
-    # If memory is enabled, inject agent-scoped context as system messages
-    input_messages = maybe_inject_memory_context(input_messages, memory_opts)
-
-    # Store user messages in working memory
+    # Store user messages BEFORE injecting context (avoids re-storing history)
     maybe_store_user_messages(input_messages, memory_opts)
+
+    # Inject agent-scoped context (Tier 2/3/KG system msgs + Tier 1 conversation)
+    input_messages = maybe_inject_memory_context(input_messages, memory_opts)
 
     context = %{
       tool_agent: tool_agent,

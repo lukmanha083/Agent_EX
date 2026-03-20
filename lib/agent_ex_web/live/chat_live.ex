@@ -1,10 +1,12 @@
 defmodule AgentExWeb.ChatLive do
   use AgentExWeb, :live_view
 
-  alias AgentEx.EventLoop
+  alias AgentEx.{EventLoop, Memory}
   alias AgentEx.EventLoop.Event
 
   import AgentExWeb.ChatComponents
+
+  @agent_id "chat"
 
   @providers %{
     "openai" => :openai,
@@ -19,6 +21,9 @@ defmodule AgentExWeb.ChatLive do
     default_model =
       Application.get_env(:agent_ex, :chat_model, default_model_for(default_provider))
 
+    session_id = "session-#{System.unique_integer([:positive])}"
+    Memory.start_session(@agent_id, session_id)
+
     {:ok,
      assign(socket,
        messages: [],
@@ -29,8 +34,15 @@ defmodule AgentExWeb.ChatLive do
        input: "",
        provider: default_provider,
        model: default_model,
-       tools: []
+       tools: [],
+       session_id: session_id
      )}
+  end
+
+  @impl true
+  def terminate(_reason, socket) do
+    Memory.stop_session(@agent_id, socket.assigns.session_id)
+    :ok
   end
 
   @impl true
@@ -56,12 +68,16 @@ defmodule AgentExWeb.ChatLive do
       {:ok, tool_agent} ->
         client = build_model_client(socket.assigns.provider, socket.assigns.model)
 
-        # Build input from full conversation history
-        input_messages =
-          [AgentEx.Message.system("You are a helpful AI assistant.")] ++
-            messages_to_llm(messages)
+        # Only pass system prompt + latest user message;
+        # the memory system injects conversation history from Tier 1
+        # and context from Tier 2/3/KG
+        input_messages = [
+          AgentEx.Message.system("You are a helpful AI assistant."),
+          AgentEx.Message.user(message)
+        ]
 
-        EventLoop.run(run_id, tool_agent, client, input_messages, tools)
+        memory_opts = %{agent_id: @agent_id, session_id: socket.assigns.session_id}
+        EventLoop.run(run_id, tool_agent, client, input_messages, tools, memory: memory_opts)
 
         {:noreply,
          assign(socket,
@@ -94,6 +110,10 @@ defmodule AgentExWeb.ChatLive do
     if socket.assigns.run_id do
       Phoenix.PubSub.unsubscribe(AgentEx.PubSub, "run:#{socket.assigns.run_id}")
     end
+
+    # Reset working memory for a fresh conversation
+    Memory.stop_session(@agent_id, socket.assigns.session_id)
+    Memory.start_session(@agent_id, socket.assigns.session_id)
 
     {:noreply, assign(socket, messages: [], events: [], stages: [], thinking: false, run_id: nil)}
   end
@@ -227,15 +247,6 @@ defmodule AgentExWeb.ChatLive do
     Enum.find_value(events, fn e ->
       if e.type == :tool_result and e.data[:call_id] == call_id,
         do: e.data[:content]
-    end)
-  end
-
-  defp messages_to_llm(messages) do
-    Enum.map(messages, fn
-      %{role: :user, content: content} -> AgentEx.Message.user(content)
-      %{role: :assistant, content: content} -> AgentEx.Message.assistant(content)
-      %{role: :system, content: content} -> AgentEx.Message.system(content)
-      %{role: role, content: content} -> %AgentEx.Message{role: role, content: content}
     end)
   end
 end

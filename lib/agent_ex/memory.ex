@@ -139,8 +139,10 @@ defmodule AgentEx.Memory do
   end
 
   @doc """
-  Injects memory context system messages into a message list.
-  System messages from memory are inserted after existing system messages.
+  Injects memory context into a message list.
+
+  Inserts system-level context (Tier 2/3/KG) after existing system messages,
+  then conversation history (Tier 1) before the current user messages.
   """
   def inject_memory_context(messages, agent_id, session_id) do
     alias AgentEx.Message
@@ -148,12 +150,21 @@ defmodule AgentEx.Memory do
     semantic_query = last_user_content(messages)
     context_messages = build_context(agent_id, session_id, semantic_query: semantic_query)
 
-    memory_system_msgs =
-      context_messages
-      |> Enum.filter(&(&1.role == "system"))
-      |> Enum.map(&Message.system(&1.content))
+    {system_ctx, conversation_ctx} =
+      Enum.split_with(context_messages, &(&1.role == "system"))
+
+    memory_system_msgs = Enum.map(system_ctx, &Message.system(&1.content))
+
+    memory_conversation_msgs =
+      Enum.map(conversation_ctx, fn msg ->
+        case msg.role do
+          "user" -> Message.user(msg.content)
+          "assistant" -> Message.assistant(msg.content)
+          role -> %Message{role: String.to_existing_atom(role), content: msg.content}
+        end
+      end)
 
     {system_msgs, rest} = Enum.split_while(messages, &(&1.role == :system))
-    system_msgs ++ memory_system_msgs ++ rest
+    system_msgs ++ memory_system_msgs ++ memory_conversation_msgs ++ rest
   end
 end
