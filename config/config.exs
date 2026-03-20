@@ -1,6 +1,20 @@
 import Config
 
+config :agent_ex, :scopes,
+  user: [
+    default: true,
+    module: AgentEx.Accounts.Scope,
+    assign_key: :current_scope,
+    access_path: [:user, :id],
+    schema_key: :user_id,
+    schema_type: :id,
+    schema_table: :users,
+    test_data_fixture: AgentEx.AccountsFixtures,
+    test_setup_helper: :register_and_log_in_user
+  ]
+
 config :agent_ex,
+  ecto_repos: [AgentEx.Repo],
   helix_db_url: "http://localhost:7969",
   embedding_model: "text-embedding-3-small",
   embedding_dimensions: 1536,
@@ -40,6 +54,12 @@ config :tailwind,
     ),
     cd: Path.expand("../assets", __DIR__)
   ]
+
+# Mailer (local dev adapter — emails shown at /dev/mailbox)
+config :agent_ex, AgentEx.Mailer, adapter: Swoosh.Adapters.Local
+
+# Swoosh API client — disable HTTP client (we use local adapter in dev)
+config :swoosh, :api_client, false
 
 # Logger
 config :logger, :console,

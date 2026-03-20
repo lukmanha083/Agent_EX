@@ -23,6 +23,10 @@
   <!-- Main content -->
   <main class="flex-1 flex flex-col overflow-hidden">
     <.flash_group flash={@flash} />
-    {@inner_content}
+    <%= if assigns[:inner_block] do %>
+      <%= render_slot(@inner_block) %>
+    <% else %>
+      {@inner_content}
+    <% end %>
   </main>
 </div>

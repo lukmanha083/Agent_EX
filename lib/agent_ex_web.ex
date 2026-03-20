@@ -66,7 +66,9 @@ defmodule AgentExWeb do
     quote do
       import Phoenix.HTML
       import Phoenix.Component
+      import AgentExWeb.CoreComponents
 
+      alias AgentExWeb.Layouts
       alias Phoenix.LiveView.JS
 
       unquote(verified_routes())

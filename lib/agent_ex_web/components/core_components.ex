@@ -8,6 +8,29 @@ defmodule AgentExWeb.CoreComponents do
   alias Phoenix.LiveView.JS
 
   @doc """
+  Renders a header with title and optional subtitle.
+  """
+  slot(:inner_block, required: true)
+  slot(:subtitle)
+  slot(:actions)
+
+  def header(assigns) do
+    ~H"""
+    <header class="mb-6">
+      <h1 class="text-xl font-bold text-white">
+        <%= render_slot(@inner_block) %>
+      </h1>
+      <p :for={subtitle <- @subtitle} class="mt-1 text-sm text-gray-400">
+        <%= render_slot(subtitle) %>
+      </p>
+      <div :for={action <- @actions} class="mt-4">
+        <%= render_slot(action) %>
+      </div>
+    </header>
+    """
+  end
+
+  @doc """
   Renders flash notices.
   """
   attr(:id, :string, doc: "the optional id of flash container")
@@ -53,6 +76,7 @@ defmodule AgentExWeb.CoreComponents do
   """
   attr(:type, :string, default: nil)
   attr(:class, :string, default: nil)
+  attr(:variant, :string, default: nil)
   attr(:rest, :global, include: ~w(disabled form name value))
 
   slot(:inner_block, required: true)
@@ -62,9 +86,9 @@ defmodule AgentExWeb.CoreComponents do
     <button
       type={@type}
       class={[
-        "phx-submit-loading:opacity-75 rounded-lg bg-indigo-600 px-3 py-2",
-        "text-sm font-semibold text-white hover:bg-indigo-500 active:bg-indigo-700",
-        "transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
+        "phx-submit-loading:opacity-75 rounded-lg px-3 py-2",
+        "text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
+        button_variant_class(@variant),
         @class
       ]}
       {@rest}
@@ -74,31 +98,71 @@ defmodule AgentExWeb.CoreComponents do
     """
   end
 
+  defp button_variant_class("primary"), do: "bg-indigo-600 text-white hover:bg-indigo-500"
+  defp button_variant_class(_), do: "bg-indigo-600 text-white hover:bg-indigo-500"
+
   @doc """
-  Renders a simple text input.
+  Renders a form-aware input with label and error messages.
+
+  For simple non-form inputs, use a plain HTML `<input>` tag.
   """
   attr(:id, :any, default: nil)
   attr(:name, :any)
+  attr(:label, :string, default: nil)
   attr(:value, :any)
   attr(:type, :string, default: "text")
+  attr(:field, Phoenix.HTML.FormField, doc: "a form field struct")
+  attr(:errors, :list, default: [])
   attr(:class, :string, default: nil)
   attr(:rest, :global, include: ~w(autocomplete disabled form placeholder readonly required))
 
+  def input(%{field: %Phoenix.HTML.FormField{} = field} = assigns) do
+    errors = if Phoenix.Component.used_input?(field), do: field.errors, else: []
+
+    assigns
+    |> assign(field: nil, id: assigns.id || field.id)
+    |> assign(:errors, Enum.map(errors, &translate_error(&1)))
+    |> assign_new(:name, fn -> field.name end)
+    |> assign_new(:value, fn -> field.value end)
+    |> assign_new(:label, fn -> Phoenix.Naming.humanize(field.field) end)
+    |> input()
+  end
+
   def input(assigns) do
     ~H"""
-    <input
-      type={@type}
-      name={@name}
-      id={@id}
-      value={Phoenix.HTML.Form.normalize_value(@type, @value)}
-      class={[
-        "block w-full rounded-lg bg-gray-800 border border-gray-700 text-white",
-        "placeholder-gray-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500",
-        "text-sm px-3 py-2",
-        @class
-      ]}
-      {@rest}
-    />
+    <div>
+      <label :if={@label} for={@id} class="block text-sm font-medium text-gray-300 mb-1">
+        {@label}
+      </label>
+      <input
+        type={@type}
+        name={@name}
+        id={@id}
+        value={Phoenix.HTML.Form.normalize_value(@type, @value)}
+        class={[
+          "block w-full rounded-lg bg-gray-800 border border-gray-700 text-white",
+          "placeholder-gray-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500",
+          "text-sm px-3 py-2",
+          @errors != [] && "border-red-500",
+          @class
+        ]}
+        {@rest}
+      />
+      <p :for={msg <- @errors} class="mt-1 text-xs text-red-400">{msg}</p>
+    </div>
+    """
+  end
+
+  @doc """
+  Renders a hero icon by name. Requires heroicons to be available.
+  Falls back to an empty span if icon is not found.
+  """
+  attr(:name, :string, required: true)
+  attr(:class, :string, default: nil)
+
+  def icon(assigns) do
+    ~H"""
+    <span class={["hero-icon", @name, @class]} />
     """
   end
 
@@ -113,5 +177,11 @@ defmodule AgentExWeb.CoreComponents do
          "opacity-100 translate-y-0 sm:scale-100",
          "opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95"}
     )
+  end
+
+  defp translate_error({msg, opts}) do
+    Regex.replace(~r"%{(\w+)}", msg, fn _, key ->
+      opts |> Keyword.get(String.to_existing_atom(key), key) |> to_string()
+    end)
   end
 end

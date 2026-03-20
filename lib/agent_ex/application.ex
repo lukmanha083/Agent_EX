@@ -6,6 +6,9 @@ defmodule AgentEx.Application do
   @impl true
   def start(_type, _args) do
     children = [
+      # Database
+      AgentEx.Repo,
+
       # PubSub for event broadcasting (EventLoop → LiveView)
       {Phoenix.PubSub, name: AgentEx.PubSub},
 

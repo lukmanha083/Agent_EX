@@ -4,6 +4,16 @@ config :agent_ex,
   dets_dir: "priv/data/dev",
   chat_tools: :demo
 
+# Database
+config :agent_ex, AgentEx.Repo,
+  username: "agent_ex",
+  password: "agent_ex_dev",
+  hostname: "localhost",
+  database: "agent_ex_dev",
+  stacktrace: true,
+  show_sensitive_data_on_connection_error: true,
+  pool_size: 10
+
 # Dev server with live reload
 config :agent_ex, AgentExWeb.Endpoint,
   http: [ip: {127, 0, 0, 1}, port: 4000],

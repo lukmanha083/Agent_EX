@@ -14,7 +14,8 @@ defmodule AgentEx.Memory.SemanticMemory.Client do
       {:ok, %{status: 200, body: body}} ->
         {:ok, body}
 
-      {:ok, %{status: 500, body: %{"error" => "Vector error: no entry point found for hnsw index"}}} ->
+      {:ok,
+       %{status: 500, body: %{"error" => "Vector error: no entry point found for hnsw index"}}} ->
         # Empty vector index — no data stored yet, return empty results
         {:ok, []}
 
