@@ -10,7 +10,13 @@ Hooks.ScrollBottom = {
     this.scrollToBottom()
   },
   updated() {
-    this.scrollToBottom()
+    if (this.isNearBottom()) {
+      this.scrollToBottom()
+    }
+  },
+  isNearBottom() {
+    const threshold = 100
+    return this.el.scrollHeight - this.el.scrollTop - this.el.clientHeight < threshold
   },
   scrollToBottom() {
     this.el.scrollTop = this.el.scrollHeight

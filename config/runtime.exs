@@ -29,10 +29,6 @@ if config_env() == :prod do
 
   port = String.to_integer(System.get_env("PHX_PORT") || "4000")
 
-  signing_salt =
-    System.get_env("SESSION_SIGNING_SALT") ||
-      raise "SESSION_SIGNING_SALT env var is required in production (generate with: mix phx.gen.secret 32)"
-
   live_view_salt =
     System.get_env("LIVE_VIEW_SIGNING_SALT") ||
       raise "LIVE_VIEW_SIGNING_SALT env var is required in production (generate with: mix phx.gen.secret 32)"
@@ -41,6 +37,5 @@ if config_env() == :prod do
     url: [host: host, port: 443, scheme: "https"],
     http: [ip: {0, 0, 0, 0}, port: port],
     secret_key_base: secret_key_base,
-    live_view: [signing_salt: live_view_salt],
-    session_signing_salt: signing_salt
+    live_view: [signing_salt: live_view_salt]
 end

@@ -60,6 +60,13 @@ defmodule AgentEx.EventLoop.RunRegistry do
     end
   end
 
+  @doc "Mark a run's task as starting (placeholder before task is spawned)."
+  @spec mark_starting(String.t()) :: :ok
+  def mark_starting(run_id) do
+    :ets.insert(@table, {:"task:#{run_id}", :starting})
+    :ok
+  end
+
   @doc "Store a task reference for a run (used by cancel)."
   @spec set_task(String.t(), Task.t()) :: :ok
   def set_task(run_id, %Task{} = task) do
@@ -68,10 +75,11 @@ defmodule AgentEx.EventLoop.RunRegistry do
   end
 
   @doc "Get the task reference for a run."
-  @spec get_task(String.t()) :: {:ok, Task.t()} | :not_found
+  @spec get_task(String.t()) :: {:ok, Task.t()} | :starting | :not_found
   def get_task(run_id) do
     case :ets.lookup(@table, :"task:#{run_id}") do
-      [{_, task}] -> {:ok, task}
+      [{_, :starting}] -> :starting
+      [{_, %Task{} = task}] -> {:ok, task}
       [] -> :not_found
     end
   end
@@ -107,6 +115,7 @@ defmodule AgentEx.EventLoop.RunRegistry do
   @spec list_active() :: [run_info()]
   def list_active do
     :ets.tab2list(@table)
+    |> Enum.filter(fn {_id, info} -> is_map(info) and Map.has_key?(info, :status) end)
     |> Enum.map(fn {_id, info} -> info end)
     |> Enum.filter(&(&1.status == :running))
   end

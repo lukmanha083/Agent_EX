@@ -74,6 +74,9 @@ defmodule AgentEx.EventLoop do
       |> Keyword.put(:model_fn, model_fn)
       |> Keyword.put(:intervention, intervention)
 
+    # Store a placeholder so cancel/1 knows the run is starting
+    RunRegistry.mark_starting(run_id)
+
     task =
       Task.Supervisor.async_nolink(AgentEx.TaskSupervisor, fn ->
         try do
@@ -117,8 +120,11 @@ defmodule AgentEx.EventLoop do
   @spec cancel(String.t()) :: :ok
   def cancel(run_id) do
     case RunRegistry.get_task(run_id) do
-      {:ok, task} -> Task.Supervisor.terminate_child(AgentEx.TaskSupervisor, task.pid)
-      :not_found -> :ok
+      {:ok, %Task{} = task} ->
+        Task.Supervisor.terminate_child(AgentEx.TaskSupervisor, task.pid)
+
+      _ ->
+        :ok
     end
 
     broadcast(run_id, :pipeline_error, %{reason: "cancelled"})

@@ -28,7 +28,8 @@ defmodule AgentExWeb.ChatLive do
        run_id: nil,
        input: "",
        provider: default_provider,
-       model: default_model
+       model: default_model,
+       tools: []
      )}
   end
 
@@ -37,23 +38,30 @@ defmodule AgentExWeb.ChatLive do
     # Add user message to display
     messages = socket.assigns.messages ++ [%{role: :user, content: message}]
 
+    # Unsubscribe from previous run if any
+    if socket.assigns.run_id do
+      Phoenix.PubSub.unsubscribe(AgentEx.PubSub, "run:#{socket.assigns.run_id}")
+    end
+
     # Generate a run ID
     run_id = "run-#{System.unique_integer([:positive])}"
 
     # Subscribe to events
     EventLoop.subscribe(run_id)
 
+    tools = socket.assigns.tools
+
     # Start the agent run
-    case AgentEx.ToolAgent.start_link(tools: []) do
+    case AgentEx.ToolAgent.start_link(tools: tools) do
       {:ok, tool_agent} ->
         client = build_model_client(socket.assigns.provider, socket.assigns.model)
 
-        input_messages = [
-          AgentEx.Message.system("You are a helpful AI assistant."),
-          AgentEx.Message.user(message)
-        ]
+        # Build input from full conversation history
+        input_messages =
+          [AgentEx.Message.system("You are a helpful AI assistant.")] ++
+            messages_to_llm(messages)
 
-        EventLoop.run(run_id, tool_agent, client, input_messages, [])
+        EventLoop.run(run_id, tool_agent, client, input_messages, tools)
 
         {:noreply,
          assign(socket,
@@ -83,20 +91,44 @@ defmodule AgentExWeb.ChatLive do
   end
 
   def handle_event("clear", _params, socket) do
-    {:noreply, assign(socket, messages: [], events: [], stages: [])}
+    if socket.assigns.run_id do
+      Phoenix.PubSub.unsubscribe(AgentEx.PubSub, "run:#{socket.assigns.run_id}")
+    end
+
+    {:noreply, assign(socket, messages: [], events: [], stages: [], thinking: false, run_id: nil)}
   end
 
   @impl true
-  def handle_info(%Event{type: :think_start} = _event, socket) do
+  def handle_info(%Event{} = event, socket) do
+    if event.run_id == socket.assigns.run_id do
+      handle_run_event(event, socket)
+    else
+      # Ignore stale events from previous runs
+      {:noreply, socket}
+    end
+  end
+
+  # Handle Task completion
+  def handle_info({ref, _result}, socket) when is_reference(ref) do
+    {:noreply, socket}
+  end
+
+  def handle_info({:DOWN, _ref, :process, _pid, _reason}, socket) do
+    {:noreply, socket}
+  end
+
+  # -- Run event dispatch --
+
+  defp handle_run_event(%Event{type: :think_start}, socket) do
     {:noreply, assign(socket, thinking: true)}
   end
 
-  def handle_info(%Event{type: :think_complete} = event, socket) do
+  defp handle_run_event(%Event{type: :think_complete} = event, socket) do
     events = socket.assigns.events ++ [event]
     {:noreply, assign(socket, thinking: false, events: events)}
   end
 
-  def handle_info(%Event{type: :tool_call} = event, socket) do
+  defp handle_run_event(%Event{type: :tool_call} = event, socket) do
     events = socket.assigns.events ++ [event]
 
     stages =
@@ -106,7 +138,7 @@ defmodule AgentExWeb.ChatLive do
     {:noreply, assign(socket, events: events, stages: stages)}
   end
 
-  def handle_info(%Event{type: :tool_result} = event, socket) do
+  defp handle_run_event(%Event{type: :tool_result} = event, socket) do
     events = socket.assigns.events ++ [event]
     result_call_id = event.data[:call_id]
 
@@ -120,7 +152,7 @@ defmodule AgentExWeb.ChatLive do
     {:noreply, assign(socket, events: events, stages: stages)}
   end
 
-  def handle_info(%Event{type: :pipeline_complete} = event, socket) do
+  defp handle_run_event(%Event{type: :pipeline_complete} = event, socket) do
     content = event.data[:final_content] || "No response."
     messages = socket.assigns.messages ++ [%{role: :assistant, content: content}]
 
@@ -133,7 +165,7 @@ defmodule AgentExWeb.ChatLive do
      )}
   end
 
-  def handle_info(%Event{type: :pipeline_error} = event, socket) do
+  defp handle_run_event(%Event{type: :pipeline_error} = event, socket) do
     reason = event.data[:reason] || "Unknown error"
     messages = socket.assigns.messages ++ [%{role: :assistant, content: "Error: #{reason}"}]
 
@@ -146,18 +178,9 @@ defmodule AgentExWeb.ChatLive do
      )}
   end
 
-  def handle_info(%Event{} = event, socket) do
+  defp handle_run_event(%Event{} = event, socket) do
     events = socket.assigns.events ++ [event]
     {:noreply, assign(socket, events: events)}
-  end
-
-  # Handle Task completion
-  def handle_info({ref, _result}, socket) when is_reference(ref) do
-    {:noreply, socket}
-  end
-
-  def handle_info({:DOWN, _ref, :process, _pid, _reason}, socket) do
-    {:noreply, socket}
   end
 
   # -- Helpers --
@@ -204,6 +227,15 @@ defmodule AgentExWeb.ChatLive do
     Enum.find_value(events, fn e ->
       if e.type == :tool_result and e.data[:call_id] == call_id,
         do: e.data[:content]
+    end)
+  end
+
+  defp messages_to_llm(messages) do
+    Enum.map(messages, fn
+      %{role: :user, content: content} -> AgentEx.Message.user(content)
+      %{role: :assistant, content: content} -> AgentEx.Message.assistant(content)
+      %{role: :system, content: content} -> AgentEx.Message.system(content)
+      %{role: role, content: content} -> %AgentEx.Message{role: role, content: content}
     end)
   end
 end
