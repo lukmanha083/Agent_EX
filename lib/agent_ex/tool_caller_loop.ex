@@ -44,7 +44,10 @@ defmodule AgentEx.ToolCallerLoop do
           caller_source: String.t(),
           tool_timeout: pos_integer(),
           intervention: [AgentEx.Intervention.handler()],
-          memory: memory_opts() | nil
+          memory: memory_opts() | nil,
+          model_fn:
+            ([Message.t()], [Tool.t()] -> {:ok, Message.t()} | {:error, term()})
+            | nil
         ]
 
   @doc """
@@ -61,6 +64,9 @@ defmodule AgentEx.ToolCallerLoop do
   - `:memory` — `%{agent_id: "...", session_id: "..."}` to enable per-agent memory.
     When set, injects memory context before the first LLM call and stores
     each user/assistant turn in working memory.
+  - `:model_fn` — override for `ModelClient.create/3`. Signature:
+    `(messages, tools) -> {:ok, Message.t()} | {:error, term()}`.
+    Useful for testing or wrapping with event broadcasting.
   """
   @spec run(GenServer.server(), ModelClient.t(), [Message.t()], [Tool.t()], opts()) ::
           {:ok, [Message.t()]} | {:error, term()}
@@ -70,18 +76,20 @@ defmodule AgentEx.ToolCallerLoop do
     tool_timeout = Keyword.get(opts, :tool_timeout, 30_000)
     intervention = Keyword.get(opts, :intervention, [])
     memory_opts = Keyword.get(opts, :memory)
+    model_fn = Keyword.get(opts, :model_fn)
 
     tools_map = Map.new(tools, fn %Tool{name: name} = tool -> {name, tool} end)
 
-    # If memory is enabled, inject agent-scoped context as system messages
-    input_messages = maybe_inject_memory_context(input_messages, memory_opts)
-
-    # Store user messages in working memory
+    # Store user messages BEFORE injecting context (avoids re-storing history)
     maybe_store_user_messages(input_messages, memory_opts)
+
+    # Inject agent-scoped context (Tier 2/3/KG system msgs + Tier 1 conversation)
+    input_messages = maybe_inject_memory_context(input_messages, memory_opts)
 
     context = %{
       tool_agent: tool_agent,
       model_client: model_client,
+      model_fn: model_fn,
       input_messages: input_messages,
       tools: tools,
       tools_map: tools_map,
@@ -94,7 +102,7 @@ defmodule AgentEx.ToolCallerLoop do
 
     Logger.debug("ToolCallerLoop: starting THINK phase (initial)")
 
-    case ModelClient.create(model_client, input_messages, tools: tools) do
+    case think(context, input_messages) do
       {:ok, response} ->
         loop(context, [response], 0)
 
@@ -141,7 +149,7 @@ defmodule AgentEx.ToolCallerLoop do
           "ToolCallerLoop: THINK phase — re-querying LLM with #{length(all_messages)} messages"
         )
 
-        case ModelClient.create(context.model_client, all_messages, tools: context.tools) do
+        case think(context, all_messages) do
           {:ok, response} ->
             new_generated = generated ++ [result_message, response]
             loop(context, new_generated, iteration + 1)
@@ -150,6 +158,16 @@ defmodule AgentEx.ToolCallerLoop do
             {:error, reason}
         end
     end
+  end
+
+  # -- Model dispatch (supports model_fn override) --
+
+  defp think(%{model_fn: fun, tools: tools}, messages) when is_function(fun, 2) do
+    fun.(messages, tools)
+  end
+
+  defp think(%{model_client: client, tools: tools}, messages) do
+    ModelClient.create(client, messages, tools: tools)
   end
 
   # -- Memory integration helpers --

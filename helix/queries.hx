@@ -3,14 +3,13 @@ QUERY SearchMemory(vector: [F64], limit: I64) =>
     results <- SearchV<Memory>(vector, limit)
     RETURN results
 
-QUERY AddMemory(vector: [F64], content: String, type: String, agent_id: String, session_id: String) =>
-    mem <- AddV<Memory>(vector, { content: content, type: type, agent_id: agent_id, session_id: session_id })
+QUERY AddMemory(vector: [F64], content: String, memory_type: String, agent_id: String, session_id: String) =>
+    mem <- AddV<Memory>(vector, { content: content, memory_type: memory_type, agent_id: agent_id, session_id: session_id })
     RETURN mem
 
 QUERY DeleteMemory(id: ID) =>
-    mem <- V<Memory>(id)
-    DELETE mem
-    RETURN mem
+    DROP V<Memory>(id)
+    RETURN NONE
 
 // --- Knowledge Graph: Create ---
 QUERY CreateEntity(name: String, entity_type: String, description: String, summary: String, now: String) =>
@@ -39,19 +38,19 @@ QUERY LinkEntityToEpisode(entity_id: ID, episode_id: ID, confidence: String) =>
     RETURN link
 
 // --- Knowledge Graph: Embeddings ---
-QUERY StoreEntityEmbedding(entity_id: ID, entity_name: String, entity_description: String, vector: [F64]) =>
+QUERY StoreEntityEmbedding(entity_id: ID, entity_name: String, entity_description: String, vector: [F64], now: String) =>
     emb <- AddV<EntityEmbedding>(vector, { entity_name: entity_name, entity_description: entity_description })
-    link <- AddE<HasEmbedding>({})::From(entity_id)::To(emb)
+    link <- AddE<HasEmbedding>({ linked_at: now })::From(entity_id)::To(emb)
     RETURN emb
 
-QUERY StoreEpisodeEmbedding(episode_id: ID, content_summary: String, agent_id: String, vector: [F64]) =>
+QUERY StoreEpisodeEmbedding(episode_id: ID, content_summary: String, agent_id: String, vector: [F64], now: String) =>
     emb <- AddV<EpisodeEmbedding>(vector, { content_summary: content_summary, agent_id: agent_id })
-    link <- AddE<HasEpisodeEmbedding>({})::From(episode_id)::To(emb)
+    link <- AddE<HasEpisodeEmbedding>({ linked_at: now })::From(episode_id)::To(emb)
     RETURN emb
 
-QUERY StoreFactEmbedding(entity_id: ID, fact_description: String, source_entity: String, target_entity: String, vector: [F64]) =>
+QUERY StoreFactEmbedding(entity_id: ID, fact_description: String, source_entity: String, target_entity: String, vector: [F64], now: String) =>
     emb <- AddV<FactEmbedding>(vector, { fact_description: fact_description, source_entity: source_entity, target_entity: target_entity })
-    link <- AddE<HasFactEmbedding>({})::From(entity_id)::To(emb)
+    link <- AddE<HasFactEmbedding>({ linked_at: now })::From(entity_id)::To(emb)
     RETURN emb
 
 // --- Knowledge Graph: Retrieval ---

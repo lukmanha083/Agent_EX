@@ -137,7 +137,8 @@ defmodule AgentEx.Memory.KnowledgeGraph.Store do
              episode_id: episode_id,
              content_summary: text,
              agent_id: agent_id,
-             vector: vector
+             vector: vector,
+             now: DateTime.utc_now() |> DateTime.to_iso8601()
            }) do
       :ok
     end
@@ -206,7 +207,8 @@ defmodule AgentEx.Memory.KnowledgeGraph.Store do
              entity_id: entity_id,
              entity_name: entity["name"],
              entity_description: entity["description"],
-             vector: vector
+             vector: vector,
+             now: now
            }) do
       {:ok, entity_id}
     end
@@ -256,7 +258,8 @@ defmodule AgentEx.Memory.KnowledgeGraph.Store do
           fact_description: rel["description"],
           source_entity: rel["source"],
           target_entity: rel["target"],
-          vector: vector
+          vector: vector,
+          now: DateTime.utc_now() |> DateTime.to_iso8601()
         })
 
       _ ->

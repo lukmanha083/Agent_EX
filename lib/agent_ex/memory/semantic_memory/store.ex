@@ -77,7 +77,7 @@ defmodule AgentEx.Memory.SemanticMemory.Store do
         Client.query("AddMemory", %{
           vector: vector,
           content: text,
-          type: type,
+          memory_type: type,
           agent_id: agent_id,
           session_id: session_id
         })
