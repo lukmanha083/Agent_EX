@@ -1,11 +1,10 @@
 <div class="flex flex-col h-full">
   <!-- Header with model selector -->
   <header class="flex items-center gap-3 px-4 py-3 border-b border-gray-800 bg-gray-900/50">
-    <div class="flex items-center gap-2">
+    <form phx-change="select_provider" class="flex items-center gap-2">
       <label for="provider_select" class="text-xs text-gray-500">Provider</label>
       <select
         id="provider_select"
-        phx-change="select_provider"
         name="provider"
         class="bg-gray-800 border border-gray-700 text-gray-300 text-xs rounded-md px-2 py-1.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
       >
@@ -17,13 +16,12 @@
           <%= label %>
         </option>
       </select>
-    </div>
+    </form>
 
-    <div class="flex items-center gap-2">
+    <form phx-change="select_model" class="flex items-center gap-2">
       <label for={"model_select_#{@provider}"} class="text-xs text-gray-500">Model</label>
       <select
         id={"model_select_#{@provider}"}
-        phx-change="select_model"
         name="model"
         class="bg-gray-800 border border-gray-700 text-gray-300 text-xs rounded-md px-2 py-1.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
       >
@@ -35,7 +33,7 @@
           <%= model %>
         </option>
       </select>
-    </div>
+    </form>
 
     <div class="ml-auto">
       <button
