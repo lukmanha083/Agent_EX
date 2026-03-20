@@ -20,9 +20,9 @@
     </div>
 
     <div class="flex items-center gap-2">
-      <label for="model_select" class="text-xs text-gray-500">Model</label>
+      <label for={"model_select_#{@provider}"} class="text-xs text-gray-500">Model</label>
       <select
-        id="model_select"
+        id={"model_select_#{@provider}"}
         phx-change="select_model"
         name="model"
         class="bg-gray-800 border border-gray-700 text-gray-300 text-xs rounded-md px-2 py-1.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
