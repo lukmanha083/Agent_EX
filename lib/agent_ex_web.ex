@@ -65,7 +65,7 @@ defmodule AgentExWeb do
   defp html_helpers do
     quote do
       import Phoenix.HTML
-      import Phoenix.LiveView.Helpers
+      import Phoenix.Component
 
       alias Phoenix.LiveView.JS
 

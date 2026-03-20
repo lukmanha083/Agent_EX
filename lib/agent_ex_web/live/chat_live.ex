@@ -44,25 +44,31 @@ defmodule AgentExWeb.ChatLive do
     EventLoop.subscribe(run_id)
 
     # Start the agent run
-    {:ok, tool_agent} = AgentEx.ToolAgent.start_link(tools: [])
-    client = build_model_client(socket.assigns.provider, socket.assigns.model)
+    case AgentEx.ToolAgent.start_link(tools: []) do
+      {:ok, tool_agent} ->
+        client = build_model_client(socket.assigns.provider, socket.assigns.model)
 
-    input_messages = [
-      AgentEx.Message.system("You are a helpful AI assistant."),
-      AgentEx.Message.user(message)
-    ]
+        input_messages = [
+          AgentEx.Message.system("You are a helpful AI assistant."),
+          AgentEx.Message.user(message)
+        ]
 
-    EventLoop.run(run_id, tool_agent, client, input_messages, [])
+        EventLoop.run(run_id, tool_agent, client, input_messages, [])
 
-    {:noreply,
-     assign(socket,
-       messages: messages,
-       events: [],
-       stages: [],
-       thinking: true,
-       run_id: run_id,
-       input: ""
-     )}
+        {:noreply,
+         assign(socket,
+           messages: messages,
+           events: [],
+           stages: [],
+           thinking: true,
+           run_id: run_id,
+           input: ""
+         )}
+
+      {:error, reason} ->
+        error_msg = %{role: :assistant, content: "Failed to start agent: #{inspect(reason)}"}
+        {:noreply, assign(socket, messages: messages ++ [error_msg], input: "")}
+    end
   end
 
   def handle_event("send", _params, socket), do: {:noreply, socket}
@@ -95,17 +101,20 @@ defmodule AgentExWeb.ChatLive do
 
     stages =
       socket.assigns.stages ++
-        [%{name: event.data.tool_name, status: :running}]
+        [%{name: event.data.tool_name, call_id: event.data.call_id, status: :running}]
 
     {:noreply, assign(socket, events: events, stages: stages)}
   end
 
   def handle_info(%Event{type: :tool_result} = event, socket) do
     events = socket.assigns.events ++ [event]
+    result_call_id = event.data[:call_id]
 
     stages =
       Enum.map(socket.assigns.stages, fn stage ->
-        if stage.status == :running, do: %{stage | status: :complete}, else: stage
+        if stage.status == :running and stage.call_id == result_call_id,
+          do: %{stage | status: :complete},
+          else: stage
       end)
 
     {:noreply, assign(socket, events: events, stages: stages)}
