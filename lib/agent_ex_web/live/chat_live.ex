@@ -204,6 +204,7 @@ defmodule AgentExWeb.ChatLive do
     {:noreply,
      assign(socket,
        messages: messages,
+       events: [],
        thinking: false,
        stages: [],
        run_id: nil
@@ -217,6 +218,7 @@ defmodule AgentExWeb.ChatLive do
     {:noreply,
      assign(socket,
        messages: messages,
+       events: [],
        thinking: false,
        stages: [],
        run_id: nil
