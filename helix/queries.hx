@@ -7,6 +7,10 @@ QUERY AddMemory(vector: [F64], content: String, memory_type: String, agent_id: S
     mem <- AddV<Memory>(vector, { content: content, memory_type: memory_type, agent_id: agent_id, session_id: session_id })
     RETURN mem
 
+QUERY DeleteMemory(id: ID) =>
+    DROP V<Memory>(id)
+    RETURN NONE
+
 // --- Knowledge Graph: Create ---
 QUERY CreateEntity(name: String, entity_type: String, description: String, summary: String, now: String) =>
     entity <- AddN<Entity>({

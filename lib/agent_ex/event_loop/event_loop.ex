@@ -45,11 +45,19 @@ defmodule AgentEx.EventLoop do
 
     broadcast(run_id, :stage_start, %{stage: "main"})
 
-    # Model function wrapper that broadcasts think events
+    # Wrap model function with think event broadcasting
+    # Preserves any caller-supplied :model_fn (e.g. test stubs)
+    caller_model_fn = Keyword.get(opts, :model_fn)
+
     model_fn = fn msgs, tls ->
       broadcast(run_id, :think_start, %{message_count: length(msgs)})
 
-      result = ModelClient.create(model_client, msgs, tools: tls)
+      result =
+        if caller_model_fn do
+          caller_model_fn.(msgs, tls)
+        else
+          ModelClient.create(model_client, msgs, tools: tls)
+        end
 
       case result do
         {:ok, response} ->
@@ -112,9 +120,15 @@ defmodule AgentEx.EventLoop do
   @doc "Cancel a running task."
   @spec cancel(String.t()) :: :ok
   def cancel(run_id) do
-    terminate_task(run_id, _retries = 3)
-    broadcast(run_id, :pipeline_error, %{reason: "cancelled"})
-    RunRegistry.cancel_run(run_id)
+    case terminate_task(run_id, _retries = 3) do
+      :terminated ->
+        broadcast(run_id, :pipeline_error, %{reason: "cancelled"})
+        RunRegistry.cancel_run(run_id)
+
+      :not_found ->
+        Logger.warning("EventLoop: cancel called for unknown run #{run_id}")
+    end
+
     :ok
   end
 
@@ -122,13 +136,14 @@ defmodule AgentEx.EventLoop do
     case RunRegistry.get_task(run_id) do
       {:ok, %Task{} = task} ->
         Task.Supervisor.terminate_child(AgentEx.TaskSupervisor, task.pid)
+        :terminated
 
       :starting when retries > 0 ->
         Process.sleep(5)
         terminate_task(run_id, retries - 1)
 
       _ ->
-        :ok
+        :not_found
     end
   end
 

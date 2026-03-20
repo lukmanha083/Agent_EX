@@ -68,21 +68,21 @@ defmodule AgentEx.EventLoop.RunRegistry do
   @doc "Mark a run's task as starting (placeholder before task is spawned)."
   @spec mark_starting(String.t()) :: :ok
   def mark_starting(run_id) do
-    :ets.insert(@table, {:"task:#{run_id}", :starting})
+    :ets.insert(@table, {{:task, run_id}, :starting})
     :ok
   end
 
   @doc "Store a task reference for a run (used by cancel)."
   @spec set_task(String.t(), Task.t()) :: :ok
   def set_task(run_id, %Task{} = task) do
-    :ets.insert(@table, {:"task:#{run_id}", task})
+    :ets.insert(@table, {{:task, run_id}, task})
     :ok
   end
 
   @doc "Get the task reference for a run."
   @spec get_task(String.t()) :: {:ok, Task.t()} | :starting | :not_found
   def get_task(run_id) do
-    case :ets.lookup(@table, :"task:#{run_id}") do
+    case :ets.lookup(@table, {:task, run_id}) do
       [{_, :starting}] -> :starting
       [{_, %Task{} = task}] -> {:ok, task}
       [] -> :not_found

@@ -6,6 +6,8 @@ defmodule AgentExWeb.ChatLive do
 
   import AgentExWeb.ChatComponents
 
+  require Logger
+
   @agent_id "chat"
 
   @providers %{
@@ -22,7 +24,11 @@ defmodule AgentExWeb.ChatLive do
       Application.get_env(:agent_ex, :chat_model, default_model_for(default_provider))
 
     session_id = "session-#{System.unique_integer([:positive])}"
-    Memory.start_session(@agent_id, session_id)
+
+    case Memory.start_session(@agent_id, session_id) do
+      {:ok, _} -> :ok
+      {:error, reason} -> Logger.warning("Failed to start memory session: #{inspect(reason)}")
+    end
 
     {:ok,
      assign(socket,
