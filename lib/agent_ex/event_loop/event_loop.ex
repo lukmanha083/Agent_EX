@@ -135,8 +135,10 @@ defmodule AgentEx.EventLoop do
   defp terminate_task(run_id, retries) do
     case RunRegistry.get_task(run_id) do
       {:ok, %Task{} = task} ->
-        Task.Supervisor.terminate_child(AgentEx.TaskSupervisor, task.pid)
-        :terminated
+        case Task.Supervisor.terminate_child(AgentEx.TaskSupervisor, task.pid) do
+          :ok -> :terminated
+          {:error, :not_found} -> :not_found
+        end
 
       :starting when retries > 0 ->
         Process.sleep(5)

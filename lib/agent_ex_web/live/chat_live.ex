@@ -56,8 +56,9 @@ defmodule AgentExWeb.ChatLive do
     # Add user message to display
     messages = socket.assigns.messages ++ [%{role: :user, content: message}]
 
-    # Unsubscribe from previous run if any
+    # Cancel and unsubscribe from previous run if any
     if socket.assigns.run_id do
+      EventLoop.cancel(socket.assigns.run_id)
       Phoenix.PubSub.unsubscribe(AgentEx.PubSub, "run:#{socket.assigns.run_id}")
     end
 
@@ -115,6 +116,7 @@ defmodule AgentExWeb.ChatLive do
 
   def handle_event("clear", _params, socket) do
     if socket.assigns.run_id do
+      EventLoop.cancel(socket.assigns.run_id)
       Phoenix.PubSub.unsubscribe(AgentEx.PubSub, "run:#{socket.assigns.run_id}")
     end
 
@@ -145,7 +147,8 @@ defmodule AgentExWeb.ChatLive do
   end
 
   def handle_info({:DOWN, _ref, :process, _pid, reason}, socket) do
-    if socket.assigns.thinking do
+    if socket.assigns.thinking and socket.assigns.run_id do
+      EventLoop.RunRegistry.error_run(socket.assigns.run_id)
       error_text = "Agent crashed: #{inspect(reason)}"
       messages = socket.assigns.messages ++ [%{role: :assistant, content: error_text}]
       {:noreply, assign(socket, messages: messages, thinking: false, stages: [], run_id: nil)}
