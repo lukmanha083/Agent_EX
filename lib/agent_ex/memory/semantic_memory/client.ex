@@ -14,6 +14,10 @@ defmodule AgentEx.Memory.SemanticMemory.Client do
       {:ok, %{status: 200, body: body}} ->
         {:ok, body}
 
+      {:ok, %{status: 500, body: %{"error" => "Vector error: no entry point found for hnsw index"}}} ->
+        # Empty vector index — no data stored yet, return empty results
+        {:ok, []}
+
       {:ok, %{status: status, body: body}} ->
         Logger.error("HelixDB error: query=#{query_name} status=#{status} body=#{inspect(body)}")
         {:error, {:helix_error, status, body}}

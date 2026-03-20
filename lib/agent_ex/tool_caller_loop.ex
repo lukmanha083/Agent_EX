@@ -186,6 +186,8 @@ defmodule AgentEx.ToolCallerLoop do
     |> Enum.each(fn msg ->
       Memory.add_message(agent_id, session_id, "user", msg.content)
     end)
+  catch
+    :exit, _ -> :ok
   end
 
   defp maybe_store_assistant_response(_message, nil), do: :ok
@@ -196,6 +198,8 @@ defmodule AgentEx.ToolCallerLoop do
        })
        when is_binary(content) and content != "" do
     Memory.add_message(agent_id, session_id, "assistant", content)
+  catch
+    :exit, _ -> :ok
   end
 
   defp maybe_store_assistant_response(_, _), do: :ok
