@@ -121,24 +121,15 @@ defmodule AgentExWeb.ChatLive do
 
   def handle_event("select_provider", %{"provider" => provider}, socket) do
     model = default_model_for(provider)
-    {:noreply, assign(socket, provider: provider, model: model)}
+    {:noreply, reset_conversation(socket) |> assign(provider: provider, model: model)}
   end
 
   def handle_event("select_model", %{"model" => model}, socket) do
-    {:noreply, assign(socket, model: model)}
+    {:noreply, reset_conversation(socket) |> assign(model: model)}
   end
 
   def handle_event("clear", _params, socket) do
-    if socket.assigns.run_id do
-      EventLoop.cancel(socket.assigns.run_id)
-      Phoenix.PubSub.unsubscribe(AgentEx.PubSub, "run:#{socket.assigns.run_id}")
-    end
-
-    # Reset working memory for a fresh conversation
-    Memory.stop_session(@agent_id, socket.assigns.session_id)
-    Memory.start_session(@agent_id, socket.assigns.session_id)
-
-    {:noreply, assign(socket, messages: [], events: [], stages: [], thinking: false, run_id: nil)}
+    {:noreply, reset_conversation(socket)}
   end
 
   @impl true
@@ -261,6 +252,18 @@ defmodule AgentExWeb.ChatLive do
 
   def provider_options,
     do: [{"OpenAI", "openai"}, {"Anthropic", "anthropic"}, {"Moonshot", "moonshot"}]
+
+  defp reset_conversation(socket) do
+    if socket.assigns.run_id do
+      EventLoop.cancel(socket.assigns.run_id)
+      Phoenix.PubSub.unsubscribe(AgentEx.PubSub, "run:#{socket.assigns.run_id}")
+    end
+
+    Memory.stop_session(@agent_id, socket.assigns.session_id)
+    Memory.start_session(@agent_id, socket.assigns.session_id)
+
+    assign(socket, messages: [], events: [], stages: [], thinking: false, run_id: nil)
+  end
 
   defp default_model_for("openai"), do: "gpt-4o-mini"
   defp default_model_for("anthropic"), do: "claude-haiku-4-5-20251001"
