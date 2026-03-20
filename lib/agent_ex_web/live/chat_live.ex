@@ -52,7 +52,7 @@ defmodule AgentExWeb.ChatLive do
        input: "",
        provider: default_provider,
        model: default_model,
-       tools: Application.get_env(:agent_ex, :chat_tools, []),
+       tools: load_chat_tools(),
        session_id: session_id
      )}
   end
@@ -311,5 +311,47 @@ defmodule AgentExWeb.ChatLive do
     end)
   rescue
     _ -> []
+  end
+
+  # Phase 5 cleanup: replace with agent-configured tools
+  defp load_chat_tools do
+    case Application.get_env(:agent_ex, :chat_tools, []) do
+      :demo -> demo_tools()
+      tools when is_list(tools) -> tools
+    end
+  end
+
+  defp demo_tools do
+    [
+      AgentEx.Tool.new(
+        name: "get_system_info",
+        description: "Get OS name, kernel version, and architecture",
+        parameters: %{"type" => "object", "properties" => %{}, "required" => []},
+        kind: :read,
+        function: fn _args ->
+          {os_output, 0} = System.cmd("uname", ["-srm"])
+          {:ok, String.trim(os_output)}
+        end
+      ),
+      AgentEx.Tool.new(
+        name: "get_disk_usage",
+        description: "Get disk space usage for all mounted filesystems",
+        parameters: %{"type" => "object", "properties" => %{}, "required" => []},
+        kind: :read,
+        function: fn _args ->
+          {df_output, 0} = System.cmd("df", ["-h"])
+          {:ok, df_output}
+        end
+      ),
+      AgentEx.Tool.new(
+        name: "get_current_time",
+        description: "Get the current date and time with timezone",
+        parameters: %{"type" => "object", "properties" => %{}, "required" => []},
+        kind: :read,
+        function: fn _args ->
+          {:ok, DateTime.utc_now() |> DateTime.to_string()}
+        end
+      )
+    ]
   end
 end

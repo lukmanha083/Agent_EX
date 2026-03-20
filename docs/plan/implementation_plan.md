@@ -661,6 +661,16 @@ UI shows:   ●──────────────●──────�
 
 ## Phase 5 — Tool Workshop + Permission Builder UI
 
+### Cleanup from Phase 4
+
+Remove demo tool scaffolding once the agent builder UI is in place:
+
+| File | What to remove | Why |
+|---|---|---|
+| `config/dev.exs` | `chat_tools: :demo` config line | Replaced by per-agent tool selection in UI |
+| `lib/agent_ex_web/live/chat_live.ex` | `load_chat_tools/0`, `demo_tools/0` functions | Replaced by Tool Workshop / agent config |
+| `lib/agent_ex_web/live/chat_live.ex` | Change `tools: load_chat_tools()` back to agent-supplied tools | Tools come from agent definition, not app config |
+
 ### Problem
 
 Tools and intervention pipelines configured only in code.

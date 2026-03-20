@@ -1,7 +1,8 @@
 import Config
 
 config :agent_ex,
-  dets_dir: "priv/data/dev"
+  dets_dir: "priv/data/dev",
+  chat_tools: :demo
 
 # Dev server with live reload
 config :agent_ex, AgentExWeb.Endpoint,
