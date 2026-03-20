@@ -22,7 +22,7 @@ defmodule AgentEx.EventLoop.Event do
           type: event_type(),
           run_id: String.t(),
           data: map(),
-          timestamp: integer()
+          timestamp: integer() | nil
         }
 
   @enforce_keys [:type, :run_id]

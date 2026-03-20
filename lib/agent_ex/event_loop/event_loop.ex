@@ -10,7 +10,7 @@ defmodule AgentEx.EventLoop do
 
   ## Usage
 
-      {:ok, task} = EventLoop.run("run-1", tool_agent, client, messages, tools)
+      {:ok, run_id} = EventLoop.run("run-1", tool_agent, client, messages, tools)
       EventLoop.subscribe("run-1")
       # Receive events as messages: %Event{type: :think_start, ...}
   """
@@ -74,32 +74,35 @@ defmodule AgentEx.EventLoop do
       |> Keyword.put(:model_fn, model_fn)
       |> Keyword.put(:intervention, intervention)
 
-    Task.Supervisor.async_nolink(AgentEx.TaskSupervisor, fn ->
-      try do
-        result = ToolCallerLoop.run(tool_agent, model_client, messages, tools, loop_opts)
+    task =
+      Task.Supervisor.async_nolink(AgentEx.TaskSupervisor, fn ->
+        try do
+          result = ToolCallerLoop.run(tool_agent, model_client, messages, tools, loop_opts)
 
-        case result do
-          {:ok, generated} ->
-            broadcast(run_id, :pipeline_complete, %{
-              message_count: length(generated),
-              final_content: final_content(generated)
-            })
+          case result do
+            {:ok, generated} ->
+              broadcast(run_id, :pipeline_complete, %{
+                message_count: length(generated),
+                final_content: final_content(generated)
+              })
 
-            RunRegistry.complete_run(run_id)
-            result
+              RunRegistry.complete_run(run_id)
+              result
 
-          {:error, reason} ->
-            broadcast(run_id, :pipeline_error, %{reason: inspect(reason)})
+            {:error, reason} ->
+              broadcast(run_id, :pipeline_error, %{reason: inspect(reason)})
+              RunRegistry.error_run(run_id)
+              result
+          end
+        rescue
+          e ->
+            broadcast(run_id, :pipeline_error, %{reason: Exception.message(e)})
             RunRegistry.error_run(run_id)
-            result
+            {:error, {:exception, Exception.message(e)}}
         end
-      rescue
-        e ->
-          broadcast(run_id, :pipeline_error, %{reason: Exception.message(e)})
-          RunRegistry.error_run(run_id)
-          {:error, {:exception, Exception.message(e)}}
-      end
-    end)
+      end)
+
+    RunRegistry.set_task(run_id, task)
 
     {:ok, run_id}
   end
@@ -113,6 +116,11 @@ defmodule AgentEx.EventLoop do
   @doc "Cancel a running task."
   @spec cancel(String.t()) :: :ok
   def cancel(run_id) do
+    case RunRegistry.get_task(run_id) do
+      {:ok, task} -> Task.Supervisor.terminate_child(AgentEx.TaskSupervisor, task.pid)
+      :not_found -> :ok
+    end
+
     broadcast(run_id, :pipeline_error, %{reason: "cancelled"})
     RunRegistry.cancel_run(run_id)
     :ok

@@ -26,8 +26,7 @@ defmodule AgentEx.EventLoop.PipeRunner do
         |> pipe.through.(writer, [])
       end)
   """
-  @spec run(String.t(), ModelClient.t(), (map() -> String.t()), keyword()) ::
-          {:ok, String.t()} | {:error, term()}
+  @spec run(String.t(), ModelClient.t(), (map() -> String.t()), keyword()) :: Task.t()
   def run(run_id, model_client, pipeline_fn, opts \\ []) do
     metadata = Keyword.get(opts, :metadata, %{})
     RunRegistry.register_run(run_id, metadata)

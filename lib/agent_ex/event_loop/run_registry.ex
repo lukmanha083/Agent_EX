@@ -45,26 +45,34 @@ defmodule AgentEx.EventLoop.RunRegistry do
     :ok
   end
 
-  @doc "Add an event to a run's history."
+  @doc "Add an event to a run's history (serialized through GenServer to prevent races)."
   @spec add_event(String.t(), Event.t()) :: :ok
   def add_event(run_id, %Event{} = event) do
-    case :ets.lookup(@events_table, run_id) do
-      [{^run_id, events}] ->
-        :ets.insert(@events_table, {run_id, events ++ [event]})
-
-      [] ->
-        :ets.insert(@events_table, {run_id, [event]})
-    end
-
-    :ok
+    GenServer.call(__MODULE__, {:add_event, run_id, event})
   end
 
   @doc "Get all events for a run (for replay on reconnection)."
   @spec get_events(String.t()) :: [Event.t()]
   def get_events(run_id) do
     case :ets.lookup(@events_table, run_id) do
-      [{^run_id, events}] -> events
+      [{^run_id, events}] -> Enum.reverse(events)
       [] -> []
+    end
+  end
+
+  @doc "Store a task reference for a run (used by cancel)."
+  @spec set_task(String.t(), Task.t()) :: :ok
+  def set_task(run_id, %Task{} = task) do
+    :ets.insert(@table, {:"task:#{run_id}", task})
+    :ok
+  end
+
+  @doc "Get the task reference for a run."
+  @spec get_task(String.t()) :: {:ok, Task.t()} | :not_found
+  def get_task(run_id) do
+    case :ets.lookup(@table, :"task:#{run_id}") do
+      [{_, task}] -> {:ok, task}
+      [] -> :not_found
     end
   end
 
@@ -110,6 +118,18 @@ defmodule AgentEx.EventLoop.RunRegistry do
     :ets.new(@table, [:named_table, :public, :set])
     :ets.new(@events_table, [:named_table, :public, :set])
     {:ok, %{}}
+  end
+
+  @impl true
+  def handle_call({:add_event, run_id, event}, _from, state) do
+    events =
+      case :ets.lookup(@events_table, run_id) do
+        [{^run_id, existing}] -> existing
+        [] -> []
+      end
+
+    :ets.insert(@events_table, {run_id, [event | events]})
+    {:reply, :ok, state}
   end
 
   # -- Private --
