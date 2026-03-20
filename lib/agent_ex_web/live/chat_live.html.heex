@@ -83,12 +83,15 @@
   <!-- Input area -->
   <div class="border-t border-gray-800 bg-gray-900/50 p-4">
     <form phx-submit="send" class="flex gap-2">
+      <label for="message_input" class="sr-only">Message</label>
       <input
+        id="message_input"
         type="text"
         name="message"
         value={@input}
         placeholder="Type a message..."
         autocomplete="off"
+        phx-update="ignore"
         disabled={@thinking}
         class={[
           "flex-1 bg-gray-800 border border-gray-700 text-white rounded-lg px-4 py-2.5 text-sm",

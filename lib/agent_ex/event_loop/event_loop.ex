@@ -79,29 +79,22 @@ defmodule AgentEx.EventLoop do
 
     task =
       Task.Supervisor.async_nolink(AgentEx.TaskSupervisor, fn ->
-        try do
-          result = ToolCallerLoop.run(tool_agent, model_client, messages, tools, loop_opts)
+        result = ToolCallerLoop.run(tool_agent, model_client, messages, tools, loop_opts)
 
-          case result do
-            {:ok, generated} ->
-              broadcast(run_id, :pipeline_complete, %{
-                message_count: length(generated),
-                final_content: final_content(generated)
-              })
+        case result do
+          {:ok, generated} ->
+            broadcast(run_id, :pipeline_complete, %{
+              message_count: length(generated),
+              final_content: final_content(generated)
+            })
 
-              RunRegistry.complete_run(run_id)
-              result
+            RunRegistry.complete_run(run_id)
+            result
 
-            {:error, reason} ->
-              broadcast(run_id, :pipeline_error, %{reason: inspect(reason)})
-              RunRegistry.error_run(run_id)
-              result
-          end
-        rescue
-          e ->
-            broadcast(run_id, :pipeline_error, %{reason: Exception.message(e)})
+          {:error, reason} ->
+            broadcast(run_id, :pipeline_error, %{reason: inspect(reason)})
             RunRegistry.error_run(run_id)
-            {:error, {:exception, Exception.message(e)}}
+            result
         end
       end)
 
@@ -119,17 +112,24 @@ defmodule AgentEx.EventLoop do
   @doc "Cancel a running task."
   @spec cancel(String.t()) :: :ok
   def cancel(run_id) do
+    terminate_task(run_id, _retries = 3)
+    broadcast(run_id, :pipeline_error, %{reason: "cancelled"})
+    RunRegistry.cancel_run(run_id)
+    :ok
+  end
+
+  defp terminate_task(run_id, retries) do
     case RunRegistry.get_task(run_id) do
       {:ok, %Task{} = task} ->
         Task.Supervisor.terminate_child(AgentEx.TaskSupervisor, task.pid)
 
+      :starting when retries > 0 ->
+        Process.sleep(5)
+        terminate_task(run_id, retries - 1)
+
       _ ->
         :ok
     end
-
-    broadcast(run_id, :pipeline_error, %{reason: "cancelled"})
-    RunRegistry.cancel_run(run_id)
-    :ok
   end
 
   @doc "Replay all events for a run (used on LiveView reconnection)."

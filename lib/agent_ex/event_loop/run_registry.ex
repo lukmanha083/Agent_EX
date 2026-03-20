@@ -29,7 +29,12 @@ defmodule AgentEx.EventLoop.RunRegistry do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
   end
 
-  @doc "Register a new run."
+  @doc """
+  Register a new run.
+
+  Writes directly to ETS (not serialized through GenServer) for performance.
+  Relies on unique `run_id` values — callers must not register the same ID concurrently.
+  """
   @spec register_run(String.t(), map()) :: :ok
   def register_run(run_id, metadata \\ %{}) do
     info = %{

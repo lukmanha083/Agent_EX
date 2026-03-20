@@ -90,6 +90,7 @@ defmodule AgentExWeb.ChatLive do
          )}
 
       {:error, reason} ->
+        Phoenix.PubSub.unsubscribe(AgentEx.PubSub, "run:#{run_id}")
         error_msg = %{role: :assistant, content: "Failed to start agent: #{inspect(reason)}"}
         {:noreply, assign(socket, messages: messages ++ [error_msg], input: "")}
     end
@@ -133,8 +134,18 @@ defmodule AgentExWeb.ChatLive do
     {:noreply, socket}
   end
 
-  def handle_info({:DOWN, _ref, :process, _pid, _reason}, socket) do
+  def handle_info({:DOWN, _ref, :process, _pid, :normal}, socket) do
     {:noreply, socket}
+  end
+
+  def handle_info({:DOWN, _ref, :process, _pid, reason}, socket) do
+    if socket.assigns.thinking do
+      error_text = "Agent crashed: #{inspect(reason)}"
+      messages = socket.assigns.messages ++ [%{role: :assistant, content: error_text}]
+      {:noreply, assign(socket, messages: messages, thinking: false, stages: [], run_id: nil)}
+    else
+      {:noreply, socket}
+    end
   end
 
   # -- Run event dispatch --
@@ -206,7 +217,15 @@ defmodule AgentExWeb.ChatLive do
   # -- Helpers --
 
   @models_by_provider %{
-    "openai" => ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "o3-mini"],
+    "openai" => [
+      "gpt-4o",
+      "gpt-4o-mini",
+      "gpt-5.4",
+      "gpt-5.4-mini",
+      "gpt-5.4-nano",
+      "gpt-5.4-pro",
+      "o3-mini"
+    ],
     "anthropic" => [
       "claude-sonnet-4-5-20250514",
       "claude-haiku-4-5-20251001",

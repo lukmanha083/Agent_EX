@@ -157,10 +157,12 @@ defmodule AgentEx.Memory do
 
     memory_conversation_msgs =
       Enum.map(conversation_ctx, fn msg ->
-        case msg.role do
+        role = if is_atom(msg.role), do: Atom.to_string(msg.role), else: msg.role
+
+        case role do
           "user" -> Message.user(msg.content)
           "assistant" -> Message.assistant(msg.content)
-          role -> %Message{role: String.to_existing_atom(role), content: msg.content}
+          other -> %Message{role: String.to_existing_atom(other), content: msg.content}
         end
       end)
 
