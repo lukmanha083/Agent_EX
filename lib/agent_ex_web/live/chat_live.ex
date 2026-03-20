@@ -128,6 +128,19 @@ defmodule AgentExWeb.ChatLive do
     {:noreply, reset_conversation(socket) |> assign(model: model)}
   end
 
+  def handle_event("cancel", _params, socket) do
+    if socket.assigns.run_id do
+      EventLoop.cancel(socket.assigns.run_id)
+      Phoenix.PubSub.unsubscribe(AgentEx.PubSub, "run:#{socket.assigns.run_id}")
+    end
+
+    messages =
+      socket.assigns.messages ++ [%{role: :assistant, content: "Cancelled by user."}]
+
+    {:noreply,
+     assign(socket, messages: messages, events: [], stages: [], thinking: false, run_id: nil)}
+  end
+
   def handle_event("clear", _params, socket) do
     {:noreply, reset_conversation(socket)}
   end
