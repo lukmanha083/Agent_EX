@@ -35,7 +35,7 @@ defmodule AgentEx.EventLoop.RunRegistry do
   Writes directly to ETS (not serialized through GenServer) for performance.
   Relies on unique `run_id` values — callers must not register the same ID concurrently.
   """
-  @spec register_run(String.t(), map()) :: :ok
+  @spec register_run(String.t(), map()) :: :ok | {:error, :already_registered}
   def register_run(run_id, metadata \\ %{}) do
     info = %{
       run_id: run_id,
@@ -45,9 +45,12 @@ defmodule AgentEx.EventLoop.RunRegistry do
       metadata: metadata
     }
 
-    :ets.insert(@table, {run_id, info})
-    :ets.insert(@events_table, {run_id, []})
-    :ok
+    if :ets.insert_new(@table, {run_id, info}) do
+      :ets.insert_new(@events_table, {run_id, []})
+      :ok
+    else
+      {:error, :already_registered}
+    end
   end
 
   @doc "Add an event to a run's history (serialized through GenServer to prevent races)."

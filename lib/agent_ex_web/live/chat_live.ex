@@ -52,7 +52,7 @@ defmodule AgentExWeb.ChatLive do
        input: "",
        provider: default_provider,
        model: default_model,
-       tools: [],
+       tools: Application.get_env(:agent_ex, :chat_tools, []),
        session_id: session_id
      )}
   end
