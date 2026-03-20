@@ -1,0 +1,110 @@
+<div class="flex flex-col h-full">
+  <!-- Header with model selector -->
+  <header class="flex items-center gap-3 px-4 py-3 border-b border-gray-800 bg-gray-900/50">
+    <div class="flex items-center gap-2">
+      <label class="text-xs text-gray-500">Provider</label>
+      <select
+        phx-change="select_provider"
+        name="provider"
+        class="bg-gray-800 border border-gray-700 text-gray-300 text-xs rounded-md px-2 py-1.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+      >
+        <option
+          :for={{label, value} <- provider_options()}
+          value={value}
+          selected={value == @provider}
+        >
+          <%= label %>
+        </option>
+      </select>
+    </div>
+
+    <div class="flex items-center gap-2">
+      <label class="text-xs text-gray-500">Model</label>
+      <select
+        phx-change="select_model"
+        name="model"
+        class="bg-gray-800 border border-gray-700 text-gray-300 text-xs rounded-md px-2 py-1.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+      >
+        <option
+          :for={model <- models_for_provider(@provider)}
+          value={model}
+          selected={model == @model}
+        >
+          <%= model %>
+        </option>
+      </select>
+    </div>
+
+    <div class="ml-auto">
+      <button
+        phx-click="clear"
+        class="text-xs text-gray-500 hover:text-gray-300 px-2 py-1 rounded hover:bg-gray-800 transition-colors"
+      >
+        Clear
+      </button>
+    </div>
+  </header>
+
+  <!-- Messages area -->
+  <div id="messages" class="flex-1 overflow-y-auto py-4 space-y-1" phx-hook="ScrollBottom">
+    <div :if={@messages == []} class="flex items-center justify-center h-full">
+      <div class="text-center">
+        <p class="text-gray-500 text-sm">No messages yet</p>
+        <p class="text-gray-600 text-xs mt-1">
+          Using <span class="text-gray-400 font-mono"><%= @model %></span>
+        </p>
+      </div>
+    </div>
+
+    <div :for={msg <- @messages}>
+      <.message_bubble role={msg.role} content={msg.content} />
+    </div>
+
+    <!-- Tool call cards -->
+    <div :for={event <- @events}>
+      <.tool_card
+        :if={event.type == :tool_call}
+        name={event.data.tool_name}
+        status={tool_status(event.data.call_id, @events)}
+        arguments={event.data.arguments}
+        result={tool_result_content(event.data.call_id, @events)}
+      />
+    </div>
+
+    <!-- Pipeline stages -->
+    <.pipeline_stages stages={@stages} />
+
+    <!-- Thinking indicator -->
+    <.thinking_indicator active={@thinking} />
+  </div>
+
+  <!-- Input area -->
+  <div class="border-t border-gray-800 bg-gray-900/50 p-4">
+    <form phx-submit="send" class="flex gap-2">
+      <input
+        type="text"
+        name="message"
+        value={@input}
+        placeholder="Type a message..."
+        autocomplete="off"
+        disabled={@thinking}
+        class={[
+          "flex-1 bg-gray-800 border border-gray-700 text-white rounded-lg px-4 py-2.5 text-sm",
+          "placeholder-gray-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500",
+          "disabled:opacity-50 disabled:cursor-not-allowed"
+        ]}
+      />
+      <button
+        type="submit"
+        disabled={@thinking}
+        class={[
+          "px-4 py-2.5 rounded-lg text-sm font-medium transition-colors",
+          "bg-indigo-600 text-white hover:bg-indigo-500 active:bg-indigo-700",
+          "disabled:opacity-50 disabled:cursor-not-allowed"
+        ]}
+      >
+        Send
+      </button>
+    </form>
+  </div>
+</div>
