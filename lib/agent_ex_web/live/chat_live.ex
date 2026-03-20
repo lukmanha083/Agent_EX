@@ -58,8 +58,10 @@ defmodule AgentExWeb.ChatLive do
   end
 
   @impl true
-  def terminate(_reason, socket) do
-    Memory.stop_session(@agent_id, socket.assigns.session_id)
+  def terminate(_reason, _socket) do
+    # Don't stop the memory session here — it's tied to the HTTP cookie
+    # and must survive LiveView reconnects (longpoll → websocket transition).
+    # Sessions are reset explicitly via "clear" or lost on server restart.
     :ok
   end
 

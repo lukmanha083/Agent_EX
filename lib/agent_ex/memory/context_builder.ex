@@ -81,6 +81,8 @@ defmodule AgentEx.Memory.ContextBuilder do
     WorkingMemory.Server.to_context_messages(agent_id, session_id)
   rescue
     _ -> []
+  catch
+    :exit, _ -> []
   end
 
   defp truncate_section(text, budget_tokens) when is_binary(text) do
