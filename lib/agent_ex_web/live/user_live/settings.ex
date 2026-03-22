@@ -13,10 +13,10 @@ defmodule AgentExWeb.UserLive.Settings do
         <%!-- Profile header with avatar --%>
         <div class="flex items-center gap-4">
           <div class="flex h-16 w-16 items-center justify-center rounded-full bg-indigo-600 text-xl font-bold text-white">
-            {initials(@current_scope.user.username)}
+            {initials(@current_scope.user.username || @current_scope.user.email)}
           </div>
           <div>
-            <h1 class="text-2xl font-bold text-white">{@current_scope.user.username}</h1>
+            <h1 class="text-2xl font-bold text-white">{@current_scope.user.username || @current_scope.user.email}</h1>
             <p class="text-sm text-gray-400">{@current_scope.user.email}</p>
           </div>
         </div>
