@@ -26,11 +26,11 @@ defmodule AgentExWeb.Router do
   end
 
   scope "/", AgentExWeb do
-    pipe_through([:browser, :require_authenticated_user])
+    pipe_through([:browser])
 
     live_session :authenticated,
-      on_mount: [{AgentExWeb.UserAuth, :require_authenticated}] do
-      live("/", ChatLive, :index)
+      on_mount: [{AgentExWeb.UserAuth, :mount_current_scope}] do
+      live("/", HomeLive, :index)
     end
   end
 
@@ -53,6 +53,7 @@ defmodule AgentExWeb.Router do
 
     live_session :require_authenticated_user,
       on_mount: [{AgentExWeb.UserAuth, :require_authenticated}] do
+      live("/chat", ChatLive, :index)
       live("/users/settings", UserLive.Settings, :edit)
       live("/users/settings/confirm-email/:token", UserLive.Settings, :confirm_email)
     end
