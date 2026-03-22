@@ -362,6 +362,68 @@ Trigger node:
 </div>
 ```
 
+## Responsive Breakpoints
+
+All pages must be responsive across 3 breakpoints using Tailwind's mobile-first approach:
+
+| Breakpoint | Tailwind Prefix | Min Width | Target Devices |
+|---|---|---|---|
+| Mobile | (default, no prefix) | 0px | Phones in portrait (375px reference) |
+| Tablet | `md:` | 768px | Tablets, small laptops |
+| Desktop | `lg:` | 1024px | Desktops, wide monitors (1280px reference) |
+
+### Sidebar Navigation
+
+```
+Mobile (< 768px)         Tablet (768-1023px)       Desktop (≥ 1024px)
+┌──────────────────┐     ┌────┬─────────────┐     ┌─────────┬──────────────┐
+│  ☰  Top bar      │     │ 🏠 │             │     │ 🏠 Home  │              │
+├──────────────────┤     │ 👤 │   Content    │     │ 👤 Agents│   Content    │
+│                  │     │ 🔧 │   area       │     │ 🔧 Tools │   area       │
+│  Content area    │     │ ▶  │              │     │ ▶  Runs  │              │
+│  (full width)    │     │    │              │     │          │              │
+│                  │     │    │              │     │  v0.1.0  │              │
+└──────────────────┘     └────┴─────────────┘     └─────────┴──────────────┘
+ Hidden sidebar,          Icon-only rail            Full expanded sidebar
+ hamburger toggle          (w-16)                    (w-64)
+```
+
+### Content Grid Patterns
+
+- **Mobile**: single column (`grid-cols-1`), full-width cards
+- **Tablet**: 2 columns (`md:grid-cols-2`)
+- **Desktop**: 3–4 columns (`lg:grid-cols-3` or `lg:grid-cols-4`)
+
+```heex
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4 lg:gap-6">
+  <.card :for={agent <- @agents}>...</.card>
+</div>
+```
+
+### Tables on Mobile
+
+Tables switch to a card-based layout on mobile for readability:
+
+```heex
+<!-- Mobile: stacked cards -->
+<div class="block md:hidden space-y-3">
+  <.card :for={row <- @data}><!-- compact card view --></.card>
+</div>
+<!-- Tablet+: standard table -->
+<div class="hidden md:block overflow-x-auto">
+  <.table><!-- full table --></.table>
+</div>
+```
+
+### Responsive Rules
+
+- **Mobile-first**: write base styles for mobile, then layer `md:` and `lg:` overrides
+- **No fixed widths**: use `w-full md:w-96 lg:w-[500px]`, never bare `w-[500px]`
+- **Touch targets**: minimum 44x44px on mobile (`min-h-[44px] min-w-[44px]`)
+- **Button groups**: use `flex flex-col md:flex-row gap-2` so they stack on mobile
+- **Modals**: full-screen sheet on mobile, centered modal on tablet+
+- **Test at**: 375px (mobile), 768px (tablet), 1280px (desktop)
+
 ## Dark Theme Colors
 
 AgentEx uses a consistent dark palette across all views:
