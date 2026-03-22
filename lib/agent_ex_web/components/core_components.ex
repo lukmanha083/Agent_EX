@@ -4,6 +4,7 @@ defmodule AgentExWeb.CoreComponents do
   """
 
   use Phoenix.Component
+
   use Phoenix.VerifiedRoutes,
     endpoint: AgentExWeb.Endpoint,
     router: AgentExWeb.Router,

@@ -60,7 +60,11 @@ defmodule AgentExWeb.UserLive.Registration do
   end
 
   def mount(_params, _session, socket) do
-    changeset = Accounts.change_user_registration(%User{}, %{}, validate_unique: false, hash_password: false)
+    changeset =
+      Accounts.change_user_registration(%User{}, %{},
+        validate_unique: false,
+        hash_password: false
+      )
 
     {:ok, assign_form(socket, changeset), temporary_assigns: [form: nil], layout: false}
   end
@@ -89,7 +93,12 @@ defmodule AgentExWeb.UserLive.Registration do
   end
 
   def handle_event("validate", %{"user" => user_params}, socket) do
-    changeset = Accounts.change_user_registration(%User{}, user_params, validate_unique: false, hash_password: false)
+    changeset =
+      Accounts.change_user_registration(%User{}, user_params,
+        validate_unique: false,
+        hash_password: false
+      )
+
     {:noreply, assign_form(socket, Map.put(changeset, :action, :validate))}
   end
 
