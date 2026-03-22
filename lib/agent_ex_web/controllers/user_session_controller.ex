@@ -49,21 +49,21 @@ defmodule AgentExWeb.UserSessionController do
   def update_password(conn, %{"user" => user_params} = params) do
     user = conn.assigns.current_scope.user
 
-    unless Accounts.sudo_mode?(user) do
+    if Accounts.sudo_mode?(user) do
+      {:ok, {_user, expired_tokens}} = Accounts.update_user_password(user, user_params)
+
+      # disconnect all existing LiveViews with old sessions
+      UserAuth.disconnect_sessions(expired_tokens)
+
+      conn
+      |> put_session(:user_return_to, ~p"/users/settings")
+      |> create(params, "Password updated successfully!")
+    else
       conn
       |> put_flash(:error, "Session expired. Please re-authenticate.")
       |> redirect(to: ~p"/users/log-in")
       |> halt()
     end
-
-    {:ok, {_user, expired_tokens}} = Accounts.update_user_password(user, user_params)
-
-    # disconnect all existing LiveViews with old sessions
-    UserAuth.disconnect_sessions(expired_tokens)
-
-    conn
-    |> put_session(:user_return_to, ~p"/users/settings")
-    |> create(params, "Password updated successfully!")
   end
 
   def delete(conn, _params) do

@@ -159,7 +159,7 @@ Navigation uses `<.link navigate={~p"/path"}>` for page switches (keeps layout, 
 
 ## Responsive Design
 
-All pages must be responsive across 3 breakpoints:
+All pages should be responsive across 3 breakpoints (target standard; the current sidebar in `app.html.heex` still uses fixed `w-56`):
 
 | Breakpoint | Tailwind Prefix | Min Width | Target |
 |---|---|---|---|
