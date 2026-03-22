@@ -114,7 +114,13 @@ defmodule AgentExWeb.UserLive.Settings do
   def handle_event("update_email", params, socket) do
     %{"user" => user_params} = params
     user = socket.assigns.current_scope.user
-    true = Accounts.sudo_mode?(user)
+
+    unless Accounts.sudo_mode?(user) do
+      {:noreply,
+       socket
+       |> put_flash(:error, "Session expired. Please re-authenticate.")
+       |> push_navigate(to: ~p"/users/log-in")}
+    end
 
     case Accounts.change_user_email(user, user_params) do
       %{valid?: true} = changeset ->
@@ -147,7 +153,13 @@ defmodule AgentExWeb.UserLive.Settings do
   def handle_event("update_password", params, socket) do
     %{"user" => user_params} = params
     user = socket.assigns.current_scope.user
-    true = Accounts.sudo_mode?(user)
+
+    unless Accounts.sudo_mode?(user) do
+      {:noreply,
+       socket
+       |> put_flash(:error, "Session expired. Please re-authenticate.")
+       |> push_navigate(to: ~p"/users/log-in")}
+    end
 
     case Accounts.change_user_password(user, user_params) do
       %{valid?: true} = changeset ->

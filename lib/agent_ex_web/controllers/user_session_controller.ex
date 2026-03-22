@@ -48,7 +48,14 @@ defmodule AgentExWeb.UserSessionController do
 
   def update_password(conn, %{"user" => user_params} = params) do
     user = conn.assigns.current_scope.user
-    true = Accounts.sudo_mode?(user)
+
+    unless Accounts.sudo_mode?(user) do
+      conn
+      |> put_flash(:error, "Session expired. Please re-authenticate.")
+      |> redirect(to: ~p"/users/log-in")
+      |> halt()
+    end
+
     {:ok, {_user, expired_tokens}} = Accounts.update_user_password(user, user_params)
 
     # disconnect all existing LiveViews with old sessions
