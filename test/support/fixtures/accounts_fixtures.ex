@@ -6,12 +6,15 @@ defmodule AgentEx.AccountsFixtures do
   alias AgentEx.Accounts
   alias AgentEx.Accounts.Scope
 
-  def unique_user_email, do: "user#{System.unique_integer()}@example.com"
+  def unique_user_email, do: "user#{System.unique_integer([:positive])}@example.com"
+  def unique_username, do: "user_#{System.unique_integer([:positive])}"
   def valid_user_password, do: "hello world!"
 
   def valid_user_attributes(attrs \\ %{}) do
     Enum.into(attrs, %{
-      email: unique_user_email()
+      username: unique_username(),
+      email: unique_user_email(),
+      password: valid_user_password()
     })
   end
 

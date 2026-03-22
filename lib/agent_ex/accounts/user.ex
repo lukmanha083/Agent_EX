@@ -3,6 +3,7 @@ defmodule AgentEx.Accounts.User do
   import Ecto.Changeset
 
   schema "users" do
+    field(:username, :string)
     field(:email, :string)
     field(:password, :string, virtual: true, redact: true)
     field(:hashed_password, :string, redact: true)
@@ -27,6 +28,44 @@ defmodule AgentEx.Accounts.User do
     user
     |> cast(attrs, [:email])
     |> validate_email(opts)
+  end
+
+  @doc """
+  A user changeset for registration with username and email.
+  """
+  def registration_changeset(user, attrs, opts \\ []) do
+    user
+    |> cast(attrs, [:username, :email, :password])
+    |> validate_username(opts)
+    |> validate_email(opts)
+    |> validate_password(opts)
+  end
+
+  @doc """
+  A user changeset for changing the username.
+  """
+  def username_changeset(user, attrs, opts \\ []) do
+    user
+    |> cast(attrs, [:username])
+    |> validate_username(opts)
+  end
+
+  defp validate_username(changeset, opts) do
+    changeset =
+      changeset
+      |> validate_required([:username])
+      |> validate_format(:username, ~r/^[a-zA-Z0-9_]+$/,
+        message: "only letters, numbers, and underscores allowed"
+      )
+      |> validate_length(:username, min: 3, max: 30)
+
+    if Keyword.get(opts, :validate_unique, true) do
+      changeset
+      |> unsafe_validate_unique(:username, AgentEx.Repo)
+      |> unique_constraint(:username)
+    else
+      changeset
+    end
   end
 
   defp validate_email(changeset, opts) do

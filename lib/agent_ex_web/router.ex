@@ -64,6 +64,7 @@ defmodule AgentExWeb.Router do
     pipe_through([:browser])
 
     live_session :current_user,
+      root_layout: {AgentExWeb.Layouts, :auth},
       on_mount: [{AgentExWeb.UserAuth, :mount_current_scope}] do
       live("/users/register", UserLive.Registration, :new)
       live("/users/log-in", UserLive.Login, :new)

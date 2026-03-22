@@ -78,11 +78,11 @@ defmodule AgentEx.AccountsTest do
       assert "has already been taken" in errors_on(changeset).email
     end
 
-    test "registers users without password" do
+    test "registers users with password" do
       email = unique_user_email()
       {:ok, user} = Accounts.register_user(valid_user_attributes(email: email))
       assert user.email == email
-      assert is_nil(user.hashed_password)
+      assert user.hashed_password
       assert is_nil(user.confirmed_at)
       assert is_nil(user.password)
     end
@@ -360,14 +360,14 @@ defmodule AgentEx.AccountsTest do
       assert {:error, :not_found} = Accounts.login_user_by_magic_link(encoded_token)
     end
 
-    test "raises when unconfirmed user has password set" do
+    test "confirms unconfirmed user with password set via magic link" do
       user = unconfirmed_user_fixture()
-      Repo.update_all(from(u in User, where: u.id == ^user.id), set: [hashed_password: "hashed"])
       {encoded_token, _hashed_token} = generate_user_magic_link_token(user)
 
-      assert_raise RuntimeError, ~r/magic link log in is not allowed/, fn ->
-        Accounts.login_user_by_magic_link(encoded_token)
-      end
+      assert {:ok, {confirmed_user, _expired_tokens}} =
+               Accounts.login_user_by_magic_link(encoded_token)
+
+      assert confirmed_user.confirmed_at
     end
   end
 
