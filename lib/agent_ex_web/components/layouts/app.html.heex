@@ -15,8 +15,12 @@
       </a>
     </div>
 
-    <div class="p-3 border-t border-gray-800">
-      <p class="text-xs text-gray-600 px-3">v<%= Application.spec(:agent_ex, :vsn) |> to_string() %></p>
+    <div class="p-3 border-t border-gray-800 space-y-1">
+      <.link navigate={~p"/users/settings"} class="flex items-center gap-2 px-3 py-2 text-sm text-gray-400 rounded-md hover:bg-gray-800 hover:text-white transition-colors">
+        <.icon name="hero-user-circle" class="w-4 h-4" />
+        Profile
+      </.link>
+      <p class="text-xs text-gray-600 px-3 mt-2">v<%= Application.spec(:agent_ex, :vsn) |> to_string() %></p>
     </div>
   </nav>
 

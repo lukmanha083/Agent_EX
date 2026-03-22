@@ -18,7 +18,7 @@ defmodule AgentExWeb.UserLive.ConfirmationTest do
         end)
 
       {:ok, _lv, html} = live(conn, ~p"/users/log-in/#{token}")
-      assert html =~ "Confirm and stay logged in"
+      assert html =~ "Confirm and stay signed in"
     end
 
     test "renders login page for confirmed user", %{conn: conn, confirmed_user: user} do
@@ -29,7 +29,7 @@ defmodule AgentExWeb.UserLive.ConfirmationTest do
 
       {:ok, _lv, html} = live(conn, ~p"/users/log-in/#{token}")
       refute html =~ "Confirm my account"
-      assert html =~ "Keep me logged in on this device"
+      assert html =~ "Stay signed in on this device"
     end
 
     test "renders login page for already logged in user", %{conn: conn, confirmed_user: user} do
@@ -42,7 +42,7 @@ defmodule AgentExWeb.UserLive.ConfirmationTest do
 
       {:ok, _lv, html} = live(conn, ~p"/users/log-in/#{token}")
       refute html =~ "Confirm my account"
-      assert html =~ "Log in"
+      assert html =~ "Sign in"
     end
 
     test "confirms the given token once", %{conn: conn, unconfirmed_user: user} do
@@ -64,7 +64,7 @@ defmodule AgentExWeb.UserLive.ConfirmationTest do
       assert Accounts.get_user!(user.id).confirmed_at
       # we are logged in now
       assert get_session(conn, :user_token)
-      assert redirected_to(conn) == ~p"/"
+      assert redirected_to(conn) == ~p"/chat"
 
       # log out, new conn
       conn = build_conn()

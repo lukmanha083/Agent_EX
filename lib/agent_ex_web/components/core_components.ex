@@ -5,6 +5,11 @@ defmodule AgentExWeb.CoreComponents do
 
   use Phoenix.Component
 
+  use Phoenix.VerifiedRoutes,
+    endpoint: AgentExWeb.Endpoint,
+    router: AgentExWeb.Router,
+    statics: AgentExWeb.static_paths()
+
   alias Phoenix.LiveView.JS
 
   @doc """
@@ -163,6 +168,33 @@ defmodule AgentExWeb.CoreComponents do
   def icon(assigns) do
     ~H"""
     <span class={["hero-icon", @name, @class]} />
+    """
+  end
+
+  @doc """
+  Renders the split-panel auth page shell with logo on the left and content on the right.
+  """
+  attr(:flash, :map, required: true)
+  slot(:inner_block, required: true)
+
+  def auth_page(assigns) do
+    ~H"""
+    <div class="flex flex-col lg:flex-row min-h-screen bg-gray-950">
+      <div class="flex items-center justify-center bg-gray-950 p-8 lg:w-1/2 lg:p-16 border-b lg:border-b-0 lg:border-r border-gray-800">
+        <img
+          src={~p"/images/logo.svg"}
+          alt="AgentEx"
+          class="w-64 md:w-80 lg:w-[420px]"
+        />
+      </div>
+
+      <div class="flex flex-1 flex-col items-center justify-center bg-gray-900 p-6 md:p-12 lg:w-1/2">
+        <div class="w-full max-w-sm space-y-6">
+          <.flash_group flash={@flash} />
+          {render_slot(@inner_block)}
+        </div>
+      </div>
+    </div>
     """
   end
 

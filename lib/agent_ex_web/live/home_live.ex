@@ -1,4 +1,4 @@
-defmodule AgentExWeb.UserLive.Login do
+defmodule AgentExWeb.HomeLive do
   use AgentExWeb, :live_view
 
   alias AgentEx.Accounts
@@ -9,19 +9,6 @@ defmodule AgentExWeb.UserLive.Login do
     <.auth_page flash={@flash}>
       <div>
         <h1 class="text-2xl font-bold text-white">Sign in</h1>
-        <p :if={@current_scope} class="mt-1 text-sm text-gray-400">
-          Re-authenticate to perform sensitive actions on your account.
-        </p>
-      </div>
-
-      <div :if={local_mail_adapter?()} class="rounded-lg border border-gray-700 bg-gray-800 p-3 text-sm text-gray-300">
-        <div class="flex items-start gap-2">
-          <.icon name="hero-information-circle" class="mt-0.5 h-5 w-5 shrink-0 text-indigo-400" />
-          <p>
-            Local mail adapter is active.
-            <.link href="/dev/mailbox" class="underline hover:text-white">View mailbox</.link>
-          </p>
-        </div>
       </div>
 
       <.form
@@ -33,7 +20,6 @@ defmodule AgentExWeb.UserLive.Login do
         class="space-y-4"
       >
         <.input
-          readonly={!!@current_scope}
           field={f[:email]}
           type="email"
           label="Email"
@@ -63,7 +49,6 @@ defmodule AgentExWeb.UserLive.Login do
         class="space-y-4"
       >
         <.input
-          readonly={!!@current_scope}
           field={f[:email]}
           type="email"
           label="Email"
@@ -85,7 +70,7 @@ defmodule AgentExWeb.UserLive.Login do
         </.button>
       </.form>
 
-      <p :if={!@current_scope} class="text-center text-sm text-gray-400">
+      <p class="text-center text-sm text-gray-400">
         Don't have an account?
         <.link navigate={~p"/users/register"} class="font-semibold text-indigo-400 hover:text-indigo-300">
           Sign up
@@ -96,13 +81,13 @@ defmodule AgentExWeb.UserLive.Login do
   end
 
   @impl true
+  def mount(_params, _session, %{assigns: %{current_scope: %{user: user}}} = socket)
+      when not is_nil(user) do
+    {:ok, redirect(socket, to: ~p"/chat")}
+  end
+
   def mount(_params, _session, socket) do
-    email =
-      Phoenix.Flash.get(socket.assigns.flash, :email) ||
-        get_in(socket.assigns, [:current_scope, Access.key(:user), Access.key(:email)])
-
-    form = to_form(%{"email" => email}, as: "user")
-
+    form = to_form(%{"email" => nil}, as: "user")
     {:ok, assign(socket, form: form, trigger_submit: false), layout: false}
   end
 
@@ -125,11 +110,6 @@ defmodule AgentExWeb.UserLive.Login do
     {:noreply,
      socket
      |> put_flash(:info, info)
-     |> push_navigate(to: ~p"/users/log-in")}
-  end
-
-  defp local_mail_adapter? do
-    Application.get_env(:agent_ex, :dev_routes, false) &&
-      Application.get_env(:agent_ex, AgentEx.Mailer)[:adapter] == Swoosh.Adapters.Local
+     |> push_navigate(to: ~p"/")}
   end
 end
