@@ -364,11 +364,7 @@ Trigger node:
 
 ## Responsive Breakpoints
 
-All pages should be responsive across 3 breakpoints using Tailwind's mobile-first approach (target standard).
-
-> **Status:** The current sidebar layout (`app.html.heex`) uses a fixed `w-56`.
-> New pages should follow the responsive patterns below; the existing sidebar
-> will be converted as part of the dashboard buildout.
+All pages must be responsive across 3 breakpoints using Tailwind's mobile-first approach:
 
 | Breakpoint | Tailwind Prefix | Min Width | Target Devices |
 |---|---|---|---|
