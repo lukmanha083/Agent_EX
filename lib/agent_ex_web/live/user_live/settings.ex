@@ -57,6 +57,22 @@ defmodule AgentExWeb.UserLive.Settings do
           </.form>
         </div>
 
+        <%!-- Timezone section --%>
+        <div class="rounded-lg border border-gray-800 bg-gray-900 p-6 space-y-4">
+          <h2 class="text-lg font-semibold text-white">Timezone</h2>
+          <.form for={@timezone_form} id="timezone_form" phx-submit="update_timezone" phx-change="validate_timezone" class="space-y-4">
+            <.input
+              field={@timezone_form[:timezone]}
+              type="select"
+              label="Timezone"
+              options={@timezone_options}
+            />
+            <.button phx-disable-with="Saving..." class="bg-indigo-600 hover:bg-indigo-500 text-white">
+              Update timezone
+            </.button>
+          </.form>
+        </div>
+
         <%!-- Password section --%>
         <div class="rounded-lg border border-gray-800 bg-gray-900 p-6 space-y-4">
           <h2 class="text-lg font-semibold text-white">Password</h2>
@@ -127,6 +143,7 @@ defmodule AgentExWeb.UserLive.Settings do
   def mount(_params, _session, socket) do
     user = socket.assigns.current_scope.user
     username_changeset = Accounts.change_user_username(user, %{})
+    timezone_changeset = Accounts.change_user_timezone(user, %{})
     email_changeset = Accounts.change_user_email(user, %{}, validate_unique: false)
     password_changeset = Accounts.change_user_password(user, %{}, hash_password: false)
 
@@ -134,6 +151,8 @@ defmodule AgentExWeb.UserLive.Settings do
       socket
       |> assign(:current_email, user.email)
       |> assign(:username_form, to_form(username_changeset))
+      |> assign(:timezone_form, to_form(timezone_changeset))
+      |> assign(:timezone_options, AgentEx.Timezone.select_options())
       |> assign(:email_form, to_form(email_changeset))
       |> assign(:password_form, to_form(password_changeset))
       |> assign(:trigger_submit, false)
@@ -168,6 +187,41 @@ defmodule AgentExWeb.UserLive.Settings do
 
         {:error, changeset} ->
           {:noreply, assign(socket, username_form: to_form(changeset, action: :insert))}
+      end
+    else
+      {:noreply,
+       socket
+       |> put_flash(:error, "Session expired. Please re-authenticate.")
+       |> push_navigate(to: ~p"/users/log-in")}
+    end
+  end
+
+  def handle_event("validate_timezone", params, socket) do
+    %{"user" => user_params} = params
+
+    timezone_form =
+      socket.assigns.current_scope.user
+      |> Accounts.change_user_timezone(user_params)
+      |> Map.put(:action, :validate)
+      |> to_form()
+
+    {:noreply, assign(socket, timezone_form: timezone_form)}
+  end
+
+  def handle_event("update_timezone", params, socket) do
+    %{"user" => user_params} = params
+    user = socket.assigns.current_scope.user
+
+    if Accounts.sudo_mode?(user) do
+      case Accounts.update_user_timezone(user, user_params) do
+        {:ok, _user} ->
+          {:noreply,
+           socket
+           |> put_flash(:info, "Timezone updated successfully.")
+           |> push_navigate(to: ~p"/users/settings")}
+
+        {:error, changeset} ->
+          {:noreply, assign(socket, timezone_form: to_form(changeset, action: :insert))}
       end
     else
       {:noreply,

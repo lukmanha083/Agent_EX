@@ -103,6 +103,24 @@ defmodule AgentEx.Accounts do
     |> Repo.update()
   end
 
+  ## Timezone
+
+  @doc """
+  Returns an `%Ecto.Changeset{}` for changing the user timezone.
+  """
+  def change_user_timezone(%User{} = user, attrs \\ %{}, opts \\ []) do
+    User.timezone_changeset(user, attrs, opts)
+  end
+
+  @doc """
+  Updates the user timezone.
+  """
+  def update_user_timezone(%User{} = user, attrs) do
+    user
+    |> User.timezone_changeset(attrs)
+    |> Repo.update()
+  end
+
   ## Settings
 
   @doc """

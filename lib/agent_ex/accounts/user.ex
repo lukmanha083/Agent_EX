@@ -7,6 +7,7 @@ defmodule AgentEx.Accounts.User do
     field(:email, :string)
     field(:password, :string, virtual: true, redact: true)
     field(:hashed_password, :string, redact: true)
+    field(:timezone, :string, default: "Etc/UTC")
     field(:confirmed_at, :naive_datetime)
     field(:authenticated_at, :naive_datetime, virtual: true)
 
@@ -35,10 +36,11 @@ defmodule AgentEx.Accounts.User do
   """
   def registration_changeset(user, attrs, opts \\ []) do
     user
-    |> cast(attrs, [:username, :email, :password])
+    |> cast(attrs, [:username, :email, :password, :timezone])
     |> validate_username(opts)
     |> validate_email(opts)
     |> validate_password(opts)
+    |> validate_timezone()
   end
 
   @doc """
@@ -48,6 +50,27 @@ defmodule AgentEx.Accounts.User do
     user
     |> cast(attrs, [:username])
     |> validate_username(opts)
+  end
+
+  @doc """
+  A user changeset for changing the timezone.
+  """
+  def timezone_changeset(user, attrs, _opts \\ []) do
+    user
+    |> cast(attrs, [:timezone])
+    |> validate_timezone()
+  end
+
+  defp validate_timezone(changeset) do
+    changeset
+    |> validate_required([:timezone])
+    |> validate_change(:timezone, fn :timezone, tz ->
+      if AgentEx.Timezone.valid?(tz) do
+        []
+      else
+        [timezone: "is not a valid timezone"]
+      end
+    end)
   end
 
   defp validate_username(changeset, opts) do

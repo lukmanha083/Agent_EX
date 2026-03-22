@@ -30,6 +30,9 @@ defmodule AgentEx.MixProject do
       {:req, "~> 0.5"},
       {:jason, "~> 1.4"},
 
+      # Timezone
+      {:tz, "~> 0.28"},
+
       # Database
       {:ecto_sql, "~> 3.12"},
       {:postgrex, "~> 0.19"},
