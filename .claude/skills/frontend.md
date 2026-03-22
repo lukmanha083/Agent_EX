@@ -157,6 +157,78 @@ end
 
 Navigation uses `<.link navigate={~p"/path"}>` for page switches (keeps layout, mounts new LiveView).
 
+## Responsive Design
+
+All pages must be responsive across 3 breakpoints:
+
+| Breakpoint | Tailwind Prefix | Min Width | Target |
+|---|---|---|---|
+| Mobile | (default) | 0px | Phones (portrait) |
+| Tablet | `md:` | 768px | Tablets, small laptops |
+| Desktop | `lg:` | 1024px | Desktops, wide screens |
+
+### Layout Behavior by Breakpoint
+
+**Sidebar navigation:**
+- Mobile: hidden, toggled via hamburger menu (`hero-bars-3` icon)
+- Tablet: collapsed icon-only rail (w-16)
+- Desktop: full expanded sidebar (w-64)
+
+```heex
+<!-- Sidebar wrapper -->
+<aside class="hidden md:flex md:w-16 lg:w-64 md:flex-col bg-gray-900 border-r border-gray-800">
+  <!-- Full label visible on desktop only -->
+  <span class="hidden lg:inline">Agents</span>
+</aside>
+
+<!-- Mobile hamburger toggle -->
+<button class="md:hidden" phx-click={JS.toggle(to: "#mobile-nav")}>
+  <.icon name="hero-bars-3" class="w-6 h-6" />
+</button>
+```
+
+**Content grids:**
+- Mobile: single column, full width (`grid-cols-1`)
+- Tablet: 2 columns (`md:grid-cols-2`)
+- Desktop: 3-4 columns (`lg:grid-cols-3` or `lg:grid-cols-4`)
+
+```heex
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+  <.card :for={agent <- @agents}>...</.card>
+</div>
+```
+
+**Tables:**
+- Mobile: card-based layout or horizontally scrollable (`overflow-x-auto`)
+- Tablet+: standard table layout
+
+```heex
+<!-- Hide columns on mobile, show as stacked cards instead -->
+<div class="block md:hidden">
+  <.card :for={row <- @data}><!-- mobile card view --></.card>
+</div>
+<div class="hidden md:block overflow-x-auto">
+  <.table><!-- full table --></.table>
+</div>
+```
+
+**Dialogs/Modals:**
+- Mobile: full-screen sheet (`class="w-full h-full"`)
+- Tablet+: centered modal with max-width
+
+**Typography & spacing:**
+- Mobile: `text-sm`, `p-3`, `gap-3`
+- Tablet: `md:text-base`, `md:p-4`, `md:gap-4`
+- Desktop: `lg:text-base`, `lg:p-6`, `lg:gap-6`
+
+### Rules for Responsive Code
+
+- Always design mobile-first — write base styles for mobile, then add `md:` and `lg:` overrides
+- Never use fixed widths (`w-[500px]`) — use responsive widths (`w-full md:w-96 lg:w-[500px]`)
+- Touch targets on mobile must be at least 44x44px (`min-h-[44px] min-w-[44px]`)
+- Use `flex-wrap` or `flex-col md:flex-row` for action button groups
+- Test all pages at 375px (mobile), 768px (tablet), and 1280px (desktop)
+
 ## Rules
 
 - Never use Alpine.js — use `Phoenix.LiveView.JS` for client-side interactions

@@ -17,6 +17,20 @@ jobs:
       matrix:
         otp: ["27.0"]
         elixir: ["1.18.3"]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: agent_ex
+          POSTGRES_PASSWORD: agent_ex_dev
+          POSTGRES_DB: agent_ex_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     env:
       MIX_ENV: test
     steps:
@@ -42,6 +56,9 @@ jobs:
 
       - name: Compile (warnings as errors)
         run: mix compile --warnings-as-errors
+
+      - name: Setup database
+        run: mix ecto.setup
 
       - name: Run tests
         run: mix test

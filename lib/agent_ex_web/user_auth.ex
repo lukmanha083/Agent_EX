@@ -121,7 +121,11 @@ defmodule AgentExWeb.UserAuth do
 
   # Do not renew session if the user is already logged in
   # to prevent CSRF errors or data being lost in tabs that are still open
-  defp renew_session(conn, user) when conn.assigns.current_scope.user.id == user.id do
+  defp renew_session(conn, user)
+       when is_map_key(conn.assigns, :current_scope) and
+              conn.assigns.current_scope != nil and
+              conn.assigns.current_scope.user != nil and
+              conn.assigns.current_scope.user.id == user.id do
     conn
   end
 
