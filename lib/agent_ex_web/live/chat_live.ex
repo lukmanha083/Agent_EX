@@ -8,8 +8,6 @@ defmodule AgentExWeb.ChatLive do
 
   require Logger
 
-  @agent_id "chat"
-
   @providers %{
     "openai" => :openai,
     "anthropic" => :anthropic,
@@ -24,17 +22,19 @@ defmodule AgentExWeb.ChatLive do
       Application.get_env(:agent_ex, :chat_model, default_model_for(default_provider))
 
     session_id = session["chat_session_id"]
+    user = socket.assigns.current_scope.user
+    agent_id = user_agent_id(user)
 
     # Start or reuse memory session
     {messages, run_id, events} =
-      case Memory.start_session(@agent_id, session_id) do
+      case Memory.start_session(agent_id, session_id) do
         {:ok, _} ->
           # New session
           {[], nil, []}
 
         {:error, {:already_started, _}} ->
           # Reconnect — restore conversation from working memory
-          restored = restore_messages(session_id)
+          restored = restore_messages(agent_id, session_id)
           {restored, nil, []}
 
         {:error, reason} ->
@@ -53,7 +53,8 @@ defmodule AgentExWeb.ChatLive do
        provider: default_provider,
        model: default_model,
        tools: load_chat_tools(),
-       session_id: session_id
+       session_id: session_id,
+       agent_id: agent_id
      )}
   end
 
@@ -97,8 +98,12 @@ defmodule AgentExWeb.ChatLive do
           AgentEx.Message.user(message)
         ]
 
-        memory_opts = %{agent_id: @agent_id, session_id: socket.assigns.session_id}
-        EventLoop.run(run_id, tool_agent, client, input_messages, tools, memory: memory_opts)
+        memory_opts = %{agent_id: socket.assigns.agent_id, session_id: socket.assigns.session_id}
+
+        EventLoop.run(run_id, tool_agent, client, input_messages, tools,
+          memory: memory_opts,
+          metadata: %{user_id: socket.assigns.current_scope.user.id}
+        )
 
         {:noreply,
          assign(socket,
@@ -274,8 +279,9 @@ defmodule AgentExWeb.ChatLive do
       Phoenix.PubSub.unsubscribe(AgentEx.PubSub, "run:#{socket.assigns.run_id}")
     end
 
-    Memory.stop_session(@agent_id, socket.assigns.session_id)
-    Memory.start_session(@agent_id, socket.assigns.session_id)
+    agent_id = socket.assigns.agent_id
+    Memory.stop_session(agent_id, socket.assigns.session_id)
+    Memory.start_session(agent_id, socket.assigns.session_id)
 
     assign(socket, messages: [], events: [], stages: [], thinking: false, run_id: nil)
   end
@@ -310,8 +316,8 @@ defmodule AgentExWeb.ChatLive do
     end)
   end
 
-  defp restore_messages(session_id) do
-    Memory.get_messages(@agent_id, session_id)
+  defp restore_messages(agent_id, session_id) do
+    Memory.get_messages(agent_id, session_id)
     |> Enum.map(fn msg ->
       role =
         case msg.role do
@@ -327,6 +333,8 @@ defmodule AgentExWeb.ChatLive do
   rescue
     _ -> []
   end
+
+  defp user_agent_id(user), do: "user_#{user.id}_chat"
 
   # Phase 5 cleanup: replace with agent-configured tools
   defp load_chat_tools do
