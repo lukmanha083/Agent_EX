@@ -29,6 +29,7 @@ defmodule AgentExWeb.Router do
     pipe_through([:browser])
 
     live_session :authenticated,
+      root_layout: {AgentExWeb.Layouts, :auth},
       on_mount: [{AgentExWeb.UserAuth, :mount_current_scope}] do
       live("/", HomeLive, :index)
     end

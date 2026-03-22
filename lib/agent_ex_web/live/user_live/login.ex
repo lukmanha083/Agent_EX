@@ -77,8 +77,10 @@ defmodule AgentExWeb.UserLive.Login do
           label="Password"
           autocomplete="current-password"
           spellcheck="false"
+          required
         />
-        <.button class="w-full bg-indigo-600 hover:bg-indigo-500 text-white" name={f[:remember_me].name} value="true">
+        <input type="hidden" name="user[remember_me]" value="true" />
+        <.button class="w-full bg-indigo-600 hover:bg-indigo-500 text-white">
           Sign in <span aria-hidden="true">→</span>
         </.button>
       </.form>
