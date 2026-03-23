@@ -1,5 +1,8 @@
 import Config
 
+# Timezone database for Elixir's Calendar system
+config :elixir, :time_zone_database, Tz.TimeZoneDatabase
+
 config :agent_ex, :scopes,
   user: [
     default: true,

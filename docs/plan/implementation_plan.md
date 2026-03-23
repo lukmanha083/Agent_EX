@@ -16,7 +16,8 @@ that decides which pipe pattern to compose.
 # ...informed by Tier 3 memory of past successful workflows
 ```
 
-**Status:** Phases 1–4 implemented (2026-03-20). Phase 5+ pending.
+**Status:** Phases 1–4 implemented (2026-03-20). Auth + password registration
+implemented (2026-03-22). Phase 4b (User Timezone + User Scoping) next, then Phase 5+.
 
 **Table of Contents**
 
@@ -26,11 +27,12 @@ that decides which pipe pattern to compose.
 4. [Phase 2 — Memory Promotion + Session Context](#phase-2--memory-promotion--session-context)
 5. [Phase 3 — Pipe-Based Orchestration](#phase-3--pipe-based-orchestration)
 6. [Phase 4 — Phoenix Foundation + EventLoop](#phase-4--phoenix-foundation--eventloop)
-7. [Phase 5 — Agent Builder + Unified Tool Management](#phase-5--agent-builder--unified-tool-management)
-8. [Phase 6 — Flow Builder + Triggers](#phase-6--flow-builder--triggers)
-9. [Phase 7 — Run View + Memory Inspector](#phase-7--run-view--memory-inspector)
-10. [File Manifest](#file-manifest)
-11. [Architecture Diagrams](#architecture-diagrams)
+7. [Phase 4b — User Timezone + User Scoping](#phase-4b--user-timezone--user-scoping)
+8. [Phase 5 — Agent Builder + Unified Tool Management](#phase-5--agent-builder--unified-tool-management)
+9. [Phase 6 — Flow Builder + Triggers](#phase-6--flow-builder--triggers)
+10. [Phase 7 — Run View + Memory Inspector](#phase-7--run-view--memory-inspector)
+11. [File Manifest](#file-manifest)
+12. [Architecture Diagrams](#architecture-diagrams)
 
 ---
 
@@ -134,22 +136,24 @@ Phase 1 (ToolPlugin)  ──────┐
                              ├──▶ Phase 3 (Pipe) ──┐
 Phase 2 (Memory Promotion) ─┘                      │
                                                     ▼
-Phase 4 (Phoenix + EventLoop) ──▶ Phase 5 (Agent Builder + Tools)
-                                         │
-                                         ▼
-                                  Phase 6 (Flow Builder + Triggers)
-                                         │
-                                         ▼
-                                  Phase 7 (Run View + Memory Inspector)
+Phase 4 (Phoenix + EventLoop) ──▶ Phase 4b (Timezone + User Scoping) ──▶ Phase 5 (Agent Builder + Tools)
+                                                                  │
+                                                                  ▼
+                                                           Phase 6 (Flow Builder + Triggers)
+                                                                  │
+                                                                  ▼
+                                                           Phase 7 (Run View + Memory Inspector)
 ```
 
 - Phases 1, 2, and 4 can start in **parallel**.
 - Phase 3 depends on Phase 1 (plugin integration) and Phase 2 (save_memory tool).
-- Phase 5 depends on Phase 4 (Phoenix infrastructure) + Phase 3 (Pipe agents).
+- Phase 4b depends on Phase 4 (auth + Phoenix infrastructure).
+- Phase 5 depends on Phase 4b (user timezone + scoping) + Phase 3 (Pipe agents).
 - Phase 6 depends on Phase 5 (agent configs) + Phase 3 (Pipe/Swarm composition).
+  - Phase 6 cron triggers use user timezone for schedule interpretation.
 - Phase 7 depends on Phase 6 (execution model) but can start in parallel for memory parts.
 
-**Recommended order:** 1+2 (parallel) → 3 → 4 → 5 → 6 → 7.
+**Recommended order:** 1+2 (parallel) → 3 → 4 → 4b → 5 → 6 → 7.
 
 ---
 
@@ -664,6 +668,218 @@ UI shows:   ●──────────────●──────�
 
 ---
 
+## Phase 4b — User Timezone + User Scoping
+
+### Problem (Timezone)
+
+All timestamps in the system are UTC-only. When Phase 6 introduces scheduled
+triggers (cron), `0 9 * * *` has no meaning without knowing the user's timezone.
+Run history, memory timestamps, and any time-aware agent output also need
+correct local time. Without timezone support at the user level, every downstream
+feature that touches time will need ad-hoc workarounds.
+
+### Problem (User Scoping)
+
+Phases 1–4 have **zero user awareness**. The critical gap: ChatLive hardcodes
+`@agent_id "chat"` — all users share the same memory space (Tier 1, 2, and 3).
+RunRegistry stores runs without user ownership. Phase 5 introduces per-user
+agent configs and cannot work without user-scoped identifiers.
+
+**Current scoping audit:**
+
+| Module | Scoped By | User-Aware? |
+|---|---|---|
+| Phase 1 — Plugins, PluginRegistry | Global (system-level) | No — correct, stays global |
+| Phase 2 — Memory (all 3 tiers) | `agent_id` only | No — needs user-scoped agent_ids |
+| Phase 3 — Pipe | Stateless | N/A — no change needed |
+| Phase 4 — EventLoop, RunRegistry | `run_id` only | No — needs `user_id` in metadata |
+| Phase 4 — ChatLive | Hardcoded `@agent_id "chat"` | Has `current_scope.user` but **ignores it** |
+
+The architecture already has the right isolation boundary (`agent_id`). The core
+modules don't need structural changes — what's missing is **wiring `user_id`
+into ID generation** at the LiveView layer.
+
+### Solution (Timezone)
+
+Add a `timezone` field (IANA string, e.g. `"Asia/Jakarta"`) to the User schema,
+collected at registration and changeable in settings. Provide a helper module
+(`AgentEx.Timezone`) for converting UTC timestamps to user-local time. Use the
+`tz` library as the timezone database for Elixir's `Calendar` system — it's
+lighter than `tzdata` and uses OS-provided timezone data.
+
+### Solution (User Scoping)
+
+Wire `user.id` into agent_id generation and run metadata. No deep refactor of
+Phases 1–4 internals — just fix how IDs are constructed at the boundary.
+
+**Scoping strategy:**
+
+```elixir
+# Before (ChatLive) — all users share memory:
+@agent_id "chat"
+Memory.start_session(@agent_id, session_id)
+
+# After — per-user isolation:
+agent_id = "user_#{user.id}_chat"
+Memory.start_session(agent_id, session_id)
+```
+
+```elixir
+# Before (EventLoop) — no user ownership:
+EventLoop.run(run_id, tool_agent, client, messages, tools, memory: memory_opts)
+
+# After — user_id in metadata for filtering:
+EventLoop.run(run_id, tool_agent, client, messages, tools,
+  memory: memory_opts,
+  metadata: %{user_id: user.id}
+)
+```
+
+**What changes and what doesn't:**
+
+| Module | Change? | Detail |
+|---|---|---|
+| Phase 1 — ToolPlugin, PluginRegistry | No | System-level infrastructure, correctly global |
+| Phase 1 — FileSystem, ShellExec plugins | No | Sandbox via config, not user identity |
+| Phase 2 — Memory (all tiers) | No internal change | Already scoped by `agent_id` — just receives user-scoped IDs |
+| Phase 2 — ContextBuilder | No internal change | Accepts `agent_id`, works as-is |
+| Phase 3 — Pipe | No | Stateless, passes through whatever `agent_id` it receives |
+| Phase 4 — EventLoop | Minor | Pass `metadata: %{user_id: ...}` to `RunRegistry.register_run/2` |
+| Phase 4 — RunRegistry | No internal change | Already accepts `metadata` map — just receives `user_id` now |
+| Phase 4 — ChatLive | **Yes** | Derive `agent_id` from `current_scope.user.id`, pass `user_id` in run metadata |
+| Phase 4 — BroadcastHandler | No | Broadcasts by `run_id`, unaffected |
+
+### Design Decisions
+
+| ID | Decision | Rationale |
+|---|---|---|
+| D22 | IANA timezone strings (e.g. `"Asia/Jakarta"`) | Industry standard, unambiguous, supported by `Calendar`. |
+| D23 | `tz` hex package, not `tzdata` | Lighter footprint, uses OS tz data, no bundled DB to update. |
+| D24 | Default to `"Etc/UTC"` if not set | Safe fallback — never crash on missing timezone. |
+| D25 | Timezone select grouped by region | Better UX than a flat 400-item dropdown. |
+| D26 | Collect at registration, editable in settings | One-time setup with escape hatch. User picks once. |
+| D27 | `AgentEx.Timezone` helper module | Single place for UTC→local conversion used by EventLoop, RunRegistry, memory timestamps, and Phase 6 triggers. |
+| D28 | `agent_id = "user_#{user.id}_chat"` pattern | Scopes memory per-user without changing Memory internals. Phase 5 replaces `_chat` with agent config names. |
+| D29 | `user_id` in RunRegistry metadata, not struct | No schema change to RunRegistry — metadata map is already there and accepted. |
+| D30 | Plugins stay global (no user scoping) | Plugins are system infrastructure. Per-user tool selection happens in Phase 5 via agent configs. |
+| D31 | No enforcement layer yet | Phase 5 agent configs will own the user→agent mapping. Phase 4b just wires in the IDs. Adding authorization checks before the data model exists would be premature. |
+
+### User Schema Change
+
+```elixir
+# Add to users table
+field(:timezone, :string, default: "Etc/UTC")
+```
+
+### Timezone Helper
+
+```elixir
+defmodule AgentEx.Timezone do
+  @default_timezone "Etc/UTC"
+
+  @doc "Convert a UTC DateTime to the user's local timezone."
+  @spec to_local(DateTime.t(), String.t() | nil) :: DateTime.t()
+  def to_local(utc_datetime, timezone)
+
+  @doc "List all IANA timezones grouped by region."
+  @spec grouped_timezones() :: [{String.t(), [String.t()]}]
+  def grouped_timezones()
+
+  @doc "Validate that a timezone string is a known IANA timezone."
+  @spec valid?(String.t()) :: boolean()
+  def valid?(timezone)
+
+  @doc "Get display label for a timezone (e.g. 'Asia/Jakarta (UTC+7)')."
+  @spec label(String.t()) :: String.t()
+  def label(timezone)
+end
+```
+
+### Registration Flow
+
+```text
+Registration form (current):     Registration form (updated):
+┌──────────────────────────┐     ┌──────────────────────────┐
+│ Username: [____________] │     │ Username: [____________] │
+│ Email:    [____________] │     │ Email:    [____________] │
+│ Password: [____________] │     │ Password: [____________] │
+│                          │     │ Timezone: [Asia/Jakarta▼]│
+│ [Sign up →]              │     │                          │
+└──────────────────────────┘     │ [Sign up →]              │
+                                 └──────────────────────────┘
+```
+
+The timezone select is auto-detected via the browser's
+`Intl.DateTimeFormat().resolvedOptions().timeZone` on mount, so most users
+won't need to touch it.
+
+### ChatLive User Scoping
+
+```text
+Before:                              After:
+┌──────────────────────────────┐     ┌──────────────────────────────┐
+│ ChatLive                     │     │ ChatLive                     │
+│                              │     │                              │
+│ @agent_id "chat"  ← global   │     │ agent_id = fn user ->        │
+│                              │     │   "user_#{user.id}_chat"     │
+│ Memory.start_session(        │     │ end                          │
+│   "chat", session_id)        │     │                              │
+│                              │     │ Memory.start_session(        │
+│ EventLoop.run(run_id, ...)   │     │   agent_id, session_id)      │
+│   # no user tracking         │     │                              │
+│                              │     │ EventLoop.run(run_id, ...,   │
+│                              │     │   metadata: %{               │
+│                              │     │     user_id: user.id          │
+│                              │     │   })                         │
+└──────────────────────────────┘     └──────────────────────────────┘
+
+Memory isolation:                    Memory isolation:
+User A → agent_id "chat"            User A → agent_id "user_1_chat"
+User B → agent_id "chat"  ← SHARED  User B → agent_id "user_2_chat"  ← ISOLATED
+```
+
+### Downstream Usage (future phases)
+
+| Consumer | How timezone is used |
+|---|---|
+| Phase 5 — Agent Builder | Display agent creation timestamps in local time |
+| Phase 6 — Cron Triggers | Interpret cron schedule in user's timezone |
+| Phase 6 — Run History | Show "completed at 2:30 PM" in local time |
+| Phase 7 — Memory Inspector | Display memory entry timestamps locally |
+| EventLoop events | Timestamp events in local time for UI display |
+
+| Consumer | How user scoping is used |
+|---|---|
+| Phase 5 — Agent Builder | Agent configs belong to `user_id`, `agent_id` = `"user_#{id}_#{name}"` |
+| Phase 5 — Unified Tools | Tool selection per agent per user |
+| Phase 6 — Run History | Filter runs by `user_id` from RunRegistry metadata |
+| Phase 6 — Triggers | Triggers owned by user, fire with user context |
+| Phase 7 — Memory Inspector | Show only current user's agent memories |
+
+### Files
+
+| Action | File | Purpose |
+|---|---|---|
+| Create | `lib/agent_ex/timezone.ex` | Timezone helper (conversion, validation, listing) |
+| Create | `priv/repo/migrations/*_add_timezone_to_users.exs` | Add `timezone` column |
+| Create | `assets/js/hooks/timezone_detect.js` | JS hook to detect browser timezone on mount |
+| Modify | `lib/agent_ex/accounts/user.ex` | Add `:timezone` field + `timezone_changeset/3` |
+| Modify | `lib/agent_ex/accounts.ex` | Add `change_user_timezone/3`, `update_user_timezone/2` |
+| Modify | `lib/agent_ex_web/live/user_live/registration.ex` | Add timezone select with browser auto-detect |
+| Modify | `lib/agent_ex_web/live/user_live/settings.ex` | Add timezone section |
+| Modify | `lib/agent_ex_web/live/chat_live.ex` | Derive `agent_id` from user, pass `user_id` in run metadata |
+| Modify | `mix.exs` | Add `{:tz, "~> 0.28"}` |
+| Modify | `config/config.exs` | Set `config :elixir, :time_zone_database, Tz.TimeZoneDatabase` |
+| Modify | `assets/js/app.js` | Register TimezoneDetect hook |
+
+**New dependency:**
+
+```elixir
+{:tz, "~> 0.28"}
+```
+
+---
+
 ## Phase 5 — Agent Builder + Unified Tool Management
 
 ### Cleanup from Phase 4
@@ -1000,14 +1216,16 @@ graph visualization.
 | 2 — Memory Promotion | 2 | 1 | 3 |
 | 3 — Pipe Orchestration | 2 | 0 | 2 |
 | 4 — Phoenix + EventLoop | 19 | 7 | 26 |
+| 4b — Timezone + User Scoping | 3 | 8 | 11 |
 | 5 — Agent Builder + Tools | 12 | 4 | 16 |
 | 6 — Flow Builder + Triggers | 17 | 4 | 21 |
 | 7 — Run View + Memory | 11 | 4 | 15 |
-| **Total** | **69** | **22** | **91** |
+| **Total** | **72** | **30** | **102** |
 
 ### Dependencies
 
-Only Phase 4 adds hex packages. Phases 1–3 need **zero new dependencies**.
+Phases 4 and 4b add hex packages. Phases 1–3 need **zero new dependencies**.
+Phase 4b adds `tz` (timezone database).
 Phase 6 may add `quantum` (cron) and `file_system` (inotify) hex packages.
 
 ### Complete File Tree
@@ -1022,6 +1240,7 @@ lib/agent_ex/
 ├── memory/
 │   └── promotion.ex                        # Phase 2
 ├── pipe.ex                                 # Phase 3
+├── timezone.ex                             # Phase 4b
 ├── agent_config.ex                         # Phase 5
 ├── agent_store.ex                          # Phase 5
 ├── flow_config.ex                          # Phase 6
@@ -1085,7 +1304,8 @@ lib/agent_ex_web/
         └── knowledge_graph_component.ex    # Phase 7
 
 assets/
-├── js/app.js                               # Phase 4
+├── js/app.js                               # Phase 4, Phase 4b (hooks)
+├── js/hooks/timezone_detect.js             # Phase 4b
 ├── js/hooks/sortable.js                    # Phase 5
 ├── js/hooks/flow_editor.js                 # Phase 6
 ├── js/hooks/graph_viewer.js                # Phase 7
@@ -1102,15 +1322,19 @@ test/
 ### Modified Files
 
 ```text
-mix.exs                            # Phase 4 (deps), Phase 6 (quantum, file_system)
+mix.exs                            # Phase 4 (deps), Phase 4b (tz), Phase 6 (quantum, file_system)
 .gitignore                         # Phase 4 (assets)
 lib/agent_ex/application.ex        # Phase 1 + Phase 4 + Phase 6 (TriggerManager)
 lib/agent_ex/workbench.ex          # Phase 1 (batch ops)
 lib/agent_ex/memory.ex             # Phase 2 (facade)
 lib/agent_ex/tool_caller_loop.ex   # Phase 4 (model_fn)
-config/config.exs                  # Phase 4
+lib/agent_ex/accounts/user.ex      # Phase 4b (timezone field + changeset)
+lib/agent_ex/accounts.ex           # Phase 4b (timezone context functions)
+lib/agent_ex_web/live/chat_live.ex # Phase 4b (user-scoped agent_id + run metadata)
+config/config.exs                  # Phase 4, Phase 4b (time_zone_database)
 config/dev.exs                     # Phase 4
 config/runtime.exs                 # Phase 4
+assets/js/app.js                   # Phase 4b (TimezoneDetect hook)
 ```
 
 ---

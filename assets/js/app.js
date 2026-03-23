@@ -1,8 +1,10 @@
 import "phoenix_html"
 import {Socket} from "phoenix"
 import {LiveSocket} from "phoenix_live_view"
+import TimezoneDetect from "./hooks/timezone_detect"
 
 let Hooks = {}
+Hooks.TimezoneDetect = TimezoneDetect
 
 // Auto-scroll chat messages to bottom on update
 Hooks.ScrollBottom = {

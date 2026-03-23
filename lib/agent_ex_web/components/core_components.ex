@@ -119,6 +119,7 @@ defmodule AgentExWeb.CoreComponents do
   attr(:field, Phoenix.HTML.FormField, doc: "a form field struct")
   attr(:errors, :list, default: [])
   attr(:class, :string, default: nil)
+  attr(:options, :list, default: nil, doc: "options for select type")
   attr(:rest, :global, include: ~w(autocomplete disabled form placeholder readonly required))
 
   def input(%{field: %Phoenix.HTML.FormField{} = field} = assigns) do
@@ -131,6 +132,33 @@ defmodule AgentExWeb.CoreComponents do
     |> assign_new(:value, fn -> field.value end)
     |> assign_new(:label, fn -> Phoenix.Naming.humanize(field.field) end)
     |> input()
+  end
+
+  def input(%{type: "select"} = assigns) do
+    ~H"""
+    <div>
+      <label :if={@label} for={@id} class="block text-sm font-medium text-gray-300 mb-1">
+        {@label}
+      </label>
+      <select
+        name={@name}
+        id={@id}
+        class={[
+          "block w-full rounded-lg bg-gray-800 border border-gray-700 text-white",
+          "focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500",
+          "text-sm px-3 py-2",
+          @errors != [] && "border-red-500",
+          @class
+        ]}
+        {@rest}
+      >
+        <option :for={opt <- @options || []} value={option_value(opt)} selected={option_value(opt) == to_string(@value)}>
+          {option_label(opt)}
+        </option>
+      </select>
+      <p :for={msg <- @errors} class="mt-1 text-xs text-red-400">{msg}</p>
+    </div>
+    """
   end
 
   def input(assigns) do
@@ -157,6 +185,12 @@ defmodule AgentExWeb.CoreComponents do
     </div>
     """
   end
+
+  defp option_value({value, _label}), do: to_string(value)
+  defp option_value(value), do: to_string(value)
+
+  defp option_label({_value, label}), do: label
+  defp option_label(value), do: to_string(value)
 
   @doc """
   Renders a hero icon by name. Requires heroicons to be available.

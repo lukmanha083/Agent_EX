@@ -12,7 +12,14 @@ defmodule AgentExWeb.UserLive.Registration do
         <h1 class="text-2xl font-bold text-white">Create an account</h1>
       </div>
 
-      <.form for={@form} id="registration_form" phx-submit="save" phx-change="validate" class="space-y-4">
+      <.form
+        for={@form}
+        id="registration_form"
+        phx-submit="save"
+        phx-change="validate"
+        phx-hook="TimezoneDetect"
+        class="space-y-4"
+      >
         <.input
           field={@form[:username]}
           type="text"
@@ -36,6 +43,12 @@ defmodule AgentExWeb.UserLive.Registration do
           label="Password"
           autocomplete="new-password"
           required
+        />
+        <.input
+          field={@form[:timezone]}
+          type="select"
+          label="Timezone"
+          options={@timezone_options}
         />
 
         <.button phx-disable-with="Creating account..." class="w-full bg-indigo-600 hover:bg-indigo-500 text-white">
@@ -66,10 +79,32 @@ defmodule AgentExWeb.UserLive.Registration do
         hash_password: false
       )
 
-    {:ok, assign_form(socket, changeset), temporary_assigns: [form: nil], layout: false}
+    socket =
+      socket
+      |> assign(:timezone_options, AgentEx.Timezone.select_options())
+      |> assign_form(changeset)
+
+    {:ok, socket, temporary_assigns: [form: nil], layout: false}
   end
 
   @impl true
+  def handle_event("timezone_detected", %{"timezone" => tz}, socket) do
+    if AgentEx.Timezone.valid?(tz) do
+      existing_params = (socket.assigns.form && socket.assigns.form.params) || %{}
+      attrs = Map.put(existing_params, "timezone", tz)
+
+      changeset =
+        Accounts.change_user_registration(%User{}, attrs,
+          validate_unique: false,
+          hash_password: false
+        )
+
+      {:noreply, assign_form(socket, changeset)}
+    else
+      {:noreply, socket}
+    end
+  end
+
   def handle_event("save", %{"user" => user_params}, socket) do
     case Accounts.register_user(user_params) do
       {:ok, user} ->
