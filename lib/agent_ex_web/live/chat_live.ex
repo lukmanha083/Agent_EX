@@ -331,7 +331,9 @@ defmodule AgentExWeb.ChatLive do
       %{role: role, content: msg.content}
     end)
   rescue
-    _ -> []
+    e in [ArgumentError, MatchError, KeyError] ->
+      Logger.error("Failed to restore messages: #{inspect(e)}")
+      []
   end
 
   defp user_agent_id(user), do: "user_#{user.id}_chat"

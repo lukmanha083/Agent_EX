@@ -23,7 +23,7 @@ defmodule AgentEx.Timezone do
                     |> List.first()
                   end)
 
-  @zone_identifiers (if @zone_tab_path do
+  @zone_identifiers (if @zone_tab_path && File.exists?(@zone_tab_path) do
                        @zone_tab_path
                        |> File.read!()
                        |> String.split("\n")
@@ -33,7 +33,10 @@ defmodule AgentEx.Timezone do
                        end)
                        |> Enum.reject(&is_nil/1)
                      else
-                       []
+                       raise CompileError,
+                         description:
+                           "IANA zone1970.tab not found (searched: #{inspect(@zone_tab_path)}). " <>
+                             "Ensure the :tz dependency is installed and compiled."
                      end)
                     |> Enum.concat(["Etc/UTC"])
                     |> Enum.uniq()

@@ -90,8 +90,11 @@ defmodule AgentExWeb.UserLive.Registration do
   @impl true
   def handle_event("timezone_detected", %{"timezone" => tz}, socket) do
     if AgentEx.Timezone.valid?(tz) do
+      existing_params = socket.assigns.form.params || %{}
+      attrs = Map.put(existing_params, "timezone", tz)
+
       changeset =
-        Accounts.change_user_registration(%User{}, %{"timezone" => tz},
+        Accounts.change_user_registration(%User{}, attrs,
           validate_unique: false,
           hash_password: false
         )
