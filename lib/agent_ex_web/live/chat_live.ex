@@ -281,7 +281,11 @@ defmodule AgentExWeb.ChatLive do
 
     agent_id = socket.assigns.agent_id
     Memory.stop_session(agent_id, socket.assigns.session_id)
-    Memory.start_session(agent_id, socket.assigns.session_id)
+
+    case Memory.start_session(agent_id, socket.assigns.session_id) do
+      {:ok, _} -> :ok
+      {:error, reason} -> Logger.warning("Failed to restart memory session: #{inspect(reason)}")
+    end
 
     assign(socket, messages: [], events: [], stages: [], thinking: false, run_id: nil)
   end
