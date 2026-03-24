@@ -47,6 +47,9 @@ defmodule AgentEx.MixProject do
       {:bandit, "~> 1.6"},
       {:phoenix_live_dashboard, "~> 0.8"},
 
+      # UI Components
+      {:salad_ui, "~> 1.0.0-beta.3"},
+
       # Assets
       {:tailwind, "~> 0.2", runtime: Mix.env() == :dev},
       {:esbuild, "~> 0.9", runtime: Mix.env() == :dev},
