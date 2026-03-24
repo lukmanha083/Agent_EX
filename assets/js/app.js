@@ -11,19 +11,29 @@ import "salad_ui/components/accordion"
 import "salad_ui/components/collapsible"
 import "salad_ui/components/command"
 import "salad_ui/components/dialog"
-import DropdownMenuComponent from "salad_ui/components/dropdown_menu"
+import "salad_ui/components/dropdown_menu"
 
-// Patch: add toggle-on-click when dropdown is open (SaladUI missing trigger click in open state)
-const origConfig = DropdownMenuComponent.prototype.getComponentConfig
-DropdownMenuComponent.prototype.getComponentConfig = function() {
-  const config = origConfig.call(this)
-  config.events.open.mouseMap = {
-    trigger: {
-      click: (_e) => { this.transition("toggle") }
-    }
+// Fix: toggle dropdown closed when clicking the trigger while open.
+// Problem: onOutsideClick closes it → state becomes "closed" → same click
+// hits closed state's trigger handler → reopens immediately.
+// Solution: mark the root on trigger click when open (capture phase),
+// then suppress the reopen in a microtask.
+document.addEventListener('click', (e) => {
+  const trigger = e.target.closest('[data-component="dropdown-menu"] [data-part="trigger"]')
+  if (!trigger) return
+  const root = trigger.closest('[data-component="dropdown-menu"]')
+  if (root && root.getAttribute('data-state') === 'open') {
+    // After all sync handlers run (open→close→reopen), force it closed
+    queueMicrotask(() => {
+      if (root.getAttribute('data-state') === 'open') {
+        root.setAttribute('data-state', 'closed')
+        // Hide the content
+        const positioner = root.querySelector('[data-part="positioner"]')
+        if (positioner) positioner.hidden = true
+      }
+    })
   }
-  return config
-}
+}, true)
 import "salad_ui/components/hover-card"
 import "salad_ui/components/menu"
 import "salad_ui/components/popover"
