@@ -73,6 +73,7 @@ defmodule AgentExWeb do
       # CoreComponents.button/1. Import it locally in modules that need it.
       import SaladUI.Badge
       import SaladUI.Card
+      import SaladUI.DropdownMenu
       import SaladUI.Separator
       import SaladUI.Sheet
       import SaladUI.Tooltip

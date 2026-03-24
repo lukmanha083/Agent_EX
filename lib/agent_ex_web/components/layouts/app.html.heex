@@ -21,20 +21,20 @@
               <.icon name="hero-chat-bubble-left-right" class="w-5 h-5" />
               Chat
             </.link>
-            <.link navigate={~p"/users/settings"} class={[
-              "flex items-center gap-3 px-3 py-2.5 text-sm rounded-md transition-colors min-h-[44px]",
-              nav_active?(@socket, AgentExWeb.UserLive.Settings) && "bg-gray-800 text-white" || "text-gray-400 hover:bg-gray-800 hover:text-white"
-            ]}>
-              <.icon name="hero-cog-6-tooth" class="w-5 h-5" />
-              Settings
-            </.link>
           </nav>
           <div class="p-3 border-t border-gray-800">
-            <.link navigate={~p"/users/settings"} class="flex items-center gap-3 px-3 py-2.5 text-sm text-gray-400 rounded-md hover:bg-gray-800 hover:text-white transition-colors min-h-[44px]">
+            <.link navigate={~p"/users/profile"} class="flex items-center gap-3 px-3 py-2.5 text-sm text-gray-400 rounded-md hover:bg-gray-800 hover:text-white transition-colors min-h-[44px]">
               <.icon name="hero-user-circle" class="w-5 h-5" />
               Profile
             </.link>
-            <p class="text-xs text-gray-600 px-3 mt-2">v<%= Application.spec(:agent_ex, :vsn) |> to_string() %></p>
+            <.link navigate={~p"/users/settings"} class="flex items-center gap-3 px-3 py-2.5 text-sm text-gray-400 rounded-md hover:bg-gray-800 hover:text-white transition-colors min-h-[44px]">
+              <.icon name="hero-cog-6-tooth" class="w-5 h-5" />
+              Settings
+            </.link>
+            <.link href={~p"/users/log-out"} method="delete" class="flex items-center gap-3 px-3 py-2.5 text-sm text-red-400 rounded-md hover:bg-gray-800 hover:text-red-300 transition-colors min-h-[44px]">
+              <.icon name="hero-arrow-right-on-rectangle" class="w-5 h-5" />
+              Sign out
+            </.link>
           </div>
         </div>
       </.sheet_content>
@@ -55,7 +55,6 @@
 
     <!-- Navigation -->
     <nav class="flex-1 p-2 lg:p-3 space-y-1">
-      <!-- Chat -->
       <.tooltip id="nav-chat-tooltip">
         <.tooltip_trigger>
           <.link navigate={~p"/chat"} class={[
@@ -69,34 +68,54 @@
         </.tooltip_trigger>
         <.tooltip_content side="right" class="lg:hidden">Chat</.tooltip_content>
       </.tooltip>
-
-      <!-- Settings -->
-      <.tooltip id="nav-settings-tooltip">
-        <.tooltip_trigger>
-          <.link navigate={~p"/users/settings"} class={[
-            "flex items-center gap-3 px-3 py-2 rounded-md transition-colors",
-            "md:justify-center lg:justify-start",
-            nav_active?(@socket, AgentExWeb.UserLive.Settings) && "bg-gray-800 text-white" || "text-gray-400 hover:bg-gray-800 hover:text-white"
-          ]}>
-            <.icon name="hero-cog-6-tooth" class="w-5 h-5 shrink-0" />
-            <span class="hidden lg:inline text-sm">Settings</span>
-          </.link>
-        </.tooltip_trigger>
-        <.tooltip_content side="right" class="lg:hidden">Settings</.tooltip_content>
-      </.tooltip>
     </nav>
 
-    <!-- Footer -->
-    <div class="p-2 lg:p-3 border-t border-gray-800 space-y-1">
-      <.tooltip id="nav-profile-tooltip">
-        <.tooltip_trigger>
-          <.link navigate={~p"/users/settings"} class="flex items-center gap-3 px-3 py-2 text-gray-400 rounded-md hover:bg-gray-800 hover:text-white transition-colors md:justify-center lg:justify-start">
-            <.icon name="hero-user-circle" class="w-5 h-5 shrink-0" />
-            <span class="hidden lg:inline text-sm">Profile</span>
-          </.link>
-        </.tooltip_trigger>
-        <.tooltip_content side="right" class="lg:hidden">Profile</.tooltip_content>
-      </.tooltip>
+    <!-- User avatar + dropdown -->
+    <div class="p-2 lg:p-3 border-t border-gray-800">
+      <.dropdown_menu id="user-menu">
+        <.dropdown_menu_trigger>
+          <button type="button" class="flex items-center gap-3 w-full px-2 py-2 rounded-md text-gray-400 hover:bg-gray-800 hover:text-white transition-colors md:justify-center lg:justify-start">
+            <div class="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-600 text-xs font-bold text-white shrink-0">
+              <%= if assigns[:current_scope] && @current_scope.user do %>
+                <%= initials(@current_scope.user.username || @current_scope.user.email) %>
+              <% else %>
+                ?
+              <% end %>
+            </div>
+            <div class="hidden lg:block min-w-0 text-left">
+              <p class="text-sm text-white truncate">
+                <%= if assigns[:current_scope] && @current_scope.user do %>
+                  <%= @current_scope.user.username || @current_scope.user.email %>
+                <% end %>
+              </p>
+            </div>
+            <.icon name="hero-chevron-up" class="w-4 h-4 hidden lg:block ml-auto shrink-0" />
+          </button>
+        </.dropdown_menu_trigger>
+        <.dropdown_menu_content side="top" class="w-56 mb-1">
+          <.dropdown_menu_label>My Account</.dropdown_menu_label>
+          <.dropdown_menu_separator />
+          <.dropdown_menu_item>
+            <.link navigate={~p"/users/profile"} class="flex items-center gap-2 w-full">
+              <.icon name="hero-user-circle" class="w-4 h-4" />
+              Profile
+            </.link>
+          </.dropdown_menu_item>
+          <.dropdown_menu_item>
+            <.link navigate={~p"/users/settings"} class="flex items-center gap-2 w-full">
+              <.icon name="hero-cog-6-tooth" class="w-4 h-4" />
+              Settings
+            </.link>
+          </.dropdown_menu_item>
+          <.dropdown_menu_separator />
+          <.dropdown_menu_item variant="destructive">
+            <.link href={~p"/users/log-out"} method="delete" class="flex items-center gap-2 w-full">
+              <.icon name="hero-arrow-right-on-rectangle" class="w-4 h-4" />
+              Sign out
+            </.link>
+          </.dropdown_menu_item>
+        </.dropdown_menu_content>
+      </.dropdown_menu>
       <p class="hidden lg:block text-xs text-gray-600 px-3 mt-2">v<%= Application.spec(:agent_ex, :vsn) |> to_string() %></p>
     </div>
   </aside>
