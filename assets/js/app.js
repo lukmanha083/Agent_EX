@@ -4,7 +4,7 @@ import {LiveSocket} from "phoenix_live_view"
 import TimezoneDetect from "./hooks/timezone_detect"
 
 // SaladUI — import all component JS so any component works without extra setup
-import SaladUI from "salad_ui"
+import SaladUILib from "salad_ui"
 import "salad_ui/components/accordion"
 // chart requires chart.js npm package — skip until needed
 // import "salad_ui/components/chart"
@@ -24,7 +24,7 @@ import "salad_ui/components/tooltip"
 
 let Hooks = {}
 Hooks.TimezoneDetect = TimezoneDetect
-Hooks.SaladUI = SaladUI
+Hooks.SaladUI = SaladUILib.SaladUIHook
 
 // Auto-scroll chat messages to bottom on update
 Hooks.ScrollBottom = {
