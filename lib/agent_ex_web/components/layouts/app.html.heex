@@ -1,31 +1,108 @@
 <div class="flex h-screen bg-gray-950">
-  <!-- Sidebar -->
-  <nav class="w-56 bg-gray-900 border-r border-gray-800 flex flex-col">
-    <div class="p-4 border-b border-gray-800">
-      <h1 class="text-lg font-bold text-white tracking-tight">AgentEx</h1>
-      <p class="text-xs text-gray-500 mt-0.5">AI Agent Framework</p>
+  <!-- Mobile top bar -->
+  <div class="fixed top-0 left-0 right-0 z-40 flex items-center gap-3 px-4 h-14 bg-gray-900 border-b border-gray-800 md:hidden">
+    <.sheet id="mobile-nav">
+      <.sheet_trigger>
+        <button type="button" class="p-2 -ml-2 rounded-md text-gray-400 hover:text-white hover:bg-gray-800 min-h-[44px] min-w-[44px] flex items-center justify-center" aria-label="Open navigation">
+          <.icon name="hero-bars-3" class="w-5 h-5" />
+        </button>
+      </.sheet_trigger>
+      <.sheet_content side="left" class="w-72 p-0 bg-gray-900 border-r border-gray-800">
+        <div class="flex flex-col h-full">
+          <div class="p-4 border-b border-gray-800">
+            <h1 class="text-lg font-bold text-white tracking-tight">AgentEx</h1>
+            <p class="text-xs text-gray-500 mt-0.5">AI Agent Framework</p>
+          </div>
+          <nav class="flex-1 p-3 space-y-1">
+            <.link navigate={~p"/chat"} class={[
+              "flex items-center gap-3 px-3 py-2.5 text-sm rounded-md transition-colors min-h-[44px]",
+              nav_active?(@socket, AgentExWeb.ChatLive) && "bg-gray-800 text-white" || "text-gray-400 hover:bg-gray-800 hover:text-white"
+            ]}>
+              <.icon name="hero-chat-bubble-left-right" class="w-5 h-5" />
+              Chat
+            </.link>
+            <.link navigate={~p"/users/settings"} class={[
+              "flex items-center gap-3 px-3 py-2.5 text-sm rounded-md transition-colors min-h-[44px]",
+              nav_active?(@socket, AgentExWeb.UserLive.Settings) && "bg-gray-800 text-white" || "text-gray-400 hover:bg-gray-800 hover:text-white"
+            ]}>
+              <.icon name="hero-cog-6-tooth" class="w-5 h-5" />
+              Settings
+            </.link>
+          </nav>
+          <div class="p-3 border-t border-gray-800">
+            <.link navigate={~p"/users/settings"} class="flex items-center gap-3 px-3 py-2.5 text-sm text-gray-400 rounded-md hover:bg-gray-800 hover:text-white transition-colors min-h-[44px]">
+              <.icon name="hero-user-circle" class="w-5 h-5" />
+              Profile
+            </.link>
+            <p class="text-xs text-gray-600 px-3 mt-2">v<%= Application.spec(:agent_ex, :vsn) |> to_string() %></p>
+          </div>
+        </div>
+      </.sheet_content>
+    </.sheet>
+    <h1 class="text-base font-bold text-white">AgentEx</h1>
+  </div>
+
+  <!-- Sidebar: icon rail on tablet, full on desktop -->
+  <aside class="hidden md:flex md:w-16 lg:w-64 flex-col flex-shrink-0 bg-gray-900 border-r border-gray-800">
+    <!-- Logo -->
+    <div class="flex items-center h-14 px-3 lg:px-4 border-b border-gray-800">
+      <.icon name="hero-cpu-chip" class="w-6 h-6 text-indigo-400 lg:hidden mx-auto" />
+      <div class="hidden lg:block">
+        <h1 class="text-lg font-bold text-white tracking-tight">AgentEx</h1>
+        <p class="text-xs text-gray-500 mt-0.5">AI Agent Framework</p>
+      </div>
     </div>
 
-    <div class="flex-1 p-3 space-y-1">
-      <a href="/" class="flex items-center gap-2 px-3 py-2 text-sm text-gray-300 rounded-md hover:bg-gray-800 hover:text-white transition-colors">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-        </svg>
-        Chat
-      </a>
-    </div>
+    <!-- Navigation -->
+    <nav class="flex-1 p-2 lg:p-3 space-y-1">
+      <!-- Chat -->
+      <.tooltip id="nav-chat-tooltip">
+        <.tooltip_trigger>
+          <.link navigate={~p"/chat"} class={[
+            "flex items-center gap-3 px-3 py-2 rounded-md transition-colors",
+            "md:justify-center lg:justify-start",
+            nav_active?(@socket, AgentExWeb.ChatLive) && "bg-gray-800 text-white" || "text-gray-400 hover:bg-gray-800 hover:text-white"
+          ]}>
+            <.icon name="hero-chat-bubble-left-right" class="w-5 h-5 shrink-0" />
+            <span class="hidden lg:inline text-sm">Chat</span>
+          </.link>
+        </.tooltip_trigger>
+        <.tooltip_content side="right" class="lg:hidden">Chat</.tooltip_content>
+      </.tooltip>
 
-    <div class="p-3 border-t border-gray-800 space-y-1">
-      <.link navigate={~p"/users/settings"} class="flex items-center gap-2 px-3 py-2 text-sm text-gray-400 rounded-md hover:bg-gray-800 hover:text-white transition-colors">
-        <.icon name="hero-user-circle" class="w-4 h-4" />
-        Profile
-      </.link>
-      <p class="text-xs text-gray-600 px-3 mt-2">v<%= Application.spec(:agent_ex, :vsn) |> to_string() %></p>
+      <!-- Settings -->
+      <.tooltip id="nav-settings-tooltip">
+        <.tooltip_trigger>
+          <.link navigate={~p"/users/settings"} class={[
+            "flex items-center gap-3 px-3 py-2 rounded-md transition-colors",
+            "md:justify-center lg:justify-start",
+            nav_active?(@socket, AgentExWeb.UserLive.Settings) && "bg-gray-800 text-white" || "text-gray-400 hover:bg-gray-800 hover:text-white"
+          ]}>
+            <.icon name="hero-cog-6-tooth" class="w-5 h-5 shrink-0" />
+            <span class="hidden lg:inline text-sm">Settings</span>
+          </.link>
+        </.tooltip_trigger>
+        <.tooltip_content side="right" class="lg:hidden">Settings</.tooltip_content>
+      </.tooltip>
+    </nav>
+
+    <!-- Footer -->
+    <div class="p-2 lg:p-3 border-t border-gray-800 space-y-1">
+      <.tooltip id="nav-profile-tooltip">
+        <.tooltip_trigger>
+          <.link navigate={~p"/users/settings"} class="flex items-center gap-3 px-3 py-2 text-gray-400 rounded-md hover:bg-gray-800 hover:text-white transition-colors md:justify-center lg:justify-start">
+            <.icon name="hero-user-circle" class="w-5 h-5 shrink-0" />
+            <span class="hidden lg:inline text-sm">Profile</span>
+          </.link>
+        </.tooltip_trigger>
+        <.tooltip_content side="right" class="lg:hidden">Profile</.tooltip_content>
+      </.tooltip>
+      <p class="hidden lg:block text-xs text-gray-600 px-3 mt-2">v<%= Application.spec(:agent_ex, :vsn) |> to_string() %></p>
     </div>
-  </nav>
+  </aside>
 
   <!-- Main content -->
-  <main class="flex-1 flex flex-col overflow-hidden">
+  <main class="flex-1 flex flex-col overflow-hidden pt-14 md:pt-0">
     <.flash_group flash={@flash} />
     <%= if assigns[:inner_block] do %>
       <%= render_slot(@inner_block) %>
