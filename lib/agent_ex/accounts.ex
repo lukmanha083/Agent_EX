@@ -121,6 +121,22 @@ defmodule AgentEx.Accounts do
     |> Repo.update()
   end
 
+  @doc """
+  Returns a changeset for changing the user's LLM provider and model.
+  """
+  def change_user_provider(%User{} = user, attrs \\ %{}, opts \\ []) do
+    User.provider_changeset(user, attrs, opts)
+  end
+
+  @doc """
+  Updates the user's LLM provider and model.
+  """
+  def update_user_provider(%User{} = user, attrs) do
+    user
+    |> User.provider_changeset(attrs)
+    |> Repo.update()
+  end
+
   ## Settings
 
   @doc """

@@ -4,6 +4,7 @@ defmodule AgentExWeb.UserLive.Settings do
   on_mount({AgentExWeb.UserAuth, :require_sudo_mode})
 
   alias AgentEx.Accounts
+  import AgentExWeb.ProviderHelpers
 
   @impl true
   def render(assigns) do
@@ -69,6 +70,37 @@ defmodule AgentExWeb.UserLive.Settings do
             />
             <.button phx-disable-with="Saving..." class="bg-indigo-600 hover:bg-indigo-500 text-white">
               Update timezone
+            </.button>
+          </.form>
+        </div>
+
+        <%!-- LLM Provider section --%>
+        <div class="rounded-lg border border-gray-800 bg-gray-900 p-6 space-y-4">
+          <h2 class="text-lg font-semibold text-white">LLM Provider</h2>
+          <.form for={@provider_form} id="provider_form" phx-submit="update_provider" phx-change="validate_provider" class="space-y-4">
+            <.input
+              field={@provider_form[:provider]}
+              type="select"
+              label="Provider"
+              options={provider_options()}
+            />
+            <.input
+              field={@provider_form[:model]}
+              type="select"
+              label="Model"
+              options={Enum.map(models_for_provider(@selected_provider), fn m -> {m, m} end)}
+            />
+            <.input
+              field={@provider_form[:provider_api_key]}
+              type="password"
+              label="API Key"
+              placeholder="sk-..."
+              autocomplete="off"
+              disabled
+            />
+            <p class="text-xs text-gray-500">API key storage coming in a future update. Keys are currently read from server environment.</p>
+            <.button phx-disable-with="Saving..." class="bg-indigo-600 hover:bg-indigo-500 text-white">
+              Update provider
             </.button>
           </.form>
         </div>
@@ -144,6 +176,7 @@ defmodule AgentExWeb.UserLive.Settings do
     user = socket.assigns.current_scope.user
     username_changeset = Accounts.change_user_username(user, %{})
     timezone_changeset = Accounts.change_user_timezone(user, %{})
+    provider_changeset = Accounts.change_user_provider(user, %{})
     email_changeset = Accounts.change_user_email(user, %{}, validate_unique: false)
     password_changeset = Accounts.change_user_password(user, %{}, hash_password: false)
 
@@ -153,6 +186,8 @@ defmodule AgentExWeb.UserLive.Settings do
       |> assign(:username_form, to_form(username_changeset))
       |> assign(:timezone_form, to_form(timezone_changeset))
       |> assign(:timezone_options, AgentEx.Timezone.select_options())
+      |> assign(:provider_form, to_form(provider_changeset))
+      |> assign(:selected_provider, user.provider || "openai")
       |> assign(:email_form, to_form(email_changeset))
       |> assign(:password_form, to_form(password_changeset))
       |> assign(:trigger_submit, false)
@@ -222,6 +257,44 @@ defmodule AgentExWeb.UserLive.Settings do
 
         {:error, changeset} ->
           {:noreply, assign(socket, timezone_form: to_form(changeset, action: :insert))}
+      end
+    else
+      {:noreply,
+       socket
+       |> put_flash(:error, "Session expired. Please re-authenticate.")
+       |> push_navigate(to: ~p"/users/log-in")}
+    end
+  end
+
+  def handle_event("validate_provider", params, socket) do
+    %{"user" => user_params} = params
+
+    provider_form =
+      socket.assigns.current_scope.user
+      |> Accounts.change_user_provider(user_params)
+      |> Map.put(:action, :validate)
+      |> to_form()
+
+    selected_provider = user_params["provider"] || socket.assigns.selected_provider
+
+    {:noreply,
+     assign(socket, provider_form: provider_form, selected_provider: selected_provider)}
+  end
+
+  def handle_event("update_provider", params, socket) do
+    %{"user" => user_params} = params
+    user = socket.assigns.current_scope.user
+
+    if Accounts.sudo_mode?(user) do
+      case Accounts.update_user_provider(user, user_params) do
+        {:ok, _user} ->
+          {:noreply,
+           socket
+           |> put_flash(:info, "Provider updated successfully.")
+           |> push_navigate(to: ~p"/users/settings")}
+
+        {:error, changeset} ->
+          {:noreply, assign(socket, provider_form: to_form(changeset, action: :insert))}
       end
     else
       {:noreply,
