@@ -16,22 +16,15 @@ import "salad_ui/components/dropdown_menu"
 // Fix: toggle dropdown closed when clicking the trigger while open.
 // Problem: onOutsideClick closes it → state becomes "closed" → same click
 // hits closed state's trigger handler → reopens immediately.
-// Solution: mark the root on trigger click when open (capture phase),
-// then suppress the reopen in a microtask.
+// Solution: stop the click entirely, then dispatch Escape which the open
+// state's keyMap already handles (Escape → close).
 document.addEventListener('click', (e) => {
   const trigger = e.target.closest('[data-component="dropdown-menu"] [data-part="trigger"]')
   if (!trigger) return
   const root = trigger.closest('[data-component="dropdown-menu"]')
   if (root && root.getAttribute('data-state') === 'open') {
-    // After all sync handlers run (open→close→reopen), force it closed
-    queueMicrotask(() => {
-      if (root.getAttribute('data-state') === 'open') {
-        root.setAttribute('data-state', 'closed')
-        // Hide the content
-        const positioner = root.querySelector('[data-part="positioner"]')
-        if (positioner) positioner.hidden = true
-      }
-    })
+    e.stopPropagation()
+    root.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
   }
 }, true)
 import "salad_ui/components/hover-card"
