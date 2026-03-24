@@ -6,7 +6,8 @@ import TimezoneDetect from "./hooks/timezone_detect"
 // SaladUI — import all component JS so any component works without extra setup
 import SaladUI from "salad_ui"
 import "salad_ui/components/accordion"
-import "salad_ui/components/chart"
+// chart requires chart.js npm package — skip until needed
+// import "salad_ui/components/chart"
 import "salad_ui/components/collapsible"
 import "salad_ui/components/command"
 import "salad_ui/components/dialog"
