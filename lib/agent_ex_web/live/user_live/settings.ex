@@ -9,150 +9,175 @@ defmodule AgentExWeb.UserLive.Settings do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="flex-1 overflow-y-auto p-6 md:p-10">
-      <div class="mx-auto max-w-lg space-y-8">
+    <div class="flex-1 overflow-y-auto p-4 md:p-6 lg:p-10">
+      <div class="mx-auto max-w-lg space-y-6">
         <%!-- Profile header with avatar --%>
         <div class="flex items-center gap-4">
-          <div class="flex h-16 w-16 items-center justify-center rounded-full bg-indigo-600 text-xl font-bold text-white">
+          <div class="flex h-16 w-16 items-center justify-center rounded-full bg-indigo-600 text-xl font-bold text-white shrink-0">
             {initials(@current_scope.user.username || @current_scope.user.email)}
           </div>
-          <div>
-            <h1 class="text-2xl font-bold text-white">{@current_scope.user.username || @current_scope.user.email}</h1>
-            <p class="text-sm text-gray-400">{@current_scope.user.email}</p>
+          <div class="min-w-0">
+            <h1 class="text-2xl font-bold text-white truncate">{@current_scope.user.username || @current_scope.user.email}</h1>
+            <p class="text-sm text-gray-400 truncate">{@current_scope.user.email}</p>
           </div>
         </div>
 
+        <.separator />
+
         <%!-- Username section --%>
-        <div class="rounded-lg border border-gray-800 bg-gray-900 p-6 space-y-4">
-          <h2 class="text-lg font-semibold text-white">Username</h2>
-          <.form for={@username_form} id="username_form" phx-submit="update_username" phx-change="validate_username" class="space-y-4">
-            <.input
-              field={@username_form[:username]}
-              type="text"
-              label="Username"
-              autocomplete="username"
-              spellcheck="false"
-              required
-            />
-            <.button phx-disable-with="Saving..." class="bg-indigo-600 hover:bg-indigo-500 text-white">
-              Update username
-            </.button>
-          </.form>
-        </div>
+        <.card>
+          <.card_header>
+            <.card_title>Username</.card_title>
+          </.card_header>
+          <.card_content>
+            <.form for={@username_form} id="username_form" phx-submit="update_username" phx-change="validate_username" class="space-y-4">
+              <.input
+                field={@username_form[:username]}
+                type="text"
+                label="Username"
+                autocomplete="username"
+                spellcheck="false"
+                required
+              />
+              <.button phx-disable-with="Saving..." class="bg-indigo-600 hover:bg-indigo-500 text-white">
+                Update username
+              </.button>
+            </.form>
+          </.card_content>
+        </.card>
 
         <%!-- Email section --%>
-        <div class="rounded-lg border border-gray-800 bg-gray-900 p-6 space-y-4">
-          <h2 class="text-lg font-semibold text-white">Email address</h2>
-          <.form for={@email_form} id="email_form" phx-submit="update_email" phx-change="validate_email" class="space-y-4">
-            <.input
-              field={@email_form[:email]}
-              type="email"
-              label="Email"
-              autocomplete="email"
-              spellcheck="false"
-              required
-            />
-            <.button phx-disable-with="Changing..." class="bg-indigo-600 hover:bg-indigo-500 text-white">
-              Change email
-            </.button>
-          </.form>
-        </div>
+        <.card>
+          <.card_header>
+            <.card_title>Email address</.card_title>
+          </.card_header>
+          <.card_content>
+            <.form for={@email_form} id="email_form" phx-submit="update_email" phx-change="validate_email" class="space-y-4">
+              <.input
+                field={@email_form[:email]}
+                type="email"
+                label="Email"
+                autocomplete="email"
+                spellcheck="false"
+                required
+              />
+              <.button phx-disable-with="Changing..." class="bg-indigo-600 hover:bg-indigo-500 text-white">
+                Change email
+              </.button>
+            </.form>
+          </.card_content>
+        </.card>
 
         <%!-- Timezone section --%>
-        <div class="rounded-lg border border-gray-800 bg-gray-900 p-6 space-y-4">
-          <h2 class="text-lg font-semibold text-white">Timezone</h2>
-          <.form for={@timezone_form} id="timezone_form" phx-submit="update_timezone" phx-change="validate_timezone" class="space-y-4">
-            <.input
-              field={@timezone_form[:timezone]}
-              type="select"
-              label="Timezone"
-              options={@timezone_options}
-            />
-            <.button phx-disable-with="Saving..." class="bg-indigo-600 hover:bg-indigo-500 text-white">
-              Update timezone
-            </.button>
-          </.form>
-        </div>
+        <.card>
+          <.card_header>
+            <.card_title>Timezone</.card_title>
+          </.card_header>
+          <.card_content>
+            <.form for={@timezone_form} id="timezone_form" phx-submit="update_timezone" phx-change="validate_timezone" class="space-y-4">
+              <.input
+                field={@timezone_form[:timezone]}
+                type="select"
+                label="Timezone"
+                options={@timezone_options}
+              />
+              <.button phx-disable-with="Saving..." class="bg-indigo-600 hover:bg-indigo-500 text-white">
+                Update timezone
+              </.button>
+            </.form>
+          </.card_content>
+        </.card>
 
         <%!-- LLM Provider section --%>
-        <div class="rounded-lg border border-gray-800 bg-gray-900 p-6 space-y-4">
-          <h2 class="text-lg font-semibold text-white">LLM Provider</h2>
-          <.form for={@provider_form} id="provider_form" phx-submit="update_provider" phx-change="validate_provider" class="space-y-4">
-            <.input
-              field={@provider_form[:provider]}
-              type="select"
-              label="Provider"
-              options={provider_options()}
-            />
-            <.input
-              field={@provider_form[:model]}
-              type="select"
-              label="Model"
-              options={Enum.map(models_for_provider(@selected_provider), fn m -> {m, m} end)}
-            />
-            <.input
-              field={@provider_form[:provider_api_key]}
-              type="password"
-              label="API Key"
-              placeholder="sk-..."
-              autocomplete="off"
-              disabled
-            />
-            <p class="text-xs text-gray-500">API key storage coming in a future update. Keys are currently read from server environment.</p>
-            <.button phx-disable-with="Saving..." class="bg-indigo-600 hover:bg-indigo-500 text-white">
-              Update provider
-            </.button>
-          </.form>
-        </div>
+        <.card>
+          <.card_header>
+            <.card_title>LLM Provider</.card_title>
+            <.card_description>Choose your default model for chat conversations.</.card_description>
+          </.card_header>
+          <.card_content>
+            <.form for={@provider_form} id="provider_form" phx-submit="update_provider" phx-change="validate_provider" class="space-y-4">
+              <.input
+                field={@provider_form[:provider]}
+                type="select"
+                label="Provider"
+                options={provider_options()}
+              />
+              <.input
+                field={@provider_form[:model]}
+                type="select"
+                label="Model"
+                options={Enum.map(models_for_provider(@selected_provider), fn m -> {m, m} end)}
+              />
+              <.input
+                field={@provider_form[:provider_api_key]}
+                type="password"
+                label="API Key"
+                placeholder="sk-..."
+                autocomplete="off"
+                disabled
+              />
+              <p class="text-xs text-muted-foreground">API key storage coming in a future update. Keys are currently read from server environment.</p>
+              <.button phx-disable-with="Saving..." class="bg-indigo-600 hover:bg-indigo-500 text-white">
+                Update provider
+              </.button>
+            </.form>
+          </.card_content>
+        </.card>
 
         <%!-- Password section --%>
-        <div class="rounded-lg border border-gray-800 bg-gray-900 p-6 space-y-4">
-          <h2 class="text-lg font-semibold text-white">Password</h2>
-          <.form
-            for={@password_form}
-            id="password_form"
-            action={~p"/users/update-password"}
-            method="post"
-            phx-change="validate_password"
-            phx-submit="update_password"
-            phx-trigger-action={@trigger_submit}
-            class="space-y-4"
-          >
-            <input
-              name={@password_form[:email].name}
-              type="hidden"
-              id="hidden_user_email"
-              spellcheck="false"
-              value={@current_email}
-            />
-            <.input
-              field={@password_form[:password]}
-              type="password"
-              label="New password"
-              autocomplete="new-password"
-              spellcheck="false"
-              required
-            />
-            <.input
-              field={@password_form[:password_confirmation]}
-              type="password"
-              label="Confirm new password"
-              autocomplete="new-password"
-              spellcheck="false"
-            />
-            <.button phx-disable-with="Saving..." class="bg-indigo-600 hover:bg-indigo-500 text-white">
-              Save password
-            </.button>
-          </.form>
-        </div>
+        <.card>
+          <.card_header>
+            <.card_title>Password</.card_title>
+          </.card_header>
+          <.card_content>
+            <.form
+              for={@password_form}
+              id="password_form"
+              action={~p"/users/update-password"}
+              method="post"
+              phx-change="validate_password"
+              phx-submit="update_password"
+              phx-trigger-action={@trigger_submit}
+              class="space-y-4"
+            >
+              <input
+                name={@password_form[:email].name}
+                type="hidden"
+                id="hidden_user_email"
+                spellcheck="false"
+                value={@current_email}
+              />
+              <.input
+                field={@password_form[:password]}
+                type="password"
+                label="New password"
+                autocomplete="new-password"
+                spellcheck="false"
+                required
+              />
+              <.input
+                field={@password_form[:password_confirmation]}
+                type="password"
+                label="Confirm new password"
+                autocomplete="new-password"
+                spellcheck="false"
+              />
+              <.button phx-disable-with="Saving..." class="bg-indigo-600 hover:bg-indigo-500 text-white">
+                Save password
+              </.button>
+            </.form>
+          </.card_content>
+        </.card>
 
         <%!-- Sign out --%>
-        <div class="rounded-lg border border-gray-800 bg-gray-900 p-6">
-          <.link href={~p"/users/log-out"} method="delete" class="flex items-center gap-2 text-sm text-red-400 hover:text-red-300 transition-colors">
-            <.icon name="hero-arrow-right-on-rectangle" class="w-4 h-4" />
-            Sign out of your account
-          </.link>
-        </div>
+        <.card>
+          <.card_content class="py-4">
+            <.link href={~p"/users/log-out"} method="delete" class="flex items-center gap-2 text-sm text-red-400 hover:text-red-300 transition-colors">
+              <.icon name="hero-arrow-right-on-rectangle" class="w-4 h-4" />
+              Sign out of your account
+            </.link>
+          </.card_content>
+        </.card>
       </div>
     </div>
     """
