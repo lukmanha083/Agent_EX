@@ -11,7 +11,19 @@ import "salad_ui/components/accordion"
 import "salad_ui/components/collapsible"
 import "salad_ui/components/command"
 import "salad_ui/components/dialog"
-import "salad_ui/components/dropdown_menu"
+import DropdownMenuComponent from "salad_ui/components/dropdown_menu"
+
+// Patch: add toggle-on-click when dropdown is open (SaladUI missing trigger click in open state)
+const origConfig = DropdownMenuComponent.prototype.getComponentConfig
+DropdownMenuComponent.prototype.getComponentConfig = function() {
+  const config = origConfig.call(this)
+  config.events.open.mouseMap = {
+    trigger: {
+      click: (_e) => { this.transition("toggle") }
+    }
+  }
+  return config
+}
 import "salad_ui/components/hover-card"
 import "salad_ui/components/menu"
 import "salad_ui/components/popover"
