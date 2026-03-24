@@ -16,8 +16,10 @@ that decides which pipe pattern to compose.
 # ...informed by Tier 3 memory of past successful workflows
 ```
 
-**Status:** Phases 1–4 implemented (2026-03-20). Auth + password registration
-implemented (2026-03-22). Phase 4b (User Timezone + User Scoping) next, then Phase 5+.
+**Status:** Phases 1–4b implemented (2026-03-23). Auth + password registration
+implemented (2026-03-22). Phase 4b (User Timezone + User Scoping) merged (2026-03-23).
+Phase 4c (Conversation History) planned. Phase 4d (Dashboard Refactor) next, then
+Phase 4c → Phase 5+.
 
 **Table of Contents**
 
@@ -28,11 +30,13 @@ implemented (2026-03-22). Phase 4b (User Timezone + User Scoping) next, then Pha
 5. [Phase 3 — Pipe-Based Orchestration](#phase-3--pipe-based-orchestration)
 6. [Phase 4 — Phoenix Foundation + EventLoop](#phase-4--phoenix-foundation--eventloop)
 7. [Phase 4b — User Timezone + User Scoping](#phase-4b--user-timezone--user-scoping)
-8. [Phase 5 — Agent Builder + Unified Tool Management](#phase-5--agent-builder--unified-tool-management)
-9. [Phase 6 — Flow Builder + Triggers](#phase-6--flow-builder--triggers)
-10. [Phase 7 — Run View + Memory Inspector](#phase-7--run-view--memory-inspector)
-11. [File Manifest](#file-manifest)
-12. [Architecture Diagrams](#architecture-diagrams)
+8. [Phase 4c — Conversation History](#phase-4c--conversation-history)
+9. [Phase 4d — Dashboard Refactor (SaladUI + Responsive Layout)](#phase-4d--dashboard-refactor-salad-ui--responsive-layout)
+10. [Phase 5 — Agent Builder + Unified Tool Management](#phase-5--agent-builder--unified-tool-management)
+11. [Phase 6 — Flow Builder + Triggers](#phase-6--flow-builder--triggers)
+12. [Phase 7 — Run View + Memory Inspector](#phase-7--run-view--memory-inspector)
+13. [File Manifest](#file-manifest)
+14. [Architecture Diagrams](#architecture-diagrams)
 
 ---
 
@@ -136,24 +140,29 @@ Phase 1 (ToolPlugin)  ──────┐
                              ├──▶ Phase 3 (Pipe) ──┐
 Phase 2 (Memory Promotion) ─┘                      │
                                                     ▼
-Phase 4 (Phoenix + EventLoop) ──▶ Phase 4b (Timezone + User Scoping) ──▶ Phase 5 (Agent Builder + Tools)
-                                                                  │
-                                                                  ▼
-                                                           Phase 6 (Flow Builder + Triggers)
-                                                                  │
-                                                                  ▼
-                                                           Phase 7 (Run View + Memory Inspector)
+Phase 4 (Phoenix + EventLoop) ──▶ Phase 4b (Timezone + Scoping) ──▶ Phase 4c (Conversation History)
+                                         │                                    │
+                                         ▼                                    ▼
+                                  Phase 4d (Dashboard Refactor) ──▶ Phase 5 (Agent Builder + Tools)
+                                                                              │
+                                                                              ▼
+                                                                    Phase 6 (Flow Builder + Triggers)
+                                                                              │
+                                                                              ▼
+                                                                    Phase 7 (Run View + Memory Inspector)
 ```
 
 - Phases 1, 2, and 4 can start in **parallel**.
 - Phase 3 depends on Phase 1 (plugin integration) and Phase 2 (save_memory tool).
 - Phase 4b depends on Phase 4 (auth + Phoenix infrastructure).
-- Phase 5 depends on Phase 4b (user timezone + scoping) + Phase 3 (Pipe agents).
+- Phase 4c depends on Phase 4b (user-scoped agent_id + Postgres).
+- Phase 4d depends on Phase 4b (Phoenix infrastructure). Can run in **parallel** with Phase 4c.
+- Phase 5 depends on Phase 4c + Phase 4d (SaladUI components needed for builder UI) + Phase 3.
 - Phase 6 depends on Phase 5 (agent configs) + Phase 3 (Pipe/Swarm composition).
   - Phase 6 cron triggers use user timezone for schedule interpretation.
 - Phase 7 depends on Phase 6 (execution model) but can start in parallel for memory parts.
 
-**Recommended order:** 1+2 (parallel) → 3 → 4 → 4b → 5 → 6 → 7.
+**Recommended order:** 1+2 (parallel) → 3 → 4 → 4b → 4d → 4c → 5 → 6 → 7.
 
 ---
 
@@ -880,6 +889,242 @@ User B → agent_id "chat"  ← SHARED  User B → agent_id "user_2_chat"  ← I
 
 ---
 
+## Phase 4c — Conversation History
+
+### Problem
+
+Tier 1 Working Memory (GenServer state) is ephemeral — messages vanish when the
+user logs out, the session cookie is cleared, or the BEAM restarts. On re-login,
+`ensure_chat_session` generates a new random session ID, making old Working
+Memory unreachable. Users lose all conversation history between sessions.
+
+**Current data flow (broken):**
+
+```text
+User chats → messages stored in WorkingMemory.Server (GenServer RAM)
+User logs out → clear_session() destroys chat_session_id cookie
+User logs in → new session_id generated → old messages unreachable
+```
+
+Meanwhile, the 3-tier memory system works correctly for LLM context (Tier 2
+facts, Tier 3 semantic search, Knowledge Graph) — but the raw conversation
+history that the **UI** needs to display is not persisted anywhere.
+
+### Solution
+
+Store conversation history in Postgres. This is a **display layer** — the
+persistent record of what was said. It does not replace any memory tier:
+
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│                     What each layer does                         │
+├─────────────────────────────────────────────────────────────────┤
+│ Postgres conversations/messages  → UI display + resume history  │
+│ Tier 1 Working Memory (GenServer)→ Active session context cache │
+│ Tier 2 Persistent Memory (ETS)   → Key-value facts per agent   │
+│ Tier 3 Semantic Memory (HelixDB) → Vector search for LLM context│
+│ Knowledge Graph (HelixDB)        → Entity/relationship context  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Key insight:** ContextBuilder already has a 4000-token budget for conversation
+with most-recent-first truncation (`truncate_conversation/2`). When resuming a
+conversation, we load messages from Postgres into Working Memory. The existing
+budget system prevents context flooding — only the tail end enters the LLM
+context window, regardless of conversation length.
+
+**Resumable conversations come for free:** hydrate Tier 1 from Postgres on
+resume, and ContextBuilder's truncation handles the rest. No architecture change
+to the memory system.
+
+### Design Decisions
+
+| ID | Decision | Rationale |
+|---|---|---|
+| D32 | Postgres for history, not DETS/ETS | Conversations are relational data (user → conversations → messages). Postgres gives querying, pagination, and survives deploys. Already in the stack via Ecto. |
+| D33 | Conversations scoped to `user_id`, not `agent_id` | Phase 5 will allow multiple agents per user. A conversation belongs to the user; the agent used is metadata on the conversation. |
+| D34 | Stable conversation ID replaces random `chat_session_id` | Use the Postgres conversation UUID as the session identifier. No more volatile session cookie IDs. |
+| D35 | Messages saved inline during chat (not on session close) | Messages are written to Postgres as they occur, so nothing is lost if the browser tab closes or the server crashes. |
+| D36 | Resume hydrates Tier 1 from Postgres | On conversation resume, load last N messages from DB into WorkingMemory.Server. ContextBuilder's 4000-token budget prevents flooding. |
+| D37 | Conversation list in sidebar | Users need to browse/switch conversations. Sidebar shows recent conversations with titles. |
+| D38 | Auto-title from first user message | LLM-generated titles are expensive and slow. Use first ~50 chars of first user message as title, with option to rename later. |
+
+### Schema
+
+```elixir
+# conversations table
+schema "conversations" do
+  belongs_to :user, AgentEx.Accounts.User
+  field :title, :string                    # auto-generated from first message
+  field :model, :string                    # e.g. "gpt-4o-mini"
+  field :provider, :string                 # e.g. "openai"
+  timestamps(type: :utc_datetime_usec)
+end
+
+# conversation_messages table
+schema "conversation_messages" do
+  belongs_to :conversation, AgentEx.Chat.Conversation
+  field :role, :string                     # "user", "assistant", "system"
+  field :content, :text
+  timestamps(type: :utc_datetime_usec, updated_at: false)
+end
+```
+
+### Flow
+
+```text
+New conversation:
+  User opens chat → create Conversation row → use conversation.id as session_id
+  → start WorkingMemory.Server(agent_id, conversation.id)
+  → each message saved to both WorkingMemory + Postgres
+
+Resume conversation:
+  User picks from sidebar → load Conversation + last N messages from Postgres
+  → hydrate WorkingMemory.Server with loaded messages
+  → ContextBuilder picks up Tier 1 as normal (budget-truncated)
+  → user continues chatting, new messages saved to both stores
+
+Logout / reconnect:
+  WorkingMemory.Server may die (ephemeral, that's fine)
+  Postgres has the full record
+  On resume → hydrate again from Postgres
+```
+
+### ChatLive Changes
+
+```text
+Before:                              After:
+┌──────────────────────────────┐     ┌──────────────────────────────┐
+│ ChatLive                     │     │ ChatLive                     │
+│                              │     │                              │
+│ session_id from cookie       │     │ conversation_id from DB      │
+│   (volatile, random)         │     │   (stable, Postgres UUID)    │
+│                              │     │                              │
+│ Messages in GenServer only   │     │ Messages in GenServer + DB   │
+│   (lost on logout)           │     │   (DB is source of truth)    │
+│                              │     │                              │
+│ No conversation list         │     │ Sidebar: recent conversations│
+│ No resume capability         │     │ Click to resume any convo    │
+│                              │     │                              │
+│ restore_messages reads       │     │ restore_messages reads       │
+│   from WorkingMemory         │     │   from Postgres (hydrates WM)│
+└──────────────────────────────┘     └──────────────────────────────┘
+```
+
+### Sidebar UI
+
+```text
+┌──────────────┬──────────────────────────────────────────────┐
+│ Conversations│  Chat Area                                    │
+│              │                                               │
+│ + New Chat   │  ● User: Analyze AAPL stock                  │
+│              │  ● Assistant: AAPL is currently...            │
+│ Today        │                                               │
+│ ▸ Analyze AAP│  ● User: What about earnings?                │
+│ ▸ Fix login b│  ● Assistant: The Q4 earnings...             │
+│              │                                               │
+│ Yesterday    │                                               │
+│ ▸ Deploy plan│  [Type a message...              ] [Send]    │
+│ ▸ OTP supervi│                                               │
+└──────────────┴──────────────────────────────────────────────┘
+```
+
+### Files
+
+| Action | File | Purpose |
+|---|---|---|
+| Create | `lib/agent_ex/chat.ex` | Chat context: CRUD for conversations + messages |
+| Create | `lib/agent_ex/chat/conversation.ex` | Conversation Ecto schema |
+| Create | `lib/agent_ex/chat/message.ex` | ConversationMessage Ecto schema |
+| Create | `priv/repo/migrations/*_create_conversations.exs` | conversations + conversation_messages tables |
+| Create | `lib/agent_ex_web/components/conversation_components.ex` | Sidebar conversation list, conversation item |
+| Create | `test/agent_ex/chat_test.exs` | Chat context tests |
+| Modify | `lib/agent_ex_web/live/chat_live.ex` | Use conversation_id instead of session cookie; save to Postgres; sidebar; resume |
+| Modify | `lib/agent_ex_web/router.ex` | Remove `ensure_chat_session` plug; add `/chat/:conversation_id` route |
+| Modify | `lib/agent_ex_web/components/chat_components.ex` | Add sidebar layout wrapper |
+
+**Dependencies:** Phase 4b (user-scoped agent_id, Postgres/Ecto already configured).
+
+---
+
+## Phase 4d — Dashboard Refactor (SaladUI + Responsive Layout)
+
+### Problem
+
+The dashboard uses hand-rolled Tailwind HTML for all UI — no component library.
+The sidebar is fixed-width (`w-56`) with no mobile or tablet support. Every UI
+element (buttons, cards, selects, badges) is styled inline with duplicated
+Tailwind classes. Phase 5 (Agent Builder) needs a component library foundation
+for cards, dialogs, tabs, dropdowns, and drag-and-drop — building on raw HTML
+would compound the duplication problem.
+
+### Solution
+
+Install SaladUI (shadcn/ui port for Phoenix LiveView) as the component library
+and refactor the existing dashboard to use it. Add responsive 3-breakpoint
+sidebar navigation.
+
+**SaladUI components used:**
+- `Card` — settings sections, tool cards, future agent cards
+- `Badge` — status indicators, model labels
+- `Button` — actions (imported locally to avoid CoreComponents conflict)
+- `Separator` — section dividers
+- `Tooltip` — icon-only sidebar labels on tablet
+- `Sheet` — mobile sidebar overlay
+
+**Responsive sidebar:**
+
+```text
+Mobile (< 768px)         Tablet (768-1023px)       Desktop (≥ 1024px)
+┌──────────────────┐     ┌────┬─────────────┐     ┌─────────┬──────────────┐
+│  ☰  AgentEx      │     │ 💬 │             │     │ 💬 Chat  │              │
+├──────────────────┤     │ ⚙  │   Content    │     │ ⚙ Settin│   Content    │
+│                  │     │ 👤 │   area       │     │ 👤 Profi │   area       │
+│  Content area    │     │    │              │     │          │              │
+│  (full width)    │     │    │              │     │  v0.1.0  │              │
+└──────────────────┘     └────┴─────────────┘     └─────────┴──────────────┘
+ Hidden sidebar,          Icon-only rail            Full expanded sidebar
+ hamburger toggle          (w-16)                    (w-64)
+```
+
+### Design Decisions
+
+| ID | Decision | Rationale |
+|---|---|---|
+| D39 | SaladUI as component library | shadcn/ui design language, 30+ HEEX components, native dark mode, no Alpine.js dependency. 106K hex downloads. |
+| D40 | Do NOT import `SaladUI.Button` globally | Conflicts with `CoreComponents.button/1` which auth pages depend on. Import locally per-module. |
+| D41 | Keep native `<select>` for provider/model pickers | SaladUI Select uses JS-driven state that may not emit `phx-change` events. Native selects preserve existing event handlers. |
+| D42 | Keep `CoreComponents` for form-aware inputs | `input/1` integrates with `Phoenix.HTML.FormField` (error display, `used_input?` checks). SaladUI does not provide this. |
+| D43 | Mobile sidebar via SaladUI `Sheet` | Built-in backdrop, close button, slide animation. Uses `Phoenix.LiveView.JS`, not Alpine.js. |
+| D44 | Active link via `@socket.view` module match | Available in layout without extra assigns. Simpler than path-based matching. |
+
+### Files
+
+| Action | File | Purpose |
+|---|---|---|
+| Modify | `mix.exs` | Add `{:salad_ui, "~> 1.0.0-beta.3"}` |
+| Modify | `config/config.exs` | Add `config :salad_ui, color_scheme: :default` |
+| Modify | `assets/tailwind.config.js` | darkMode, content path, colors, animate plugin |
+| Modify | `assets/js/app.js` | Register SaladUI JS hook |
+| Modify | `lib/agent_ex_web.ex` | Add SaladUI imports to `html_helpers/0` |
+| Modify | `layouts/root.html.heex` | Add `dark` class to `<html>` |
+| Modify | `layouts/auth.html.heex` | Add `dark` class to `<html>` |
+| Modify | `layouts/app.html.heex` | Full responsive sidebar rewrite |
+| Modify | `live/chat_live.html.heex` | SaladUI buttons, badge, refined empty state |
+| Modify | `live/chat_live.ex` | Add local SaladUI.Button/Badge imports |
+| Modify | `components/chat_components.ex` | Tool card → SaladUI Card + Badge |
+| Modify | `live/user_live/settings.ex` | Card sections → SaladUI Card + Separator |
+
+**New dependency:**
+
+```elixir
+{:salad_ui, "~> 1.0.0-beta.3"}
+```
+
+**Dependencies:** Phase 4b (Phoenix infrastructure). Can run in parallel with Phase 4c.
+
+---
+
 ## Phase 5 — Agent Builder + Unified Tool Management
 
 ### Cleanup from Phase 4
@@ -1217,16 +1462,20 @@ graph visualization.
 | 3 — Pipe Orchestration | 2 | 0 | 2 |
 | 4 — Phoenix + EventLoop | 19 | 7 | 26 |
 | 4b — Timezone + User Scoping | 3 | 8 | 11 |
+| 4c — Conversation History | 6 | 3 | 9 |
+| 4d — Dashboard Refactor | 0 | 12 | 12 |
 | 5 — Agent Builder + Tools | 12 | 4 | 16 |
 | 6 — Flow Builder + Triggers | 17 | 4 | 21 |
 | 7 — Run View + Memory | 11 | 4 | 15 |
-| **Total** | **72** | **30** | **102** |
+| **Total** | **78** | **45** | **123** |
 
 ### Dependencies
 
 Phases 4 and 4b add hex packages. Phases 1–3 need **zero new dependencies**.
-Phase 4b adds `tz` (timezone database).
-Phase 6 may add `quantum` (cron) and `file_system` (inotify) hex packages.
+Phase 4b adds `tz` (timezone database). Phase 4c needs **zero new dependencies**
+(uses existing Ecto/Postgres). Phase 4d adds `salad_ui` (SaladUI component library)
++ `tailwindcss-animate` (npm). Phase 6 may add `quantum` (cron) and `file_system`
+(inotify) hex packages.
 
 ### Complete File Tree
 
@@ -1241,6 +1490,10 @@ lib/agent_ex/
 │   └── promotion.ex                        # Phase 2
 ├── pipe.ex                                 # Phase 3
 ├── timezone.ex                             # Phase 4b
+├── chat.ex                                 # Phase 4c
+├── chat/
+│   ├── conversation.ex                     # Phase 4c
+│   └── message.ex                          # Phase 4c
 ├── agent_config.ex                         # Phase 5
 ├── agent_store.ex                          # Phase 5
 ├── flow_config.ex                          # Phase 6
@@ -1274,6 +1527,7 @@ lib/agent_ex_web/
 │   ├── layouts/app.html.heex               # Phase 4
 │   ├── core_components.ex                  # Phase 4
 │   ├── chat_components.ex                  # Phase 4
+│   ├── conversation_components.ex          # Phase 4c
 │   ├── agent_components.ex                 # Phase 5
 │   ├── tool_components.ex                  # Phase 5
 │   ├── intervention_components.ex          # Phase 5
@@ -1313,6 +1567,7 @@ assets/
 └── tailwind.config.js                      # Phase 4
 
 test/
+├── agent_ex/chat_test.exs                  # Phase 4c
 ├── plugin_registry_test.exs                # Phase 1
 ├── plugins/file_system_test.exs            # Phase 1
 ├── memory/promotion_test.exs               # Phase 2
@@ -1330,7 +1585,9 @@ lib/agent_ex/memory.ex             # Phase 2 (facade)
 lib/agent_ex/tool_caller_loop.ex   # Phase 4 (model_fn)
 lib/agent_ex/accounts/user.ex      # Phase 4b (timezone field + changeset)
 lib/agent_ex/accounts.ex           # Phase 4b (timezone context functions)
-lib/agent_ex_web/live/chat_live.ex # Phase 4b (user-scoped agent_id + run metadata)
+lib/agent_ex_web/live/chat_live.ex # Phase 4b (user-scoped agent_id), Phase 4c (conversation persistence + sidebar)
+lib/agent_ex_web/router.ex        # Phase 4c (remove ensure_chat_session, add /chat/:conversation_id)
+lib/agent_ex_web/components/chat_components.ex # Phase 4c (sidebar layout)
 config/config.exs                  # Phase 4, Phase 4b (time_zone_database)
 config/dev.exs                     # Phase 4
 config/runtime.exs                 # Phase 4
