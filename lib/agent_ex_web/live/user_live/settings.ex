@@ -293,6 +293,15 @@ defmodule AgentExWeb.UserLive.Settings do
 
   def handle_event("validate_provider", params, socket) do
     %{"user" => user_params} = params
+    new_provider = user_params["provider"] || socket.assigns.selected_provider
+
+    # Auto-set model to provider's default when provider changes
+    user_params =
+      if new_provider != socket.assigns.selected_provider do
+        Map.put(user_params, "model", default_model_for(new_provider))
+      else
+        user_params
+      end
 
     provider_form =
       socket.assigns.current_scope.user
@@ -300,10 +309,8 @@ defmodule AgentExWeb.UserLive.Settings do
       |> Map.put(:action, :validate)
       |> to_form()
 
-    selected_provider = user_params["provider"] || socket.assigns.selected_provider
-
     {:noreply,
-     assign(socket, provider_form: provider_form, selected_provider: selected_provider)}
+     assign(socket, provider_form: provider_form, selected_provider: new_provider)}
   end
 
   def handle_event("update_provider", params, socket) do

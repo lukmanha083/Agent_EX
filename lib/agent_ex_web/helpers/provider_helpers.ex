@@ -23,8 +23,9 @@ defmodule AgentExWeb.ProviderHelpers do
 
   def models_for_provider(provider), do: Map.get(@models_by_provider, provider, [])
 
+  # CoreComponents select uses {value, label} order
   def provider_options,
-    do: [{"OpenAI", "openai"}, {"Anthropic", "anthropic"}, {"Moonshot", "moonshot"}]
+    do: [{"openai", "OpenAI"}, {"anthropic", "Anthropic"}, {"moonshot", "Moonshot"}]
 
   def default_model_for("openai"), do: "gpt-4o-mini"
   def default_model_for("anthropic"), do: "claude-haiku-4-5-20251001"
