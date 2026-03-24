@@ -70,7 +70,7 @@
       </.tooltip>
     </nav>
 
-    <!-- User avatar + dropdown -->
+    <!-- User avatar + dropdown (aligned with main content bottom) -->
     <div class="p-2 lg:p-3 border-t border-gray-800">
       <.dropdown_menu id="user-menu" use-portal>
         <.dropdown_menu_trigger>
@@ -116,7 +116,6 @@
           </.dropdown_menu_item>
         </.dropdown_menu_content>
       </.dropdown_menu>
-      <p class="hidden lg:block text-xs text-gray-600 px-3 mt-2">v<%= Application.spec(:agent_ex, :vsn) |> to_string() %></p>
     </div>
   </aside>
 
