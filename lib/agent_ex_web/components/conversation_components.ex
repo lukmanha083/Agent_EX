@@ -15,7 +15,7 @@ defmodule AgentExWeb.ConversationComponents do
     assigns = assign(assigns, :grouped, grouped)
 
     ~H"""
-    <div class="flex flex-col h-full bg-gray-900/50 border-r border-gray-800">
+    <div class="flex flex-col h-full w-full bg-gray-900 border-r border-gray-800">
       <div class="p-3 border-b border-gray-800">
         <.button variant="outline" class="w-full justify-start gap-2 text-sm border-gray-600 text-gray-200 hover:bg-gray-800 hover:text-white" phx-click="new_chat">
           <.icon name="hero-plus" class="w-4 h-4" />
