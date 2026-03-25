@@ -82,4 +82,39 @@ defmodule AgentEx.Chat do
 
     if String.length(trimmed) > 50, do: title <> "...", else: title
   end
+
+  def generate_title_async(%Conversation{} = conversation, user_message, assistant_message) do
+    Task.start(fn ->
+      client =
+        AgentEx.ModelClient.new(
+          model: conversation.model,
+          provider: String.to_existing_atom(conversation.provider)
+        )
+
+      messages = [
+        AgentEx.Message.system(
+          "Generate a short title (max 6 words) for this conversation. " <>
+            "Reply with ONLY the title, no quotes or punctuation."
+        ),
+        AgentEx.Message.user(
+          "User: #{String.slice(user_message, 0, 200)}\n" <>
+            "Assistant: #{String.slice(assistant_message, 0, 200)}"
+        )
+      ]
+
+      case AgentEx.ModelClient.create(client, messages) do
+        {:ok, response} ->
+          title =
+            response.content
+            |> String.trim()
+            |> String.trim("\"")
+            |> String.slice(0, 60)
+
+          update_conversation_title(conversation, title)
+
+        _error ->
+          :ok
+      end
+    end)
+  end
 end

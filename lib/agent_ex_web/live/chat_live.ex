@@ -258,6 +258,7 @@ defmodule AgentExWeb.ChatLive do
       end
 
       Chat.touch_conversation(socket.assigns.conversation)
+      maybe_generate_title(socket.assigns.conversation, messages, content)
     end
 
     {:noreply,
@@ -381,6 +382,13 @@ defmodule AgentExWeb.ChatLive do
       end)
 
     if has_result, do: :complete, else: :running
+  end
+
+  defp maybe_generate_title(conversation, messages, assistant_content) do
+    if length(messages) == 2 do
+      user_msg = Enum.find(messages, &(&1.role == :user))
+      if user_msg, do: Chat.generate_title_async(conversation, user_msg.content, assistant_content)
+    end
   end
 
   defp role_atom("user"), do: :user
