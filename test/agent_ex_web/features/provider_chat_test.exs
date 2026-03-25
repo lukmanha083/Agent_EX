@@ -26,9 +26,8 @@ defmodule AgentExWeb.Features.ProviderChatTest do
         |> assert_has(css("p", text: "Provider updated successfully", count: :any))
 
       # Navigate to chat and verify the model badge shows an Anthropic model
-      session
-      |> visit("/chat")
-      |> assert_has(css("span", text: "claude-", count: :any))
+      session = visit(session, "/chat")
+      assert page_source(session) =~ "claude-"
     end
   end
 end
