@@ -7,62 +7,67 @@
           <.icon name="hero-bars-3" class="w-5 h-5" />
         </button>
       </.sheet_trigger>
-      <.sheet_content side="left" class="w-72 p-0 bg-gray-900 border-r border-gray-800">
+      <.sheet_content side="left" class="w-64 p-0 bg-gray-900 border-r border-gray-800">
         <div class="flex flex-col h-full">
-          <div class="p-4 border-b border-gray-800">
-            <h1 class="text-lg font-bold text-white tracking-tight">AgentEx</h1>
-            <p class="text-xs text-gray-500 mt-0.5">AI Agent Framework</p>
+          <div class="flex items-center gap-2 h-14 px-4 border-b border-gray-800">
+            <div class="flex h-7 w-7 items-center justify-center rounded-md bg-indigo-600">
+              <.icon name="hero-cpu-chip" class="w-4 h-4 text-white" />
+            </div>
+            <span class="font-semibold text-white text-sm">AgentEx</span>
           </div>
-          <nav class="flex-1 p-3 space-y-1">
+          <nav class="flex-1 px-3 py-4 space-y-1">
+            <p class="px-2 mb-2 text-[11px] font-medium text-gray-500 uppercase tracking-wider">Platform</p>
             <.link navigate={~p"/chat"} class={[
-              "flex items-center gap-3 px-3 py-2.5 text-sm rounded-md transition-colors min-h-[44px]",
-              nav_active?(@socket, AgentExWeb.ChatLive) && "bg-gray-800 text-white" || "text-gray-400 hover:bg-gray-800 hover:text-white"
+              "flex items-center gap-3 px-2 py-2 text-sm rounded-md transition-colors",
+              nav_active?(@socket, AgentExWeb.ChatLive) && "bg-gray-800 text-white font-medium" || "text-gray-400 hover:bg-gray-800/50 hover:text-gray-200"
             ]}>
-              <.icon name="hero-chat-bubble-left-right" class="w-5 h-5" />
+              <.icon name="hero-chat-bubble-left-right" class="w-4 h-4" />
               Chat
             </.link>
           </nav>
-          <div class="p-3 border-t border-gray-800">
-            <.link navigate={~p"/users/profile"} class="flex items-center gap-3 px-3 py-2.5 text-sm text-gray-400 rounded-md hover:bg-gray-800 hover:text-white transition-colors min-h-[44px]">
-              <.icon name="hero-user-circle" class="w-5 h-5" />
+          <.separator class="bg-gray-800" />
+          <div class="px-3 py-3 space-y-1">
+            <p class="px-2 mb-2 text-[11px] font-medium text-gray-500 uppercase tracking-wider">Account</p>
+            <.link navigate={~p"/users/profile"} class="flex items-center gap-3 px-2 py-2 text-sm text-gray-400 rounded-md hover:bg-gray-800/50 hover:text-gray-200 transition-colors">
+              <.icon name="hero-user-circle" class="w-4 h-4" />
               Profile
             </.link>
-            <.link navigate={~p"/users/settings"} class="flex items-center gap-3 px-3 py-2.5 text-sm text-gray-400 rounded-md hover:bg-gray-800 hover:text-white transition-colors min-h-[44px]">
-              <.icon name="hero-cog-6-tooth" class="w-5 h-5" />
+            <.link navigate={~p"/users/settings"} class="flex items-center gap-3 px-2 py-2 text-sm text-gray-400 rounded-md hover:bg-gray-800/50 hover:text-gray-200 transition-colors">
+              <.icon name="hero-cog-6-tooth" class="w-4 h-4" />
               Settings
             </.link>
-            <.link href={~p"/users/log-out"} method="delete" class="flex items-center gap-3 px-3 py-2.5 text-sm text-red-400 rounded-md hover:bg-gray-800 hover:text-red-300 transition-colors min-h-[44px]">
-              <.icon name="hero-arrow-right-on-rectangle" class="w-5 h-5" />
+            <.link href={~p"/users/log-out"} method="delete" class="flex items-center gap-3 px-2 py-2 text-sm text-red-400 rounded-md hover:bg-red-500/10 hover:text-red-300 transition-colors">
+              <.icon name="hero-arrow-right-on-rectangle" class="w-4 h-4" />
               Sign out
             </.link>
           </div>
         </div>
       </.sheet_content>
     </.sheet>
-    <h1 class="text-base font-bold text-white">AgentEx</h1>
+    <h1 class="text-base font-semibold text-white">AgentEx</h1>
   </div>
 
-  <!-- Sidebar: icon rail on tablet, full on desktop -->
+  <!-- Sidebar -->
   <aside class="hidden md:flex md:w-16 lg:w-48 flex-col flex-shrink-0 bg-gray-900 border-r border-gray-800">
     <!-- Logo -->
-    <div class="flex items-center h-14 px-3 lg:px-4 border-b border-gray-800">
-      <.icon name="hero-cpu-chip" class="w-6 h-6 text-indigo-400 lg:hidden mx-auto" />
-      <div class="hidden lg:block">
-        <h1 class="text-lg font-bold text-white tracking-tight">AgentEx</h1>
-        <p class="text-xs text-gray-500 mt-0.5">AI Agent Framework</p>
+    <div class="flex items-center gap-2 h-14 px-3 lg:px-4 border-b border-gray-800">
+      <div class="flex h-7 w-7 items-center justify-center rounded-md bg-indigo-600 shrink-0 mx-auto lg:mx-0">
+        <.icon name="hero-cpu-chip" class="w-4 h-4 text-white" />
       </div>
+      <span class="hidden lg:inline font-semibold text-white text-sm truncate">AgentEx</span>
     </div>
 
     <!-- Navigation -->
-    <nav class="flex-1 p-2 lg:p-3 space-y-1">
+    <nav class="flex-1 px-2 lg:px-3 py-3 space-y-1">
+      <p class="hidden lg:block px-2 mb-2 text-[11px] font-medium text-gray-500 uppercase tracking-wider">Platform</p>
       <.tooltip id="nav-chat-tooltip">
         <.tooltip_trigger>
           <.link navigate={~p"/chat"} class={[
-            "flex items-center gap-3 px-3 py-2 rounded-md transition-colors",
+            "flex items-center gap-3 px-2 py-2 rounded-md transition-colors",
             "md:justify-center lg:justify-start",
-            nav_active?(@socket, AgentExWeb.ChatLive) && "bg-gray-800 text-white" || "text-gray-400 hover:bg-gray-800 hover:text-white"
+            nav_active?(@socket, AgentExWeb.ChatLive) && "bg-gray-800 text-white font-medium" || "text-gray-400 hover:bg-gray-800/50 hover:text-gray-200"
           ]}>
-            <.icon name="hero-chat-bubble-left-right" class="w-5 h-5 shrink-0" />
+            <.icon name="hero-chat-bubble-left-right" class="w-4 h-4 shrink-0" />
             <span class="hidden lg:inline text-sm">Chat</span>
           </.link>
         </.tooltip_trigger>
@@ -70,29 +75,27 @@
       </.tooltip>
     </nav>
 
-    <!-- User avatar + dropdown (aligned with main content bottom) -->
-    <div class="p-2 lg:p-3 border-t border-gray-800">
+    <!-- Footer -->
+    <div class="px-2 lg:px-3 py-3 border-t border-gray-800">
       <.dropdown_menu id="user-menu" use-portal>
         <.dropdown_menu_trigger>
-          <button type="button" class="flex items-center gap-3 w-full px-2 py-2 rounded-md text-gray-400 hover:bg-gray-800 hover:text-white transition-colors md:justify-center lg:justify-start">
-            <div class="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-600 text-xs font-bold text-white shrink-0">
+          <button type="button" class="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-gray-400 hover:bg-gray-800/50 hover:text-white transition-colors md:justify-center lg:justify-start">
+            <div class="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-600 text-[10px] font-bold text-white shrink-0">
               <%= if assigns[:current_scope] && @current_scope.user do %>
                 <%= initials(@current_scope.user.username || @current_scope.user.email) %>
               <% else %>
                 ?
               <% end %>
             </div>
-            <div class="hidden lg:block min-w-0 text-left">
-              <p class="text-sm text-white truncate">
-                <%= if assigns[:current_scope] && @current_scope.user do %>
-                  <%= @current_scope.user.username || @current_scope.user.email %>
-                <% end %>
-              </p>
-            </div>
-            <.icon name="hero-chevron-up" class="w-4 h-4 hidden lg:block ml-auto shrink-0" />
+            <span class="hidden lg:block text-sm text-white truncate flex-1 text-left">
+              <%= if assigns[:current_scope] && @current_scope.user do %>
+                <%= @current_scope.user.username || @current_scope.user.email %>
+              <% end %>
+            </span>
+            <.icon name="hero-ellipsis-vertical" class="w-4 h-4 hidden lg:block shrink-0 text-gray-500" />
           </button>
         </.dropdown_menu_trigger>
-        <.dropdown_menu_content side="top" class="w-56 mb-1">
+        <.dropdown_menu_content side="top" class="w-48 mb-1">
           <.dropdown_menu_label>My Account</.dropdown_menu_label>
           <.dropdown_menu_separator />
           <.dropdown_menu_item>
