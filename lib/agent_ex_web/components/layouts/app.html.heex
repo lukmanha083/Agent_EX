@@ -1,6 +1,6 @@
 <div class="flex h-screen bg-gray-950">
   <!-- Mobile top bar -->
-  <div class="fixed top-0 left-0 right-0 z-40 flex items-center gap-3 px-4 h-14 bg-gray-900 border-b border-gray-800 md:hidden">
+  <div class="fixed top-0 left-0 right-0 z-40 flex items-center gap-3 px-4 h-14 bg-gray-900 border-b border-gray-800 lg:hidden">
     <.sheet id="mobile-nav">
       <.sheet_trigger>
         <button type="button" class="p-2 -ml-2 rounded-md text-gray-400 hover:text-white hover:bg-gray-800 min-h-[44px] min-w-[44px] flex items-center justify-center" aria-label="Open navigation">
@@ -21,7 +21,9 @@
               "flex items-center gap-3 px-2 py-2 text-sm rounded-md transition-colors",
               nav_active?(@socket, AgentExWeb.ChatLive) && "bg-gray-800 text-white font-medium" || "text-gray-400 hover:bg-gray-800/50 hover:text-gray-200"
             ]}>
-              <.icon name="hero-chat-bubble-left-right" class="w-4 h-4" />
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4 shrink-0">
+                <path d="M3.505 2.365A41.369 41.369 0 0 1 9 2c1.863 0 3.697.124 5.495.365 1.247.167 2.18 1.108 2.435 2.268a4.45 4.45 0 0 0-.577-.069 43.36 43.36 0 0 0-4.353 0C9.168 4.749 7 6.733 7 9.035c0 1.358.635 2.565 1.625 3.346-.463.305-.96.559-1.484.756-1.077.405-1.916-.265-1.916-1.378V10.5c0-.235.007-.467.022-.696A4.998 4.998 0 0 1 2 5.869V5.75c0-1.505.923-2.97 2.17-3.29a.228.228 0 0 0-.165-.035ZM12 8.217a33.36 33.36 0 0 0-3.397.166c-1.04.152-1.853 1.03-1.853 2.163v1.01c0 1.133.813 2.01 1.853 2.163A33.36 33.36 0 0 0 12 13.885a33.36 33.36 0 0 0 3.397-.166c1.04-.152 1.853-1.03 1.853-2.163v-1.01c0-1.133-.813-2.01-1.853-2.163A33.36 33.36 0 0 0 12 8.217Z" />
+              </svg>
               Chat
             </.link>
           </nav>
@@ -117,7 +119,7 @@
   </aside>
 
   <!-- Main content -->
-  <main class="flex-1 flex flex-col overflow-hidden pt-14 md:pt-0">
+  <main class="flex-1 flex flex-col overflow-hidden pt-14 lg:pt-0">
     <.flash_group flash={@flash} />
     <%= if assigns[:inner_block] do %>
       <%= render_slot(@inner_block) %>

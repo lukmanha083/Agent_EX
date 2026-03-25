@@ -84,11 +84,11 @@ defmodule AgentEx.Chat do
   end
 
   def generate_title_async(%Conversation{} = conversation, user_message, assistant_message) do
-    Task.start(fn ->
+    Task.Supervisor.start_child(AgentEx.TaskSupervisor, fn ->
       client =
         AgentEx.ModelClient.new(
           model: conversation.model,
-          provider: String.to_existing_atom(conversation.provider)
+          provider: safe_provider_atom(conversation.provider)
         )
 
       messages = [
@@ -117,4 +117,9 @@ defmodule AgentEx.Chat do
       end
     end)
   end
+
+  defp safe_provider_atom(provider) when provider in ["openai", "anthropic", "moonshot"],
+    do: String.to_existing_atom(provider)
+
+  defp safe_provider_atom(_), do: :openai
 end

@@ -19,11 +19,11 @@ defmodule AgentExWeb.Features.SidebarTest do
       |> assert_has(css("#mobile-nav [data-part='trigger']"))
     end
 
-    test "tablet (768px): shows sidebar", %{session: session} do
+    test "tablet (768px): shows mobile top bar (sidebar hidden below lg)", %{session: session} do
       session
       |> resize_window(768, 1024)
       |> visit("/chat")
-      |> assert_has(css("#user-menu"))
+      |> assert_has(css("#mobile-nav [data-part='trigger']"))
     end
 
     test "desktop (1280px): shows full sidebar with user menu", %{session: session} do

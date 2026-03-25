@@ -9,8 +9,8 @@ defmodule AgentExWeb.UserAuth do
   alias AgentEx.Accounts.Scope
 
   # Remember-me cookie uses the same 15-minute idle timeout as the session.
-  # Both cookies are refreshed on every request, so they only expire
-  # after 15 minutes of inactivity.
+  # The session cookie is refreshed by touching :_last_active on each request.
+  # The remember-me cookie is refreshed in maybe_refresh_remember_me_cookie/2.
   @idle_timeout_in_seconds 15 * 60
   @remember_me_cookie "_agent_ex_web_user_remember_me"
   @remember_me_options [
@@ -71,6 +71,7 @@ defmodule AgentExWeb.UserAuth do
          {user, token_inserted_at} <- Accounts.get_user_by_session_token(token) do
       conn
       |> assign(:current_scope, Scope.for_user(user))
+      |> touch_session()
       |> maybe_refresh_remember_me_cookie(token)
       |> maybe_reissue_user_session_token(user, token_inserted_at)
     else
@@ -90,6 +91,12 @@ defmodule AgentExWeb.UserAuth do
         nil
       end
     end
+  end
+
+  # Touch session data so Plug.Session re-sends the Set-Cookie header,
+  # effectively rolling the max_age on every request.
+  defp touch_session(conn) do
+    put_session(conn, :_last_active, System.system_time(:second))
   end
 
   # Refresh the remember-me cookie on each request to implement rolling idle timeout.

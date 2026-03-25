@@ -1,8 +1,9 @@
 defmodule AgentExWeb.Endpoint do
   use Phoenix.Endpoint, otp_app: :agent_ex
 
-  # 15-minute idle timeout: cookie is refreshed on every request,
-  # so it only expires after 15 minutes of inactivity.
+  # 15-minute idle timeout: Plug.Session only re-sends Set-Cookie when
+  # session data changes, so we touch :_last_active in user_auth to
+  # ensure the cookie is refreshed on every authenticated request.
   @session_options [
     store: :cookie,
     key: "_agent_ex_key",

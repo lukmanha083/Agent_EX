@@ -77,63 +77,13 @@ defmodule AgentExWeb.ChatLive do
 
   def handle_event("send", %{"message" => message}, socket) when message != "" do
     socket = ensure_conversation(socket, message)
-    conversation = socket.assigns.conversation
 
-    # Save user message to DB
-    case Chat.create_message(%{
-           conversation_id: conversation.id,
-           role: "user",
-           content: message
-         }) do
-      {:ok, _msg} -> :ok
-      {:error, reason} -> Logger.warning("Failed to persist user message: #{inspect(reason)}")
-    end
+    case socket.assigns.conversation do
+      nil ->
+        {:noreply, socket}
 
-    # Add user message to display
-    messages = socket.assigns.messages ++ [%{role: :user, content: message}]
-
-    # Cancel previous run if any
-    if socket.assigns.run_id do
-      EventLoop.cancel(socket.assigns.run_id)
-      Phoenix.PubSub.unsubscribe(AgentEx.PubSub, "run:#{socket.assigns.run_id}")
-    end
-
-    run_id = "run-#{System.unique_integer([:positive])}"
-    EventLoop.subscribe(run_id)
-
-    tools = socket.assigns.tools
-    session_id = "conversation-#{conversation.id}"
-
-    case AgentEx.ToolAgent.start_link(tools: tools) do
-      {:ok, tool_agent} ->
-        client = build_model_client(socket.assigns.provider, socket.assigns.model)
-
-        input_messages = [
-          AgentEx.Message.system("You are a helpful AI assistant."),
-          AgentEx.Message.user(message)
-        ]
-
-        memory_opts = %{agent_id: socket.assigns.agent_id, session_id: session_id}
-
-        EventLoop.run(run_id, tool_agent, client, input_messages, tools,
-          memory: memory_opts,
-          metadata: %{user_id: socket.assigns.current_scope.user.id}
-        )
-
-        {:noreply,
-         assign(socket,
-           messages: messages,
-           events: [],
-           stages: [],
-           thinking: true,
-           run_id: run_id,
-           input: ""
-         )}
-
-      {:error, reason} ->
-        Phoenix.PubSub.unsubscribe(AgentEx.PubSub, "run:#{run_id}")
-        error_msg = %{role: :assistant, content: "Failed to start agent: #{inspect(reason)}"}
-        {:noreply, assign(socket, messages: messages ++ [error_msg], input: "")}
+      conversation ->
+        send_message(socket, conversation, message)
     end
   end
 
@@ -293,6 +243,65 @@ defmodule AgentExWeb.ChatLive do
 
   # -- Helpers --
 
+  defp send_message(socket, conversation, message) do
+    # Save user message to DB
+    case Chat.create_message(%{
+           conversation_id: conversation.id,
+           role: "user",
+           content: message
+         }) do
+      {:ok, _msg} -> :ok
+      {:error, reason} -> Logger.warning("Failed to persist user message: #{inspect(reason)}")
+    end
+
+    # Add user message to display
+    messages = socket.assigns.messages ++ [%{role: :user, content: message}]
+
+    # Cancel previous run if any
+    if socket.assigns.run_id do
+      EventLoop.cancel(socket.assigns.run_id)
+      Phoenix.PubSub.unsubscribe(AgentEx.PubSub, "run:#{socket.assigns.run_id}")
+    end
+
+    run_id = "run-#{System.unique_integer([:positive])}"
+    EventLoop.subscribe(run_id)
+
+    tools = socket.assigns.tools
+    session_id = "conversation-#{conversation.id}"
+
+    case AgentEx.ToolAgent.start_link(tools: tools) do
+      {:ok, tool_agent} ->
+        client = build_model_client(socket.assigns.provider, socket.assigns.model)
+
+        input_messages = [
+          AgentEx.Message.system("You are a helpful AI assistant."),
+          AgentEx.Message.user(message)
+        ]
+
+        memory_opts = %{agent_id: socket.assigns.agent_id, session_id: session_id}
+
+        EventLoop.run(run_id, tool_agent, client, input_messages, tools,
+          memory: memory_opts,
+          metadata: %{user_id: socket.assigns.current_scope.user.id}
+        )
+
+        {:noreply,
+         assign(socket,
+           messages: messages,
+           events: [],
+           stages: [],
+           thinking: true,
+           run_id: run_id,
+           input: ""
+         )}
+
+      {:error, reason} ->
+        Phoenix.PubSub.unsubscribe(AgentEx.PubSub, "run:#{run_id}")
+        error_msg = %{role: :assistant, content: "Failed to start agent: #{inspect(reason)}"}
+        {:noreply, assign(socket, messages: messages ++ [error_msg], input: "")}
+    end
+  end
+
   defp ensure_conversation(socket, first_message) do
     case socket.assigns.conversation do
       nil ->
@@ -387,14 +396,16 @@ defmodule AgentExWeb.ChatLive do
   defp maybe_generate_title(conversation, messages, assistant_content) do
     if length(messages) == 2 do
       user_msg = Enum.find(messages, &(&1.role == :user))
-      if user_msg, do: Chat.generate_title_async(conversation, user_msg.content, assistant_content)
+
+      if user_msg,
+        do: Chat.generate_title_async(conversation, user_msg.content, assistant_content)
     end
   end
 
   defp role_atom("user"), do: :user
   defp role_atom("assistant"), do: :assistant
   defp role_atom("system"), do: :system
-  defp role_atom(other), do: String.to_atom(other)
+  defp role_atom(_other), do: :user
 
   defp user_agent_id(user), do: "user_#{user.id}_chat"
 

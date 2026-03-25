@@ -4,8 +4,6 @@ defmodule AgentExWeb.ConversationComponents do
 
   import AgentExWeb.CoreComponents, except: [button: 1]
 
-  alias Phoenix.LiveView.JS
-
   attr(:conversations, :list, required: true)
   attr(:current_id, :any, default: nil)
 
@@ -72,10 +70,11 @@ defmodule AgentExWeb.ConversationComponents do
       </.link>
       <button
         type="button"
-        phx-click={JS.push("delete_conversation", value: %{id: @conversation.id})}
+        phx-click="delete_conversation"
+        phx-value-id={@conversation.id}
+        data-confirm="Delete this conversation?"
         class="opacity-0 group-hover:opacity-100 p-1 rounded text-gray-500 hover:text-red-400 transition-opacity shrink-0"
         aria-label="Delete conversation"
-        data-confirm="Delete this conversation?"
       >
         <.icon name="hero-trash" class="w-3 h-3" />
       </button>
