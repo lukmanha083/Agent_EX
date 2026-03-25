@@ -46,7 +46,7 @@
   </div>
 
   <!-- Sidebar -->
-  <aside class="hidden md:flex md:w-16 lg:w-48 flex-col flex-shrink-0 bg-gray-900 border-r border-gray-800">
+  <aside class="hidden lg:flex lg:w-48 flex-col flex-shrink-0 bg-gray-900 border-r border-gray-800">
     <!-- Logo -->
     <div class="flex items-center gap-2 h-14 px-3 lg:px-4 border-b border-gray-800">
       <img src={~p"/images/logo-icon.svg"} alt="AgentEx" class="h-7 w-7 shrink-0 mx-auto lg:mx-0" />
@@ -54,21 +54,17 @@
     </div>
 
     <!-- Navigation -->
-    <nav class="flex-1 px-2 lg:px-3 py-3 space-y-1">
-      <p class="hidden lg:block px-2 mb-2 text-[11px] font-medium text-gray-500 uppercase tracking-wider">Platform</p>
-      <.tooltip id="nav-chat-tooltip">
-        <.tooltip_trigger>
-          <.link navigate={~p"/chat"} class={[
-            "flex items-center gap-3 px-2 py-2 rounded-md transition-colors",
-            "md:justify-center lg:justify-start",
-            nav_active?(@socket, AgentExWeb.ChatLive) && "bg-gray-800 text-white font-medium" || "text-gray-400 hover:bg-gray-800/50 hover:text-gray-200"
-          ]}>
-            <.icon name="hero-chat-bubble-left-right" class="w-4 h-4 shrink-0" />
-            <span class="hidden lg:inline text-sm">Chat</span>
-          </.link>
-        </.tooltip_trigger>
-        <.tooltip_content side="right" class="lg:hidden">Chat</.tooltip_content>
-      </.tooltip>
+    <nav class="flex-1 px-3 py-3 space-y-1">
+      <p class="px-2 mb-2 text-[11px] font-medium text-gray-500 uppercase tracking-wider">Platform</p>
+      <.link navigate={~p"/chat"} class={[
+        "flex items-center gap-3 px-2 py-2 rounded-md transition-colors",
+        nav_active?(@socket, AgentExWeb.ChatLive) && "bg-gray-800 text-white font-medium" || "text-gray-400 hover:bg-gray-800/50 hover:text-gray-200"
+      ]}>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4 shrink-0">
+          <path d="M3.505 2.365A41.369 41.369 0 0 1 9 2c1.863 0 3.697.124 5.495.365 1.247.167 2.18 1.108 2.435 2.268a4.45 4.45 0 0 0-.577-.069 43.36 43.36 0 0 0-4.353 0C9.168 4.749 7 6.733 7 9.035c0 1.358.635 2.565 1.625 3.346-.463.305-.96.559-1.484.756-1.077.405-1.916-.265-1.916-1.378V10.5c0-.235.007-.467.022-.696A4.998 4.998 0 0 1 2 5.869V5.75c0-1.505.923-2.97 2.17-3.29a.228.228 0 0 0-.165-.035ZM12 8.217a33.36 33.36 0 0 0-3.397.166c-1.04.152-1.853 1.03-1.853 2.163v1.01c0 1.133.813 2.01 1.853 2.163A33.36 33.36 0 0 0 12 13.885a33.36 33.36 0 0 0 3.397-.166c1.04-.152 1.853-1.03 1.853-2.163v-1.01c0-1.133-.813-2.01-1.853-2.163A33.36 33.36 0 0 0 12 8.217Z" />
+        </svg>
+        <span class="text-sm">Chat</span>
+      </.link>
     </nav>
 
     <!-- Footer -->
