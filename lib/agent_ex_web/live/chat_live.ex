@@ -32,6 +32,7 @@ defmodule AgentExWeb.ChatLive do
        model: model,
        tools: load_chat_tools(),
        agent_id: user_agent_id(user),
+       user_initials: AgentExWeb.Layouts.initials(user.username || user.email),
        conversation: nil,
        conversations: conversations
      )}

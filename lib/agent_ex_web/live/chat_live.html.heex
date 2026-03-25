@@ -37,7 +37,7 @@
       </div>
 
       <div :for={msg <- @messages}>
-        <.message_bubble role={msg.role} content={msg.content} />
+        <.message_bubble role={msg.role} content={msg.content} model={@model} user_initials={@user_initials} />
       </div>
 
       <!-- Tool call cards -->
