@@ -1,10 +1,11 @@
 defmodule AgentExWeb.ChatLive do
   use AgentExWeb, :live_view
 
-  alias AgentEx.{EventLoop, Memory}
+  alias AgentEx.{Chat, EventLoop, Memory}
   alias AgentEx.EventLoop.Event
 
   import AgentExWeb.ChatComponents
+  import AgentExWeb.ConversationComponents
   import AgentExWeb.CoreComponents, except: [button: 1]
   import AgentExWeb.ProviderHelpers, only: [default_model_for: 1, provider_to_atom: 1]
   import SaladUI.Button
@@ -12,89 +13,104 @@ defmodule AgentExWeb.ChatLive do
   require Logger
 
   @impl true
-  def mount(_params, session, socket) do
+  def mount(_params, _session, socket) do
     user = socket.assigns.current_scope.user
-
-    session_id = session["chat_session_id"]
-    agent_id = user_agent_id(user)
-
-    # Start or reuse memory session
-    {messages, run_id, events} =
-      case Memory.start_session(agent_id, session_id) do
-        {:ok, _} ->
-          # New session
-          {[], nil, []}
-
-        {:error, {:already_started, _}} ->
-          # Reconnect — restore conversation from working memory
-          restored = restore_messages(agent_id, session_id)
-          {restored, nil, []}
-
-        {:error, reason} ->
-          Logger.warning("Failed to start memory session: #{inspect(reason)}")
-          {[], nil, []}
-      end
 
     provider = user.provider || "openai"
     model = user.model || default_model_for(provider)
+    conversations = Chat.list_conversations(user.id)
 
     {:ok,
      assign(socket,
-       messages: messages,
-       events: events,
+       messages: [],
+       events: [],
        stages: [],
        thinking: false,
-       run_id: run_id,
+       run_id: nil,
        input: "",
        provider: provider,
        model: model,
        tools: load_chat_tools(),
-       session_id: session_id,
-       agent_id: agent_id
+       agent_id: user_agent_id(user),
+       conversation: nil,
+       conversations: conversations
      )}
   end
 
   @impl true
-  def terminate(_reason, _socket) do
-    # Don't stop the memory session here — it's tied to the HTTP cookie
-    # and must survive LiveView reconnects (longpoll → websocket transition).
-    # Sessions are reset explicitly via "clear" or lost on server restart.
-    :ok
+  def handle_params(%{"conversation_id" => id}, _uri, socket) do
+    user = socket.assigns.current_scope.user
+
+    case Chat.get_user_conversation(user.id, id) do
+      nil ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Conversation not found")
+         |> push_navigate(to: ~p"/chat")}
+
+      conversation ->
+        {:noreply, load_conversation(socket, conversation)}
+    end
+  end
+
+  def handle_params(_params, _uri, socket) do
+    # /chat with no conversation_id — show empty state
+    {:noreply,
+     assign(socket,
+       conversation: nil,
+       messages: [],
+       events: [],
+       stages: [],
+       thinking: false,
+       run_id: nil
+     )}
   end
 
   @impl true
+  def terminate(_reason, _socket), do: :ok
+
+  @impl true
+  def handle_event("new_chat", _params, socket) do
+    {:noreply, push_patch(socket, to: ~p"/chat")}
+  end
+
   def handle_event("send", %{"message" => message}, socket) when message != "" do
+    socket = ensure_conversation(socket, message)
+    conversation = socket.assigns.conversation
+
+    # Save user message to DB
+    {:ok, _msg} =
+      Chat.create_message(%{
+        conversation_id: conversation.id,
+        role: "user",
+        content: message
+      })
+
     # Add user message to display
     messages = socket.assigns.messages ++ [%{role: :user, content: message}]
 
-    # Cancel and unsubscribe from previous run if any
+    # Cancel previous run if any
     if socket.assigns.run_id do
       EventLoop.cancel(socket.assigns.run_id)
       Phoenix.PubSub.unsubscribe(AgentEx.PubSub, "run:#{socket.assigns.run_id}")
     end
 
-    # Generate a run ID
     run_id = "run-#{System.unique_integer([:positive])}"
-
-    # Subscribe to events
     EventLoop.subscribe(run_id)
 
     tools = socket.assigns.tools
+    session_id = "conversation-#{conversation.id}"
 
-    # Start the agent run
     case AgentEx.ToolAgent.start_link(tools: tools) do
       {:ok, tool_agent} ->
         client = build_model_client(socket.assigns.provider, socket.assigns.model)
 
-        # Only pass system prompt + latest user message;
-        # the memory system injects conversation history from Tier 1
-        # and context from Tier 2/3/KG
         input_messages = [
           AgentEx.Message.system("You are a helpful AI assistant."),
           AgentEx.Message.user(message)
         ]
 
-        memory_opts = %{agent_id: socket.assigns.agent_id, session_id: socket.assigns.session_id}
+        memory_opts = %{agent_id: socket.assigns.agent_id, session_id: session_id}
 
         EventLoop.run(run_id, tool_agent, client, input_messages, tools,
           memory: memory_opts,
@@ -134,7 +150,28 @@ defmodule AgentExWeb.ChatLive do
   end
 
   def handle_event("clear", _params, socket) do
-    {:noreply, reset_conversation(socket)}
+    {:noreply, push_patch(socket, to: ~p"/chat")}
+  end
+
+  def handle_event("delete_conversation", %{"id" => id}, socket) do
+    user = socket.assigns.current_scope.user
+
+    case Chat.get_user_conversation(user.id, id) do
+      nil ->
+        {:noreply, socket}
+
+      conversation ->
+        {:ok, _} = Chat.delete_conversation(conversation)
+        conversations = Chat.list_conversations(user.id)
+
+        socket = assign(socket, conversations: conversations)
+
+        if socket.assigns.conversation && socket.assigns.conversation.id == conversation.id do
+          {:noreply, push_patch(socket, to: ~p"/chat")}
+        else
+          {:noreply, socket}
+        end
+    end
   end
 
   @impl true
@@ -142,12 +179,10 @@ defmodule AgentExWeb.ChatLive do
     if event.run_id == socket.assigns.run_id do
       handle_run_event(event, socket)
     else
-      # Ignore stale events from previous runs
       {:noreply, socket}
     end
   end
 
-  # Handle Task completion
   def handle_info({ref, _result}, socket) when is_reference(ref) do
     {:noreply, socket}
   end
@@ -206,13 +241,25 @@ defmodule AgentExWeb.ChatLive do
     content = event.data[:final_content] || "No response."
     messages = socket.assigns.messages ++ [%{role: :assistant, content: content}]
 
+    # Save assistant message to DB
+    if socket.assigns.conversation do
+      Chat.create_message(%{
+        conversation_id: socket.assigns.conversation.id,
+        role: "assistant",
+        content: content
+      })
+
+      Chat.touch_conversation(socket.assigns.conversation)
+    end
+
     {:noreply,
      assign(socket,
        messages: messages,
        events: [],
        thinking: false,
        stages: [],
-       run_id: nil
+       run_id: nil,
+       conversations: Chat.list_conversations(socket.assigns.current_scope.user.id)
      )}
   end
 
@@ -237,21 +284,76 @@ defmodule AgentExWeb.ChatLive do
 
   # -- Helpers --
 
-  defp reset_conversation(socket) do
-    if socket.assigns.run_id do
-      EventLoop.cancel(socket.assigns.run_id)
-      Phoenix.PubSub.unsubscribe(AgentEx.PubSub, "run:#{socket.assigns.run_id}")
-    end
+  defp ensure_conversation(socket, first_message) do
+    case socket.assigns.conversation do
+      nil ->
+        user = socket.assigns.current_scope.user
+        title = Chat.auto_title(first_message)
 
+        {:ok, conversation} =
+          Chat.create_conversation(%{
+            user_id: user.id,
+            title: title,
+            model: socket.assigns.model,
+            provider: socket.assigns.provider
+          })
+
+        # Start memory session for this conversation
+        session_id = "conversation-#{conversation.id}"
+        Memory.start_session(socket.assigns.agent_id, session_id)
+
+        conversations = Chat.list_conversations(user.id)
+
+        socket
+        |> assign(conversation: conversation, conversations: conversations)
+        |> push_patch(to: ~p"/chat/#{conversation.id}", replace: true)
+
+      _existing ->
+        socket
+    end
+  end
+
+  defp load_conversation(socket, conversation) do
+    # Load messages from Postgres
+    db_messages =
+      Chat.list_messages(conversation.id)
+      |> Enum.map(fn msg ->
+        %{role: String.to_existing_atom(msg.role), content: msg.content}
+      end)
+
+    # Hydrate Tier 1 working memory
+    session_id = "conversation-#{conversation.id}"
     agent_id = socket.assigns.agent_id
-    Memory.stop_session(agent_id, socket.assigns.session_id)
 
-    case Memory.start_session(agent_id, socket.assigns.session_id) do
-      {:ok, _} -> :ok
-      {:error, reason} -> Logger.warning("Failed to restart memory session: #{inspect(reason)}")
+    case Memory.start_session(agent_id, session_id) do
+      {:ok, _} ->
+        # New session — hydrate from DB
+        hydrate_working_memory(agent_id, session_id, db_messages)
+
+      {:error, {:already_started, _}} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("Failed to start memory session: #{inspect(reason)}")
     end
 
-    assign(socket, messages: [], events: [], stages: [], thinking: false, run_id: nil)
+    assign(socket,
+      conversation: conversation,
+      messages: db_messages,
+      events: [],
+      stages: [],
+      thinking: false,
+      run_id: nil
+    )
+  end
+
+  defp hydrate_working_memory(agent_id, session_id, messages) do
+    Enum.each(messages, fn msg ->
+      Memory.add_message(agent_id, session_id, to_string(msg.role), msg.content)
+    end)
+  rescue
+    e ->
+      Logger.warning("Failed to hydrate working memory: #{inspect(e)}")
   end
 
   defp build_model_client(provider, model) do
@@ -277,29 +379,8 @@ defmodule AgentExWeb.ChatLive do
     end)
   end
 
-  defp restore_messages(agent_id, session_id) do
-    Memory.get_messages(agent_id, session_id)
-    |> Enum.map(fn msg ->
-      role =
-        case msg.role do
-          r when is_atom(r) -> r
-          "user" -> :user
-          "assistant" -> :assistant
-          "system" -> :system
-          other -> String.to_existing_atom(other)
-        end
-
-      %{role: role, content: msg.content}
-    end)
-  rescue
-    e in [ArgumentError, MatchError, KeyError] ->
-      Logger.error("Failed to restore messages: #{inspect(e)}")
-      []
-  end
-
   defp user_agent_id(user), do: "user_#{user.id}_chat"
 
-  # Phase 5 cleanup: replace with agent-configured tools
   defp load_chat_tools do
     case Application.get_env(:agent_ex, :chat_tools, []) do
       :demo -> demo_tools()

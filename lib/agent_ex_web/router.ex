@@ -6,23 +6,11 @@ defmodule AgentExWeb.Router do
   pipeline :browser do
     plug(:accepts, ["html"])
     plug(:fetch_session)
-    plug(:ensure_chat_session)
     plug(:fetch_live_flash)
     plug(:put_root_layout, html: {AgentExWeb.Layouts, :root})
     plug(:protect_from_forgery)
     plug(:put_secure_browser_headers)
     plug(:fetch_current_scope_for_user)
-  end
-
-  defp ensure_chat_session(conn, _opts) do
-    case Plug.Conn.get_session(conn, :chat_session_id) do
-      nil ->
-        session_id = "session-#{System.unique_integer([:positive])}"
-        Plug.Conn.put_session(conn, :chat_session_id, session_id)
-
-      _ ->
-        conn
-    end
   end
 
   scope "/", AgentExWeb do
@@ -55,6 +43,7 @@ defmodule AgentExWeb.Router do
     live_session :require_authenticated_user,
       on_mount: [{AgentExWeb.UserAuth, :require_authenticated}] do
       live("/chat", ChatLive, :index)
+      live("/chat/:conversation_id", ChatLive, :show)
       live("/users/profile", UserLive.Profile, :edit)
       live("/users/profile/confirm-email/:token", UserLive.Profile, :confirm_email)
       live("/users/settings", UserLive.Settings, :edit)
