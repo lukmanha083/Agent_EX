@@ -8,13 +8,14 @@ defmodule AgentExWeb.UserAuth do
   alias AgentEx.Accounts
   alias AgentEx.Accounts.Scope
 
-  # Make the remember me cookie valid for 14 days. This should match
-  # the session validity setting in UserToken.
-  @max_cookie_age_in_days 14
+  # Remember-me cookie uses the same 15-minute idle timeout as the session.
+  # Both cookies are refreshed on every request, so they only expire
+  # after 15 minutes of inactivity.
+  @idle_timeout_in_seconds 15 * 60
   @remember_me_cookie "_agent_ex_web_user_remember_me"
   @remember_me_options [
     sign: true,
-    max_age: @max_cookie_age_in_days * 24 * 60 * 60,
+    max_age: @idle_timeout_in_seconds,
     same_site: "Lax"
   ]
 
@@ -70,6 +71,7 @@ defmodule AgentExWeb.UserAuth do
          {user, token_inserted_at} <- Accounts.get_user_by_session_token(token) do
       conn
       |> assign(:current_scope, Scope.for_user(user))
+      |> maybe_refresh_remember_me_cookie(token)
       |> maybe_reissue_user_session_token(user, token_inserted_at)
     else
       nil -> assign(conn, :current_scope, Scope.for_user(nil))
@@ -87,6 +89,15 @@ defmodule AgentExWeb.UserAuth do
       else
         nil
       end
+    end
+  end
+
+  # Refresh the remember-me cookie on each request to implement rolling idle timeout.
+  defp maybe_refresh_remember_me_cookie(conn, token) do
+    if get_session(conn, :user_remember_me) do
+      put_resp_cookie(conn, @remember_me_cookie, token, @remember_me_options)
+    else
+      conn
     end
   end
 
