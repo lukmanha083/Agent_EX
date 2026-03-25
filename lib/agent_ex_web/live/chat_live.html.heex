@@ -14,11 +14,12 @@
       <.badge variant="secondary">{@model}</.badge>
       <div class="ml-auto flex items-center gap-1">
         <.button variant="ghost" size="sm" phx-click="new_chat" class="lg:hidden" aria-label="New chat">
-          <.icon name="hero-plus" class="w-3.5 h-3.5" />
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-3.5 h-3.5">
+            <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
+          </svg>
         </.button>
         <.button variant="ghost" size="sm" phx-click="clear" aria-label="Clear conversation">
-          <.icon name="hero-trash" class="w-3.5 h-3.5 md:mr-1" />
-          <span class="sr-only md:not-sr-only md:inline">Clear</span>
+          Clear
         </.button>
       </div>
     </header>
@@ -72,12 +73,10 @@
           ]}
         />
         <.button :if={!@thinking} type="submit" class="min-h-[44px]" aria-label="Send message">
-          <.icon name="hero-paper-airplane" class="w-4 h-4 md:hidden" />
-          <span class="sr-only md:not-sr-only md:inline">Send</span>
+          Send
         </.button>
         <.button :if={@thinking} variant="destructive" type="button" phx-click="cancel" class="min-h-[44px]" aria-label="Cancel">
-          <.icon name="hero-stop" class="w-4 h-4 md:hidden" />
-          <span class="sr-only md:not-sr-only md:inline">Cancel</span>
+          Cancel
         </.button>
       </form>
     </div>
