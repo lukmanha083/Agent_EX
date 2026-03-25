@@ -16,9 +16,22 @@ config :agent_ex, AgentEx.Repo,
   pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: System.schedulers_online() * 2
 
-# Disable the web server in tests
+# Enable the web server for Wallaby browser tests
 config :agent_ex, AgentExWeb.Endpoint,
   http: [ip: {127, 0, 0, 1}, port: 4002],
   secret_key_base:
     "test-only-secret-key-base-that-is-at-least-64-bytes-long-for-testing-purposes",
-  server: false
+  server: true
+
+# Allow Wallaby to share the Ecto sandbox with browser requests
+config :agent_ex, :sql_sandbox, true
+
+# Wallaby browser test configuration
+config :wallaby,
+  otp_app: :agent_ex,
+  base_url: "http://localhost:4002",
+  driver: Wallaby.Chrome,
+  screenshot_on_failure: true,
+  chrome: [
+    headless: true
+  ]

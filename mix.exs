@@ -55,6 +55,7 @@ defmodule AgentEx.MixProject do
       {:esbuild, "~> 0.9", runtime: Mix.env() == :dev},
 
       # Dev/Test
+      {:wallaby, "~> 0.30", only: :test, runtime: false},
       {:lazy_html, "~> 0.1", only: :test},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:ex_slop, "~> 0.2", only: [:dev, :test], runtime: false},

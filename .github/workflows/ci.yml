@@ -57,6 +57,18 @@ jobs:
       - name: Compile (warnings as errors)
         run: mix compile --warnings-as-errors
 
+      - name: Setup ChromeDriver
+        uses: nanasess/setup-chromedriver@v2
+
+      - name: Start ChromeDriver
+        run: chromedriver --headless --disable-gpu --no-sandbox --port=9515 &
+
+      - name: Install frontend tooling
+        run: mix assets.setup
+
+      - name: Build assets
+        run: mix assets.build
+
       - name: Setup database
         run: mix ecto.setup
 
