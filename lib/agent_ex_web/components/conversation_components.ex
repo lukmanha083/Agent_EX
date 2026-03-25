@@ -16,7 +16,7 @@ defmodule AgentExWeb.ConversationComponents do
     ~H"""
     <div class="flex flex-col h-full w-full bg-gray-900 border-r border-gray-800">
       <!-- Header -->
-      <div class="flex items-center justify-between h-14 px-3 border-b border-gray-800">
+      <div class="flex items-center justify-between h-14 pl-3 pr-12 border-b border-gray-800">
         <span class="text-sm font-semibold text-white">History</span>
         <button
           type="button"
