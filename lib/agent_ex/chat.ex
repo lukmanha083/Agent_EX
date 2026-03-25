@@ -77,11 +77,9 @@ defmodule AgentEx.Chat do
   end
 
   def auto_title(content) do
-    content
-    |> String.trim()
-    |> String.slice(0, 50)
-    |> then(fn title ->
-      if String.length(content) > 50, do: title <> "...", else: title
-    end)
+    trimmed = String.trim(content)
+    title = String.slice(trimmed, 0, 50)
+
+    if String.length(trimmed) > 50, do: title <> "...", else: title
   end
 end

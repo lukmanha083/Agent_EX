@@ -79,12 +79,14 @@ defmodule AgentExWeb.ChatLive do
     conversation = socket.assigns.conversation
 
     # Save user message to DB
-    {:ok, _msg} =
-      Chat.create_message(%{
-        conversation_id: conversation.id,
-        role: "user",
-        content: message
-      })
+    case Chat.create_message(%{
+           conversation_id: conversation.id,
+           role: "user",
+           content: message
+         }) do
+      {:ok, _msg} -> :ok
+      {:error, reason} -> Logger.warning("Failed to persist user message: #{inspect(reason)}")
+    end
 
     # Add user message to display
     messages = socket.assigns.messages ++ [%{role: :user, content: message}]
@@ -156,21 +158,20 @@ defmodule AgentExWeb.ChatLive do
   def handle_event("delete_conversation", %{"id" => id}, socket) do
     user = socket.assigns.current_scope.user
 
-    case Chat.get_user_conversation(user.id, id) do
-      nil ->
-        {:noreply, socket}
+    with conversation when not is_nil(conversation) <- Chat.get_user_conversation(user.id, id),
+         {:ok, _} <- Chat.delete_conversation(conversation) do
+      conversations = Chat.list_conversations(user.id)
+      socket = assign(socket, conversations: conversations)
 
-      conversation ->
-        {:ok, _} = Chat.delete_conversation(conversation)
-        conversations = Chat.list_conversations(user.id)
+      viewing_deleted? =
+        socket.assigns.conversation && socket.assigns.conversation.id == conversation.id
 
-        socket = assign(socket, conversations: conversations)
-
-        if socket.assigns.conversation && socket.assigns.conversation.id == conversation.id do
-          {:noreply, push_patch(socket, to: ~p"/chat")}
-        else
-          {:noreply, socket}
-        end
+      if viewing_deleted?,
+        do: {:noreply, push_patch(socket, to: ~p"/chat")},
+        else: {:noreply, socket}
+    else
+      nil -> {:noreply, socket}
+      {:error, _reason} -> {:noreply, put_flash(socket, :error, "Failed to delete conversation")}
     end
   end
 
@@ -243,11 +244,17 @@ defmodule AgentExWeb.ChatLive do
 
     # Save assistant message to DB
     if socket.assigns.conversation do
-      Chat.create_message(%{
-        conversation_id: socket.assigns.conversation.id,
-        role: "assistant",
-        content: content
-      })
+      case Chat.create_message(%{
+             conversation_id: socket.assigns.conversation.id,
+             role: "assistant",
+             content: content
+           }) do
+        {:ok, _} ->
+          :ok
+
+        {:error, reason} ->
+          Logger.warning("Failed to persist assistant message: #{inspect(reason)}")
+      end
 
       Chat.touch_conversation(socket.assigns.conversation)
     end
@@ -290,23 +297,26 @@ defmodule AgentExWeb.ChatLive do
         user = socket.assigns.current_scope.user
         title = Chat.auto_title(first_message)
 
-        {:ok, conversation} =
-          Chat.create_conversation(%{
-            user_id: user.id,
-            title: title,
-            model: socket.assigns.model,
-            provider: socket.assigns.provider
-          })
+        case Chat.create_conversation(%{
+               user_id: user.id,
+               title: title,
+               model: socket.assigns.model,
+               provider: socket.assigns.provider
+             }) do
+          {:ok, conversation} ->
+            session_id = "conversation-#{conversation.id}"
+            Memory.start_session(socket.assigns.agent_id, session_id)
 
-        # Start memory session for this conversation
-        session_id = "conversation-#{conversation.id}"
-        Memory.start_session(socket.assigns.agent_id, session_id)
+            conversations = Chat.list_conversations(user.id)
 
-        conversations = Chat.list_conversations(user.id)
+            socket
+            |> assign(conversation: conversation, conversations: conversations)
+            |> push_patch(to: ~p"/chat/#{conversation.id}", replace: true)
 
-        socket
-        |> assign(conversation: conversation, conversations: conversations)
-        |> push_patch(to: ~p"/chat/#{conversation.id}", replace: true)
+          {:error, reason} ->
+            Logger.warning("Failed to create conversation: #{inspect(reason)}")
+            put_flash(socket, :error, "Failed to create conversation")
+        end
 
       _existing ->
         socket
@@ -318,7 +328,7 @@ defmodule AgentExWeb.ChatLive do
     db_messages =
       Chat.list_messages(conversation.id)
       |> Enum.map(fn msg ->
-        %{role: String.to_existing_atom(msg.role), content: msg.content}
+        %{role: role_atom(msg.role), content: msg.content}
       end)
 
     # Hydrate Tier 1 working memory
@@ -378,6 +388,11 @@ defmodule AgentExWeb.ChatLive do
         do: e.data[:content]
     end)
   end
+
+  defp role_atom("user"), do: :user
+  defp role_atom("assistant"), do: :assistant
+  defp role_atom("system"), do: :system
+  defp role_atom(other), do: String.to_atom(other)
 
   defp user_agent_id(user), do: "user_#{user.id}_chat"
 

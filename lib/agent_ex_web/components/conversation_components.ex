@@ -5,8 +5,10 @@ defmodule AgentExWeb.ConversationComponents do
   import AgentExWeb.CoreComponents, except: [button: 1]
   import SaladUI.Button
 
-  attr :conversations, :list, required: true
-  attr :current_id, :integer, default: nil
+  alias Phoenix.LiveView.JS
+
+  attr(:conversations, :list, required: true)
+  attr(:current_id, :any, default: nil)
 
   def conversation_sidebar(assigns) do
     grouped = group_by_date(assigns.conversations)
@@ -43,30 +45,32 @@ defmodule AgentExWeb.ConversationComponents do
     """
   end
 
-  attr :conversation, :map, required: true
-  attr :active, :boolean, default: false
+  attr(:conversation, :map, required: true)
+  attr(:active, :boolean, default: false)
 
   def conversation_item(assigns) do
     ~H"""
-    <.link
-      patch={~p"/chat/#{@conversation.id}"}
-      class={[
-        "flex items-center gap-2 px-2 py-2 rounded-md text-sm transition-colors group cursor-pointer",
-        @active && "bg-gray-800 text-white" || "text-gray-400 hover:bg-gray-800/50 hover:text-gray-200"
-      ]}
-    >
-      <.icon name="hero-chat-bubble-left" class="w-4 h-4 shrink-0" />
-      <span class="truncate flex-1">{@conversation.title || "New conversation"}</span>
+    <div class={[
+      "flex items-center gap-2 px-2 py-2 rounded-md text-sm transition-colors group",
+      @active && "bg-gray-800 text-white" || "text-gray-400 hover:bg-gray-800/50 hover:text-gray-200"
+    ]}>
+      <.link
+        patch={~p"/chat/#{@conversation.id}"}
+        class="flex items-center gap-2 flex-1 min-w-0"
+      >
+        <.icon name="hero-chat-bubble-left" class="w-4 h-4 shrink-0" />
+        <span class="truncate">{@conversation.title || "New conversation"}</span>
+      </.link>
       <button
         type="button"
-        phx-click="delete_conversation"
-        phx-value-id={@conversation.id}
-        class="opacity-0 group-hover:opacity-100 p-1 rounded text-gray-500 hover:text-red-400 transition-opacity"
+        phx-click={JS.push("delete_conversation", value: %{id: @conversation.id})}
+        class="opacity-0 group-hover:opacity-100 p-1 rounded text-gray-500 hover:text-red-400 transition-opacity shrink-0"
+        aria-label="Delete conversation"
         data-confirm="Delete this conversation?"
       >
         <.icon name="hero-trash" class="w-3.5 h-3.5" />
       </button>
-    </.link>
+    </div>
     """
   end
 
@@ -76,7 +80,7 @@ defmodule AgentExWeb.ConversationComponents do
 
     {today_list, yesterday_list, older_list} =
       Enum.reduce(conversations, {[], [], []}, fn convo, {t, y, o} ->
-        date = DateTime.to_date(convo.updated_at)
+        date = conversation_date(convo.updated_at)
 
         cond do
           date == today -> {[convo | t], y, o}
@@ -91,4 +95,7 @@ defmodule AgentExWeb.ConversationComponents do
       {"Older", Enum.reverse(older_list)}
     ]
   end
+
+  defp conversation_date(%DateTime{} = dt), do: DateTime.to_date(dt)
+  defp conversation_date(_), do: nil
 end

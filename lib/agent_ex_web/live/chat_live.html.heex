@@ -16,12 +16,12 @@
         {@conversation.title}
       </span>
       <div class="ml-auto flex items-center gap-1">
-        <.button variant="ghost" size="sm" phx-click="new_chat" class="md:hidden">
+        <.button variant="ghost" size="sm" phx-click="new_chat" class="md:hidden" aria-label="New chat">
           <.icon name="hero-plus" class="w-3.5 h-3.5" />
         </.button>
-        <.button variant="ghost" size="sm" phx-click="clear">
+        <.button variant="ghost" size="sm" phx-click="clear" aria-label="Clear conversation">
           <.icon name="hero-trash" class="w-3.5 h-3.5 md:mr-1" />
-          <span class="hidden md:inline">Clear</span>
+          <span class="sr-only md:not-sr-only md:inline">Clear</span>
         </.button>
       </div>
     </header>
@@ -76,13 +76,13 @@
             "disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px]"
           ]}
         />
-        <.button :if={!@thinking} type="submit" class="min-h-[44px]">
+        <.button :if={!@thinking} type="submit" class="min-h-[44px]" aria-label="Send message">
           <.icon name="hero-paper-airplane" class="w-4 h-4 md:hidden" />
-          <span class="hidden md:inline">Send</span>
+          <span class="sr-only md:not-sr-only md:inline">Send</span>
         </.button>
-        <.button :if={@thinking} variant="destructive" type="button" phx-click="cancel" class="min-h-[44px]">
+        <.button :if={@thinking} variant="destructive" type="button" phx-click="cancel" class="min-h-[44px]" aria-label="Cancel">
           <.icon name="hero-stop" class="w-4 h-4 md:hidden" />
-          <span class="hidden md:inline">Cancel</span>
+          <span class="sr-only md:not-sr-only md:inline">Cancel</span>
         </.button>
       </form>
     </div>
