@@ -13,6 +13,10 @@ defmodule AgentExWeb.Endpoint do
     longpoll: [connect_info: [session: @session_options]]
   )
 
+  if Application.compile_env(:agent_ex, :sql_sandbox) do
+    plug(Phoenix.Ecto.SQL.Sandbox)
+  end
+
   plug(Plug.Static,
     at: "/",
     from: :agent_ex,

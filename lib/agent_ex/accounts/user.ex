@@ -8,6 +8,10 @@ defmodule AgentEx.Accounts.User do
     field(:password, :string, virtual: true, redact: true)
     field(:hashed_password, :string, redact: true)
     field(:timezone, :string, default: "Etc/UTC")
+    field(:provider, :string, default: "openai")
+    field(:model, :string, default: "gpt-4o-mini")
+    # Placeholder: encrypted storage for provider API keys (wired up in future phase)
+    field(:provider_api_key, :binary, redact: true)
     field(:confirmed_at, :naive_datetime)
     field(:authenticated_at, :naive_datetime, virtual: true)
 
@@ -59,6 +63,28 @@ defmodule AgentEx.Accounts.User do
     user
     |> cast(attrs, [:timezone])
     |> validate_timezone()
+  end
+
+  @doc """
+  A user changeset for changing the LLM provider and model.
+  """
+  def provider_changeset(user, attrs, _opts \\ []) do
+    user
+    |> cast(attrs, [:provider, :model])
+    |> validate_required([:provider, :model])
+    |> validate_inclusion(:provider, AgentEx.ProviderHelpers.valid_providers())
+    |> validate_model_for_provider()
+  end
+
+  defp validate_model_for_provider(changeset) do
+    provider = get_field(changeset, :provider)
+    model = get_field(changeset, :model)
+
+    if provider && model && not AgentEx.ProviderHelpers.valid_model?(provider, model) do
+      add_error(changeset, :model, "is not valid for the selected provider")
+    else
+      changeset
+    end
   end
 
   defp validate_timezone(changeset) do

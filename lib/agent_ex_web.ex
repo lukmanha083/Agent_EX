@@ -68,6 +68,16 @@ defmodule AgentExWeb do
       import Phoenix.Component
       import AgentExWeb.CoreComponents
 
+      # SaladUI structural components (available in all templates)
+      # NOTE: SaladUI.Button is NOT imported globally — it conflicts with
+      # CoreComponents.button/1. Import it locally in modules that need it.
+      import SaladUI.Badge
+      import SaladUI.Card
+      import SaladUI.DropdownMenu
+      import SaladUI.Separator
+      import SaladUI.Sheet
+      import SaladUI.Tooltip
+
       alias AgentExWeb.Layouts
       alias Phoenix.LiveView.JS
 

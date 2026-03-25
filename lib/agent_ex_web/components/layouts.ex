@@ -8,4 +8,24 @@ defmodule AgentExWeb.Layouts do
   import AgentExWeb.CoreComponents
 
   embed_templates("layouts/*")
+
+  @doc "Check if a nav link is active based on the current LiveView module."
+  def nav_active?(socket, module) do
+    socket.view == module
+  end
+
+  @doc "Generate initials from a username or email string."
+  def initials(name) when is_binary(name) do
+    parts =
+      name
+      |> String.split(~r/[_@.\s]/)
+      |> Enum.filter(&(&1 != ""))
+
+    case parts do
+      [] -> "?"
+      parts -> parts |> Enum.take(2) |> Enum.map_join(&String.first/1) |> String.upcase()
+    end
+  end
+
+  def initials(_), do: "?"
 end

@@ -47,11 +47,15 @@ defmodule AgentEx.MixProject do
       {:bandit, "~> 1.6"},
       {:phoenix_live_dashboard, "~> 0.8"},
 
+      # UI Components
+      {:salad_ui, "~> 1.0.0-beta.3"},
+
       # Assets
       {:tailwind, "~> 0.2", runtime: Mix.env() == :dev},
       {:esbuild, "~> 0.9", runtime: Mix.env() == :dev},
 
       # Dev/Test
+      {:wallaby, "~> 0.30", only: :test, runtime: false},
       {:lazy_html, "~> 0.1", only: :test},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:ex_slop, "~> 0.2", only: [:dev, :test], runtime: false},

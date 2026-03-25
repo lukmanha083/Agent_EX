@@ -5,24 +5,17 @@ defmodule AgentExWeb.ChatLive do
   alias AgentEx.EventLoop.Event
 
   import AgentExWeb.ChatComponents
+  import AgentExWeb.CoreComponents, except: [button: 1]
+  import AgentExWeb.ProviderHelpers, only: [default_model_for: 1, provider_to_atom: 1]
+  import SaladUI.Button
 
   require Logger
 
-  @providers %{
-    "openai" => :openai,
-    "anthropic" => :anthropic,
-    "moonshot" => :moonshot
-  }
-
   @impl true
   def mount(_params, session, socket) do
-    default_provider = Application.get_env(:agent_ex, :chat_provider, "openai")
-
-    default_model =
-      Application.get_env(:agent_ex, :chat_model, default_model_for(default_provider))
+    user = socket.assigns.current_scope.user
 
     session_id = session["chat_session_id"]
-    user = socket.assigns.current_scope.user
     agent_id = user_agent_id(user)
 
     # Start or reuse memory session
@@ -42,6 +35,9 @@ defmodule AgentExWeb.ChatLive do
           {[], nil, []}
       end
 
+    provider = user.provider || "openai"
+    model = user.model || default_model_for(provider)
+
     {:ok,
      assign(socket,
        messages: messages,
@@ -50,8 +46,8 @@ defmodule AgentExWeb.ChatLive do
        thinking: false,
        run_id: run_id,
        input: "",
-       provider: default_provider,
-       model: default_model,
+       provider: provider,
+       model: model,
        tools: load_chat_tools(),
        session_id: session_id,
        agent_id: agent_id
@@ -123,15 +119,6 @@ defmodule AgentExWeb.ChatLive do
   end
 
   def handle_event("send", _params, socket), do: {:noreply, socket}
-
-  def handle_event("select_provider", %{"provider" => provider}, socket) do
-    model = default_model_for(provider)
-    {:noreply, reset_conversation(socket) |> assign(provider: provider, model: model)}
-  end
-
-  def handle_event("select_model", %{"model" => model}, socket) do
-    {:noreply, reset_conversation(socket) |> assign(model: model)}
-  end
 
   def handle_event("cancel", _params, socket) do
     if socket.assigns.run_id do
@@ -250,29 +237,6 @@ defmodule AgentExWeb.ChatLive do
 
   # -- Helpers --
 
-  @models_by_provider %{
-    "openai" => [
-      "gpt-4o",
-      "gpt-4o-mini",
-      "gpt-5.4",
-      "gpt-5.4-mini",
-      "gpt-5.4-nano",
-      "gpt-5.4-pro",
-      "o3-mini"
-    ],
-    "anthropic" => [
-      "claude-sonnet-4-5-20250514",
-      "claude-haiku-4-5-20251001",
-      "claude-opus-4-20250514"
-    ],
-    "moonshot" => ["moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"]
-  }
-
-  def models_for_provider(provider), do: Map.get(@models_by_provider, provider, [])
-
-  def provider_options,
-    do: [{"OpenAI", "openai"}, {"Anthropic", "anthropic"}, {"Moonshot", "moonshot"}]
-
   defp reset_conversation(socket) do
     if socket.assigns.run_id do
       EventLoop.cancel(socket.assigns.run_id)
@@ -290,17 +254,10 @@ defmodule AgentExWeb.ChatLive do
     assign(socket, messages: [], events: [], stages: [], thinking: false, run_id: nil)
   end
 
-  defp default_model_for("openai"), do: "gpt-4o-mini"
-  defp default_model_for("anthropic"), do: "claude-haiku-4-5-20251001"
-  defp default_model_for("moonshot"), do: "moonshot-v1-8k"
-  defp default_model_for(_), do: "gpt-4o-mini"
-
   defp build_model_client(provider, model) do
-    provider_atom = Map.get(@providers, provider, :openai)
-
     AgentEx.ModelClient.new(
       model: model,
-      provider: provider_atom
+      provider: provider_to_atom(provider)
     )
   end
 

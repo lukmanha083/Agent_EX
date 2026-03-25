@@ -6,6 +6,9 @@ defmodule AgentExWeb.ChatComponents do
 
   use Phoenix.Component
 
+  import SaladUI.Badge
+  import SaladUI.Card
+
   @doc "Renders a chat message bubble."
   attr(:role, :atom, required: true, values: [:user, :assistant, :system, :tool])
   attr(:content, :string, required: true)
@@ -18,7 +21,7 @@ defmodule AgentExWeb.ChatComponents do
       @role == :user && "justify-end"
     ]}>
       <div :if={@role != :user} class="flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold bg-indigo-600 text-white">
-        <%= role_icon(@role) %>
+        {role_icon(@role)}
       </div>
 
       <div class={[
@@ -26,9 +29,9 @@ defmodule AgentExWeb.ChatComponents do
         message_style(@role)
       ]}>
         <p :if={@source && @role == :assistant} class="text-xs text-gray-500 mb-1">
-          <%= @source %>
+          {@source}
         </p>
-        <div class="whitespace-pre-wrap break-words"><%= @content %></div>
+        <div class="whitespace-pre-wrap break-words">{@content}</div>
       </div>
 
       <div :if={@role == :user} class="flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold bg-gray-600 text-white">
@@ -46,31 +49,32 @@ defmodule AgentExWeb.ChatComponents do
 
   def tool_card(assigns) do
     ~H"""
-    <div class="mx-4 my-2 rounded-lg border border-gray-800 bg-gray-900/50 overflow-hidden">
-      <div class="flex items-center gap-2 px-3 py-2 border-b border-gray-800">
-        <span class={[
-          "w-2 h-2 rounded-full",
-          @status == :pending && "bg-gray-500",
-          @status == :running && "bg-yellow-500 animate-pulse",
-          @status == :complete && "bg-green-500",
-          @status == :error && "bg-red-500"
-        ]} />
-        <span class="text-xs font-mono text-gray-400"><%= @name %></span>
-        <span class="text-xs text-gray-600 ml-auto"><%= @status %></span>
-      </div>
+    <div class="mx-4 my-2">
+      <.card class="bg-gray-900/50 overflow-hidden">
+        <.card_header class="flex-row items-center gap-2 px-3 py-2 space-y-0">
+          <span class={[
+            "w-2 h-2 rounded-full shrink-0",
+            status_dot_class(@status)
+          ]} />
+          <span class="text-xs font-mono text-gray-400">{@name}</span>
+          <.badge variant={status_badge_variant(@status)} class="ml-auto text-[10px]">
+            {@status}
+          </.badge>
+        </.card_header>
 
-      <div :if={@arguments} class="px-3 py-2 border-b border-gray-800">
-        <p class="text-xs text-gray-600 mb-1">Arguments</p>
-        <pre class="text-xs text-gray-400 font-mono overflow-x-auto"><%= @arguments %></pre>
-      </div>
+        <.card_content :if={@arguments} class="px-3 py-2 border-t border-gray-800">
+          <p class="text-xs text-gray-600 mb-1">Arguments</p>
+          <pre class="text-xs text-gray-400 font-mono overflow-x-auto">{@arguments}</pre>
+        </.card_content>
 
-      <div :if={@result} class="px-3 py-2">
-        <p class="text-xs text-gray-600 mb-1">Result</p>
-        <pre class={[
-          "text-xs font-mono overflow-x-auto",
-          @status == :error && "text-red-400" || "text-gray-400"
-        ]}><%= @result %></pre>
-      </div>
+        <.card_content :if={@result} class="px-3 py-2 border-t border-gray-800">
+          <p class="text-xs text-gray-600 mb-1">Result</p>
+          <pre class={[
+            "text-xs font-mono overflow-x-auto",
+            @status == :error && "text-red-400" || "text-gray-400"
+          ]}>{@result}</pre>
+        </.card_content>
+      </.card>
     </div>
     """
   end
@@ -99,18 +103,12 @@ defmodule AgentExWeb.ChatComponents do
 
   def pipeline_stages(assigns) do
     ~H"""
-    <div :if={@stages != []} class="flex items-center gap-1 px-4 py-2 overflow-x-auto">
-      <div :for={{stage, idx} <- Enum.with_index(@stages)} class="flex items-center gap-1">
+    <div :if={@stages != []} class="flex items-center gap-1.5 px-4 py-2 overflow-x-auto">
+      <div :for={{stage, idx} <- Enum.with_index(@stages)} class="flex items-center gap-1.5">
         <span :if={idx > 0} class="w-4 h-px bg-gray-700" />
-        <span class={[
-          "px-2 py-0.5 rounded text-xs font-mono",
-          stage.status == :running && "bg-indigo-900/50 text-indigo-400 border border-indigo-700",
-          stage.status == :complete && "bg-green-900/50 text-green-400 border border-green-800",
-          stage.status == :pending && "bg-gray-900 text-gray-500 border border-gray-800",
-          stage.status == :error && "bg-red-900/50 text-red-400 border border-red-800"
-        ]}>
-          <%= stage.name %>
-        </span>
+        <.badge variant={stage_badge_variant(stage.status)} class="font-mono text-[10px]">
+          {stage.name}
+        </.badge>
       </div>
     </div>
     """
@@ -128,4 +126,18 @@ defmodule AgentExWeb.ChatComponents do
   defp message_style(:system), do: "bg-gray-900 text-gray-400 border border-gray-800 text-xs"
   defp message_style(:tool), do: "bg-gray-900 text-gray-400 font-mono text-xs"
   defp message_style(_), do: "bg-gray-800 text-gray-300"
+
+  defp status_dot_class(:pending), do: "bg-gray-500"
+  defp status_dot_class(:running), do: "bg-yellow-500 animate-pulse"
+  defp status_dot_class(:complete), do: "bg-green-500"
+  defp status_dot_class(:error), do: "bg-red-500"
+
+  defp status_badge_variant(:error), do: "destructive"
+  defp status_badge_variant(:complete), do: "default"
+  defp status_badge_variant(_), do: "secondary"
+
+  defp stage_badge_variant(:running), do: "default"
+  defp stage_badge_variant(:complete), do: "outline"
+  defp stage_badge_variant(:error), do: "destructive"
+  defp stage_badge_variant(_), do: "secondary"
 end
