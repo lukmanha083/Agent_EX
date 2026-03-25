@@ -46,8 +46,6 @@
           :if={event.type == :tool_call}
           name={event.data.tool_name}
           status={tool_status(event.data.call_id, @events)}
-          arguments={event.data.arguments}
-          result={tool_result_content(event.data.call_id, @events)}
         />
       </div>
 

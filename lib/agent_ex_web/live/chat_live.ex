@@ -382,13 +382,6 @@ defmodule AgentExWeb.ChatLive do
     if has_result, do: :complete, else: :running
   end
 
-  def tool_result_content(call_id, events) do
-    Enum.find_value(events, fn e ->
-      if e.type == :tool_result and e.data[:call_id] == call_id,
-        do: e.data[:content]
-    end)
-  end
-
   defp role_atom("user"), do: :user
   defp role_atom("assistant"), do: :assistant
   defp role_atom("system"), do: :system

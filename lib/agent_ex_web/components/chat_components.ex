@@ -44,8 +44,6 @@ defmodule AgentExWeb.ChatComponents do
   @doc "Renders a tool call/result card."
   attr(:name, :string, required: true)
   attr(:status, :atom, default: :pending, values: [:pending, :running, :complete, :error])
-  attr(:arguments, :string, default: nil)
-  attr(:result, :string, default: nil)
 
   def tool_card(assigns) do
     ~H"""
@@ -61,19 +59,6 @@ defmodule AgentExWeb.ChatComponents do
             {@status}
           </.badge>
         </.card_header>
-
-        <.card_content :if={@arguments} class="px-3 py-2 border-t border-gray-800">
-          <p class="text-xs text-gray-600 mb-1">Arguments</p>
-          <pre class="text-xs text-gray-400 font-mono overflow-x-auto">{@arguments}</pre>
-        </.card_content>
-
-        <.card_content :if={@result} class="px-3 py-2 border-t border-gray-800">
-          <p class="text-xs text-gray-600 mb-1">Result</p>
-          <pre class={[
-            "text-xs font-mono overflow-x-auto",
-            @status == :error && "text-red-400" || "text-gray-400"
-          ]}>{@result}</pre>
-        </.card_content>
       </.card>
     </div>
     """
