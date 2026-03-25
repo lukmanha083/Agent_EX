@@ -24,7 +24,7 @@ defmodule AgentExWeb.ConversationComponents do
           class="flex items-center justify-center w-8 h-8 rounded-md border border-gray-600 text-gray-200 hover:bg-gray-800 hover:text-white transition-colors"
           aria-label="New chat"
         >
-          <.icon name="hero-plus" class="w-4 h-4" />
+          <.icon name="hero-plus" class="w-4 h-4 text-gray-200" />
         </button>
       </div>
 
