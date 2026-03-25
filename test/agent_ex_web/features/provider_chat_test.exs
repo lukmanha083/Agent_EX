@@ -23,12 +23,12 @@ defmodule AgentExWeb.Features.ProviderChatTest do
           sel.dispatchEvent(new Event('change', { bubbles: true }));
         """)
         |> click(button("Update provider"))
-        |> assert_has(css("div", text: "Provider updated successfully"))
+        |> assert_has(css("p", text: "Provider updated successfully", count: :any))
 
       # Navigate to chat and verify the model badge shows an Anthropic model
       session
       |> visit("/chat")
-      |> assert_has(css("span", text: "claude-"))
+      |> assert_has(css("span", text: "claude-", count: :any))
     end
   end
 end

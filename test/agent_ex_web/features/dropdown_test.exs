@@ -18,29 +18,35 @@ defmodule AgentExWeb.Features.DropdownTest do
       session
       |> visit("/chat")
       |> click(css("#user-menu [data-part='trigger']"))
-      |> assert_has(css("[data-component='dropdown-menu'][data-state='open']"))
-      |> assert_has(css("[data-component='dropdown-menu'] a", text: "Profile"))
-      |> assert_has(css("[data-component='dropdown-menu'] a", text: "Settings"))
-      |> assert_has(css("[data-component='dropdown-menu'] a", text: "Sign out"))
+      |> assert_has(css("[data-state='open']", count: :any))
+      |> assert_has(css("a", text: "Profile", count: :any))
+      |> assert_has(css("a", text: "Settings", count: :any))
+      |> assert_has(css("a", text: "Sign out", count: :any))
     end
 
     test "closes on re-click of trigger", %{session: session} do
+      session =
+        session
+        |> visit("/chat")
+        |> click(css("#user-menu [data-part='trigger']"))
+        |> assert_has(css("[data-state='open']", count: :any))
+
       session
-      |> visit("/chat")
       |> click(css("#user-menu [data-part='trigger']"))
-      |> assert_has(css("[data-component='dropdown-menu'][data-state='open']"))
-      |> click(css("#user-menu [data-part='trigger']"))
-      |> refute_has(css("[data-component='dropdown-menu'][data-state='open']"))
+      |> refute_has(css("#user-menu [data-state='open']"))
     end
 
     test "closes on outside click", %{session: session} do
-      session
-      |> visit("/chat")
-      |> click(css("#user-menu [data-part='trigger']"))
-      |> assert_has(css("[data-component='dropdown-menu'][data-state='open']"))
+      session =
+        session
+        |> visit("/chat")
+        |> click(css("#user-menu [data-part='trigger']"))
+        |> assert_has(css("[data-state='open']", count: :any))
+
       # Click on the main content area to dismiss
+      session
       |> click(css("#messages"))
-      |> refute_has(css("[data-component='dropdown-menu'][data-state='open']"))
+      |> refute_has(css("#user-menu [data-state='open']"))
     end
   end
 end

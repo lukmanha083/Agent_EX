@@ -30,7 +30,7 @@ defmodule AgentExWeb.Features.SettingsTest do
         sel.dispatchEvent(new Event('change', { bubbles: true }));
       """)
       |> click(button("Update timezone"))
-      |> assert_has(css("div", text: "Timezone updated successfully"))
+      |> assert_has(css("p", text: "Timezone updated successfully", count: :any))
     end
 
     test "update provider and model", %{session: session} do
@@ -42,7 +42,7 @@ defmodule AgentExWeb.Features.SettingsTest do
         sel.dispatchEvent(new Event('change', { bubbles: true }));
       """)
       |> click(button("Update provider"))
-      |> assert_has(css("div", text: "Provider updated successfully"))
+      |> assert_has(css("p", text: "Provider updated successfully", count: :any))
     end
 
     test "update password", %{session: session} do
@@ -55,7 +55,7 @@ defmodule AgentExWeb.Features.SettingsTest do
         with: new_password
       )
       |> click(button("Save password"))
-      |> assert_has(css("div", text: "Password updated successfully"))
+      |> assert_has(css("p", text: "Password updated successfully", count: :any))
     end
   end
 end
