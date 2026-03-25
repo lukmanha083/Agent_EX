@@ -65,8 +65,6 @@ defmodule AgentEx.Accounts.User do
     |> validate_timezone()
   end
 
-  @valid_providers ~w(openai anthropic moonshot)
-
   @doc """
   A user changeset for changing the LLM provider and model.
   """
@@ -74,7 +72,19 @@ defmodule AgentEx.Accounts.User do
     user
     |> cast(attrs, [:provider, :model])
     |> validate_required([:provider, :model])
-    |> validate_inclusion(:provider, @valid_providers)
+    |> validate_inclusion(:provider, AgentExWeb.ProviderHelpers.valid_providers())
+    |> validate_model_for_provider()
+  end
+
+  defp validate_model_for_provider(changeset) do
+    provider = get_field(changeset, :provider)
+    model = get_field(changeset, :model)
+
+    if provider && model && not AgentExWeb.ProviderHelpers.valid_model?(provider, model) do
+      add_error(changeset, :model, "is not valid for the selected provider")
+    else
+      changeset
+    end
   end
 
   defp validate_timezone(changeset) do

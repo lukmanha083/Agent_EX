@@ -55,15 +55,7 @@ defmodule AgentExWeb.UserLive.Settings do
                 label="Model"
                 options={Enum.map(models_for_provider(@selected_provider), fn m -> {m, m} end)}
               />
-              <.input
-                field={@provider_form[:provider_api_key]}
-                type="password"
-                label="API Key"
-                placeholder="sk-..."
-                autocomplete="off"
-                disabled
-              />
-              <p class="text-xs text-muted-foreground">API key storage coming in a future update. Keys are currently read from server environment.</p>
+              <p class="text-xs text-muted-foreground">API key configuration coming in a future update. Keys are currently read from server environment.</p>
               <.button phx-disable-with="Saving..." class="bg-indigo-600 hover:bg-indigo-500 text-white">
                 Update provider
               </.button>
@@ -203,8 +195,7 @@ defmodule AgentExWeb.UserLive.Settings do
       |> Map.put(:action, :validate)
       |> to_form()
 
-    {:noreply,
-     assign(socket, provider_form: provider_form, selected_provider: new_provider)}
+    {:noreply, assign(socket, provider_form: provider_form, selected_provider: new_provider)}
   end
 
   def handle_event("update_provider", params, socket) do
@@ -220,7 +211,14 @@ defmodule AgentExWeb.UserLive.Settings do
            |> push_navigate(to: ~p"/users/settings")}
 
         {:error, changeset} ->
-          {:noreply, assign(socket, provider_form: to_form(changeset, action: :insert))}
+          provider =
+            Ecto.Changeset.get_field(changeset, :provider) || socket.assigns.selected_provider
+
+          {:noreply,
+           assign(socket,
+             provider_form: to_form(changeset, action: :insert),
+             selected_provider: provider
+           )}
       end
     else
       {:noreply,

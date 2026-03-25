@@ -6,15 +6,10 @@ defmodule AgentExWeb.ChatLive do
 
   import AgentExWeb.ChatComponents
   import AgentExWeb.CoreComponents, except: [button: 1]
+  import AgentExWeb.ProviderHelpers, only: [default_model_for: 1, provider_to_atom: 1]
   import SaladUI.Button
 
   require Logger
-
-  @providers %{
-    "openai" => :openai,
-    "anthropic" => :anthropic,
-    "moonshot" => :moonshot
-  }
 
   @impl true
   def mount(_params, session, socket) do
@@ -49,7 +44,7 @@ defmodule AgentExWeb.ChatLive do
        run_id: run_id,
        input: "",
        provider: user.provider || "openai",
-       model: user.model || "gpt-4o-mini",
+       model: user.model || default_model_for(user.provider || "openai"),
        tools: load_chat_tools(),
        session_id: session_id,
        agent_id: agent_id
@@ -257,11 +252,9 @@ defmodule AgentExWeb.ChatLive do
   end
 
   defp build_model_client(provider, model) do
-    provider_atom = Map.get(@providers, provider, :openai)
-
     AgentEx.ModelClient.new(
       model: model,
-      provider: provider_atom
+      provider: provider_to_atom(provider)
     )
   end
 

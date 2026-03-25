@@ -1,6 +1,7 @@
 defmodule AgentExWeb.ProviderHelpers do
   @moduledoc """
-  Shared provider/model data for chat and settings pages.
+  Single source of truth for provider/model data.
+  Used by ChatLive, Settings, and User changeset validation.
   """
 
   @models_by_provider %{
@@ -21,7 +22,21 @@ defmodule AgentExWeb.ProviderHelpers do
     "moonshot" => ["moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"]
   }
 
+  @valid_providers Map.keys(@models_by_provider)
+
+  @provider_atoms %{
+    "openai" => :openai,
+    "anthropic" => :anthropic,
+    "moonshot" => :moonshot
+  }
+
+  def valid_providers, do: @valid_providers
+
   def models_for_provider(provider), do: Map.get(@models_by_provider, provider, [])
+
+  def valid_model?(provider, model), do: model in models_for_provider(provider)
+
+  def provider_to_atom(provider), do: Map.get(@provider_atoms, provider, :openai)
 
   # CoreComponents select uses {value, label} order
   def provider_options,

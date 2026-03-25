@@ -174,13 +174,5 @@ defmodule AgentExWeb.UserLive.Profile do
     end
   end
 
-  defp initials(username) when is_binary(username) do
-    username
-    |> String.split("_")
-    |> Enum.take(2)
-    |> Enum.map_join(&String.first/1)
-    |> String.upcase()
-  end
-
-  defp initials(_), do: "?"
+  defdelegate initials(name), to: AgentExWeb.Layouts
 end
