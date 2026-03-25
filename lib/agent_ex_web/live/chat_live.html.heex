@@ -10,13 +10,10 @@
   <!-- Chat area -->
   <div class="flex flex-col flex-1 min-w-0">
     <!-- Header -->
-    <header class="flex items-center gap-2 md:gap-3 px-3 md:px-4 py-2.5 border-b border-gray-800 bg-gray-900/50">
+    <header class="flex items-center gap-2 md:gap-3 px-3 md:px-4 h-14 border-b border-gray-800 bg-gray-900/50">
       <.badge variant="secondary">{@model}</.badge>
-      <span :if={@conversation} class="text-xs text-gray-500 truncate hidden md:inline">
-        {@conversation.title}
-      </span>
       <div class="ml-auto flex items-center gap-1">
-        <.button variant="ghost" size="sm" phx-click="new_chat" class="md:hidden" aria-label="New chat">
+        <.button variant="ghost" size="sm" phx-click="new_chat" class="lg:hidden" aria-label="New chat">
           <.icon name="hero-plus" class="w-3.5 h-3.5" />
         </.button>
         <.button variant="ghost" size="sm" phx-click="clear" aria-label="Clear conversation">
