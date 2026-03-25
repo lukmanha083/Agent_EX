@@ -17,9 +17,11 @@ defmodule AgentExWeb.Features.ProviderChatTest do
       session =
         session
         |> visit("/users/settings")
-        |> find(css("#provider_form select[name='user[provider]']"), fn element ->
-          Wallaby.Browser.click(element, Wallaby.Query.option("anthropic"))
-        end)
+        |> execute_script("""
+          const sel = document.querySelector('#provider_form select[name="user[provider]"]');
+          sel.value = 'anthropic';
+          sel.dispatchEvent(new Event('change', { bubbles: true }));
+        """)
         |> click(button("Update provider"))
         |> assert_has(css("div", text: "Provider updated successfully"))
 

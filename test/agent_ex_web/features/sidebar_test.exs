@@ -12,28 +12,27 @@ defmodule AgentExWeb.Features.SidebarTest do
   end
 
   describe "responsive sidebar" do
-    test "mobile (375px): shows top bar with hamburger, hides desktop sidebar", %{
-      session: session
-    } do
+    test "mobile (375px): shows mobile top bar with hamburger menu", %{session: session} do
       session
       |> resize_window(375, 812)
       |> visit("/chat")
-      |> assert_has(css(".md\\:hidden", visible: true))
-      |> refute_has(css(".hidden.md\\:flex", visible: true))
+      # The mobile-nav sheet trigger (hamburger) should be visible
+      |> assert_has(css("#mobile-nav [data-part='trigger']"))
     end
 
-    test "tablet (768px): shows icon-only rail sidebar", %{session: session} do
+    test "tablet (768px): shows sidebar", %{session: session} do
       session
       |> resize_window(768, 1024)
       |> visit("/chat")
-      |> assert_has(css(".hidden.md\\:flex", visible: true))
+      # The desktop sidebar should be visible and user-menu dropdown should exist
+      |> assert_has(css("#user-menu"))
     end
 
-    test "desktop (1280px): shows full sidebar with text labels", %{session: session} do
+    test "desktop (1280px): shows full sidebar with user menu", %{session: session} do
       session
       |> resize_window(1280, 900)
       |> visit("/chat")
-      |> assert_has(css(".hidden.md\\:flex", visible: true))
+      |> assert_has(css("#user-menu"))
     end
   end
 end

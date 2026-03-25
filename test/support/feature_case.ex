@@ -38,6 +38,6 @@ defmodule AgentExWeb.FeatureCase do
     |> visit("/users/log-in")
     |> fill_in(css("#login_form_password_email"), with: user.email)
     |> fill_in(css("#login_form_password_password"), with: password)
-    |> click(css("#login_form_password button[type='submit']"))
+    |> click(css("#login_form_password button"))
   end
 end
