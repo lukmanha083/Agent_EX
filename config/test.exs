@@ -17,8 +17,11 @@ config :agent_ex, AgentEx.Repo,
   pool_size: System.schedulers_online() * 2
 
 # Enable the web server for Wallaby browser tests
+# Derive a per-partition port so parallel test shards don't collide
+test_port = 4002 + String.to_integer(System.get_env("MIX_TEST_PARTITION") || "0")
+
 config :agent_ex, AgentExWeb.Endpoint,
-  http: [ip: {127, 0, 0, 1}, port: 4002],
+  http: [ip: {127, 0, 0, 1}, port: test_port],
   secret_key_base:
     "test-only-secret-key-base-that-is-at-least-64-bytes-long-for-testing-purposes",
   server: true
@@ -29,9 +32,10 @@ config :agent_ex, :sql_sandbox, true
 # Wallaby browser test configuration
 config :wallaby,
   otp_app: :agent_ex,
-  base_url: "http://localhost:4002",
+  base_url: "http://localhost:#{test_port}",
   driver: Wallaby.Chrome,
   screenshot_on_failure: true,
   chrome: [
-    headless: true
+    headless: true,
+    args: ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"]
   ]

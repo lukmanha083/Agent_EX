@@ -31,7 +31,7 @@ Phase 4c → Phase 5+.
 6. [Phase 4 — Phoenix Foundation + EventLoop](#phase-4--phoenix-foundation--eventloop)
 7. [Phase 4b — User Timezone + User Scoping](#phase-4b--user-timezone--user-scoping)
 8. [Phase 4c — Conversation History](#phase-4c--conversation-history)
-9. [Phase 4d — Dashboard Refactor (SaladUI + Responsive Layout)](#phase-4d--dashboard-refactor-salad-ui--responsive-layout)
+9. [Phase 4d — Dashboard Refactor (SaladUI + Responsive Layout)](#phase-4d--dashboard-refactor-saladui--responsive-layout)
 10. [Phase 5 — Agent Builder + Unified Tool Management](#phase-5--agent-builder--unified-tool-management)
 11. [Phase 6 — Flow Builder + Triggers](#phase-6--flow-builder--triggers)
 12. [Phase 7 — Run View + Memory Inspector](#phase-7--run-view--memory-inspector)

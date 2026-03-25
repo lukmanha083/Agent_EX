@@ -72,7 +72,7 @@ defmodule AgentEx.Accounts.User do
     user
     |> cast(attrs, [:provider, :model])
     |> validate_required([:provider, :model])
-    |> validate_inclusion(:provider, AgentExWeb.ProviderHelpers.valid_providers())
+    |> validate_inclusion(:provider, AgentEx.ProviderHelpers.valid_providers())
     |> validate_model_for_provider()
   end
 
@@ -80,7 +80,7 @@ defmodule AgentEx.Accounts.User do
     provider = get_field(changeset, :provider)
     model = get_field(changeset, :model)
 
-    if provider && model && not AgentExWeb.ProviderHelpers.valid_model?(provider, model) do
+    if provider && model && not AgentEx.ProviderHelpers.valid_model?(provider, model) do
       add_error(changeset, :model, "is not valid for the selected provider")
     else
       changeset

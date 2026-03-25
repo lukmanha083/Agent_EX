@@ -59,7 +59,7 @@ jobs:
         uses: nanasess/setup-chromedriver@v2
 
       - name: Start ChromeDriver
-        run: chromedriver --headless --disable-gpu --no-sandbox --port=9515 &
+        run: chromedriver --port=9515 &
 
       - name: Install frontend tooling
         run: mix assets.setup

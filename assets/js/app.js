@@ -12,6 +12,15 @@ import "salad_ui/components/collapsible"
 import "salad_ui/components/command"
 import "salad_ui/components/dialog"
 import "salad_ui/components/dropdown_menu"
+import "salad_ui/components/hover-card"
+import "salad_ui/components/menu"
+import "salad_ui/components/popover"
+import "salad_ui/components/radio_group"
+import "salad_ui/components/select"
+import "salad_ui/components/slider"
+import "salad_ui/components/switch"
+import "salad_ui/components/tabs"
+import "salad_ui/components/tooltip"
 
 // Fix: toggle dropdown closed when clicking the trigger while open.
 // Problem: onOutsideClick closes it → state becomes "closed" → same click
@@ -27,15 +36,6 @@ document.addEventListener('click', (e) => {
     root.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
   }
 }, true)
-import "salad_ui/components/hover-card"
-import "salad_ui/components/menu"
-import "salad_ui/components/popover"
-import "salad_ui/components/radio_group"
-import "salad_ui/components/select"
-import "salad_ui/components/slider"
-import "salad_ui/components/switch"
-import "salad_ui/components/tabs"
-import "salad_ui/components/tooltip"
 
 let Hooks = {}
 Hooks.TimezoneDetect = TimezoneDetect

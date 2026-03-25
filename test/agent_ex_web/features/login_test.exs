@@ -19,7 +19,7 @@ defmodule AgentExWeb.Features.LoginTest do
 
       session
       |> visit("/users/log-in")
-      |> fill_in(text_field("Email", id: "login_form_magic_email"), with: user.email)
+      |> fill_in(css("#login_form_magic_email"), with: user.email)
       |> click(button("Sign in with email"))
       |> assert_has(css("div", text: "If your email is in our system"))
     end

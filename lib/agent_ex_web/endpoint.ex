@@ -14,7 +14,7 @@ defmodule AgentExWeb.Endpoint do
   )
 
   if Application.compile_env(:agent_ex, :sql_sandbox) do
-    plug Phoenix.Ecto.SQL.Sandbox
+    plug(Phoenix.Ecto.SQL.Sandbox)
   end
 
   plug(Plug.Static,

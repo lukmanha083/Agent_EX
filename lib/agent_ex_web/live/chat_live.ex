@@ -35,6 +35,9 @@ defmodule AgentExWeb.ChatLive do
           {[], nil, []}
       end
 
+    provider = user.provider || "openai"
+    model = user.model || default_model_for(provider)
+
     {:ok,
      assign(socket,
        messages: messages,
@@ -43,8 +46,8 @@ defmodule AgentExWeb.ChatLive do
        thinking: false,
        run_id: run_id,
        input: "",
-       provider: user.provider || "openai",
-       model: user.model || default_model_for(user.provider || "openai"),
+       provider: provider,
+       model: model,
        tools: load_chat_tools(),
        session_id: session_id,
        agent_id: agent_id

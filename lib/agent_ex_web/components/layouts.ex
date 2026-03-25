@@ -16,11 +16,15 @@ defmodule AgentExWeb.Layouts do
 
   @doc "Generate initials from a username or email string."
   def initials(name) when is_binary(name) do
-    name
-    |> String.split(~r/[_@.\s]/)
-    |> Enum.take(2)
-    |> Enum.map_join(&String.first/1)
-    |> String.upcase()
+    parts =
+      name
+      |> String.split(~r/[_@.\s]/)
+      |> Enum.filter(&(&1 != ""))
+
+    case parts do
+      [] -> "?"
+      parts -> parts |> Enum.take(2) |> Enum.map_join(&String.first/1) |> String.upcase()
+    end
   end
 
   def initials(_), do: "?"
