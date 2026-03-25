@@ -13,16 +13,12 @@ defmodule AgentExWeb.Features.ProviderChatTest do
 
   describe "provider/model reflected in chat" do
     test "chat page shows current model in badge", %{session: session, user: user} do
-      # The default user has provider "openai" / model "gpt-4o-mini"
-      # Verify the chat page displays the model badge
       session = visit(session, "/chat")
       source = page_source(session)
       assert source =~ user.model || "gpt-4o-mini"
     end
 
     test "changing provider in settings persists", %{session: session} do
-      # Update provider via the database directly then verify in chat
-      # (the settings form E2E flow is tested in SettingsTest)
       session =
         session
         |> visit("/users/settings")
@@ -34,7 +30,6 @@ defmodule AgentExWeb.Features.ProviderChatTest do
         |> click(button("Update provider"))
         |> assert_has(css("p", text: "Provider updated successfully", count: :any))
 
-      # Verify the settings page now shows anthropic
       session = visit(session, "/users/settings")
       source = page_source(session)
       assert source =~ "anthropic"

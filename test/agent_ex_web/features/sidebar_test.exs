@@ -16,7 +16,6 @@ defmodule AgentExWeb.Features.SidebarTest do
       session
       |> resize_window(375, 812)
       |> visit("/chat")
-      # The mobile-nav sheet trigger (hamburger) should be visible
       |> assert_has(css("#mobile-nav [data-part='trigger']"))
     end
 
@@ -24,7 +23,6 @@ defmodule AgentExWeb.Features.SidebarTest do
       session
       |> resize_window(768, 1024)
       |> visit("/chat")
-      # The desktop sidebar should be visible and user-menu dropdown should exist
       |> assert_has(css("#user-menu"))
     end
 

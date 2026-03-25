@@ -32,8 +32,6 @@ defmodule AgentExWeb.FeatureCase do
     password = AgentEx.AccountsFixtures.valid_user_password()
     AgentEx.AccountsFixtures.set_password(user)
 
-    # The login page has two forms (magic link + password), each with an "Email" field.
-    # Target the password form fields by their specific IDs to avoid ambiguity.
     session
     |> visit("/users/log-in")
     |> fill_in(css("#login_form_password_email"), with: user.email)

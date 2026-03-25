@@ -8,7 +8,6 @@ defmodule AgentExWeb.Features.DropdownTest do
   setup %{session: session} do
     user = user_fixture()
     session = feature_log_in_user(session, user)
-    # Desktop width so the sidebar avatar dropdown is visible
     session = resize_window(session, 1280, 900)
     {:ok, session: session, user: user}
   end
@@ -43,7 +42,6 @@ defmodule AgentExWeb.Features.DropdownTest do
         |> click(css("#user-menu [data-part='trigger']"))
         |> assert_has(css("[data-state='open']", count: :any))
 
-      # Click on the main content area to dismiss
       session
       |> click(css("#messages"))
       |> refute_has(css("#user-menu [data-state='open']"))
