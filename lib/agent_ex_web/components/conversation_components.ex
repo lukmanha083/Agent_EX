@@ -3,7 +3,6 @@ defmodule AgentExWeb.ConversationComponents do
   use AgentExWeb, :html
 
   import AgentExWeb.CoreComponents, except: [button: 1]
-  import SaladUI.Button
 
   alias Phoenix.LiveView.JS
 
@@ -16,16 +15,23 @@ defmodule AgentExWeb.ConversationComponents do
 
     ~H"""
     <div class="flex flex-col h-full w-full bg-gray-900 border-r border-gray-800">
-      <div class="flex items-center h-14 px-3 border-b border-gray-800">
-        <.button variant="outline" class="w-full justify-start gap-2 text-sm border-gray-600 text-gray-200 hover:bg-gray-800 hover:text-white" phx-click="new_chat">
+      <!-- Header -->
+      <div class="flex items-center justify-between h-14 px-3 border-b border-gray-800">
+        <span class="text-sm font-semibold text-white">History</span>
+        <button
+          type="button"
+          phx-click="new_chat"
+          class="flex items-center justify-center w-7 h-7 rounded-md text-gray-400 hover:bg-gray-800 hover:text-white transition-colors"
+          aria-label="New chat"
+        >
           <.icon name="hero-plus" class="w-4 h-4" />
-          New Chat
-        </.button>
+        </button>
       </div>
 
-      <div class="flex-1 overflow-y-auto p-2 space-y-3">
+      <!-- Conversation list -->
+      <nav class="flex-1 overflow-y-auto px-2 py-3 space-y-4">
         <div :for={{label, convos} <- @grouped} :if={convos != []}>
-          <p class="px-2 py-1 text-[11px] font-medium text-gray-500 uppercase tracking-wider">
+          <p class="px-2 mb-1 text-[11px] font-medium text-gray-500 uppercase tracking-wider">
             {label}
           </p>
           <div class="space-y-0.5">
@@ -37,10 +43,11 @@ defmodule AgentExWeb.ConversationComponents do
           </div>
         </div>
 
-        <p :if={@conversations == []} class="px-2 py-4 text-xs text-gray-600 text-center">
-          No conversations yet
-        </p>
-      </div>
+        <div :if={@conversations == []} class="flex flex-col items-center gap-2 py-8 text-gray-600">
+          <.icon name="hero-chat-bubble-left-right" class="w-8 h-8" />
+          <p class="text-xs">No conversations yet</p>
+        </div>
+      </nav>
     </div>
     """
   end
@@ -51,8 +58,8 @@ defmodule AgentExWeb.ConversationComponents do
   def conversation_item(assigns) do
     ~H"""
     <div class={[
-      "flex items-center gap-2 px-2 py-2 rounded-md text-sm transition-colors group",
-      @active && "bg-gray-800 text-white" || "text-gray-400 hover:bg-gray-800/50 hover:text-gray-200"
+      "flex items-center gap-2 px-2 py-1.5 rounded-md text-sm transition-colors group",
+      @active && "bg-gray-800 text-white font-medium" || "text-gray-400 hover:bg-gray-800/50 hover:text-gray-200"
     ]}>
       <.link
         patch={~p"/chat/#{@conversation.id}"}
@@ -68,7 +75,7 @@ defmodule AgentExWeb.ConversationComponents do
         aria-label="Delete conversation"
         data-confirm="Delete this conversation?"
       >
-        <.icon name="hero-trash" class="w-3.5 h-3.5" />
+        <.icon name="hero-trash" class="w-3 h-3" />
       </button>
     </div>
     """
