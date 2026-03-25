@@ -1,6 +1,6 @@
 <div class="flex h-full">
-  <!-- Conversation sidebar (hidden on mobile, shown on md+) -->
-  <div class="hidden md:flex md:w-56 lg:w-64 flex-shrink-0">
+  <!-- Conversation sidebar (hidden on mobile, shown on lg+) -->
+  <div class="hidden lg:flex lg:w-52 flex-shrink-0">
     <.conversation_sidebar
       conversations={@conversations}
       current_id={@conversation && @conversation.id}
