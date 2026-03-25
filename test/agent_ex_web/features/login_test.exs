@@ -6,7 +6,7 @@ defmodule AgentExWeb.Features.LoginTest do
   @moduletag :feature
 
   describe "login page" do
-    test "renders login form in the browser", %{session: session} do
+    test "renders both login forms in the browser", %{session: session} do
       session
       |> visit("/users/log-in")
       |> assert_has(css("h1", text: "Sign in"))
@@ -20,7 +20,7 @@ defmodule AgentExWeb.Features.LoginTest do
       session
       |> visit("/users/log-in")
       |> fill_in(css("#login_form_magic_email"), with: user.email)
-      |> click(button("Sign in with email"))
+      |> click(css("#login_form_magic button[type='submit']"))
       |> assert_has(css("div", text: "If your email is in our system"))
     end
 
@@ -29,6 +29,25 @@ defmodule AgentExWeb.Features.LoginTest do
       |> visit("/users/log-in")
       |> click(link("Sign up"))
       |> assert_has(css("h1", text: "Create an account"))
+    end
+  end
+
+  describe "registration page" do
+    test "renders registration form", %{session: session} do
+      session
+      |> visit("/users/register")
+      |> assert_has(css("h1", text: "Create an account"))
+      |> assert_has(css("#registration_form"))
+      |> assert_has(css("#registration_form input[name='user[username]']"))
+      |> assert_has(css("#registration_form input[name='user[email]']"))
+      |> assert_has(css("#registration_form input[name='user[password]']"))
+    end
+
+    test "navigates to login page", %{session: session} do
+      session
+      |> visit("/users/register")
+      |> click(link("Sign in"))
+      |> assert_has(css("h1", text: "Sign in"))
     end
   end
 end
