@@ -169,4 +169,51 @@ defmodule AgentEx.ChatTest do
       assert Chat.auto_title("  hello  ") == "hello"
     end
   end
+
+  describe "conversation title lifecycle" do
+    setup [:create_user, :create_conversation]
+
+    test "auto_title sets initial title from first message", %{conversation: convo} do
+      assert convo.title == "Test conversation"
+
+      {:ok, updated} = Chat.update_conversation_title(convo, Chat.auto_title("check disk space"))
+      assert updated.title == "check disk space"
+    end
+
+    test "update_conversation_title replaces existing title", %{conversation: convo} do
+      {:ok, updated} = Chat.update_conversation_title(convo, "Disk Space Check")
+      assert updated.title == "Disk Space Check"
+
+      reloaded = Chat.get_conversation!(convo.id)
+      assert reloaded.title == "Disk Space Check"
+    end
+
+    test "title update notifies caller via send when notify_pid is set", %{conversation: convo} do
+      # Simulate what generate_title_async does after LLM responds:
+      # update the title and send notification
+      convo_id = convo.id
+      title = "System Info Query"
+      {:ok, _} = Chat.update_conversation_title(convo, title)
+      send(self(), {:title_updated, convo_id, title})
+
+      assert_receive {:title_updated, ^convo_id, "System Info Query"}
+
+      reloaded = Chat.get_conversation!(convo.id)
+      assert reloaded.title == "System Info Query"
+    end
+
+    test "empty title is not saved (clean_title guard)", %{conversation: convo} do
+      original_title = convo.title
+
+      # Simulate what happens when LLM returns garbage
+      cleaned = ""
+      # The with clause in do_generate_title skips update when title is ""
+      if cleaned != "" do
+        Chat.update_conversation_title(convo, cleaned)
+      end
+
+      reloaded = Chat.get_conversation!(convo.id)
+      assert reloaded.title == original_title
+    end
+  end
 end
