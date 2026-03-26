@@ -1,73 +1,99 @@
-<div class="flex flex-col h-full">
-  <!-- Header -->
-  <header class="flex items-center gap-2 md:gap-3 px-3 md:px-4 py-2.5 border-b border-gray-800 bg-gray-900/50">
-    <.badge variant="secondary">{@model}</.badge>
-    <div class="ml-auto">
-      <.button variant="ghost" size="sm" phx-click="clear">
-        <.icon name="hero-trash" class="w-3.5 h-3.5 md:mr-1" />
-        <span class="hidden md:inline">Clear</span>
-      </.button>
-    </div>
-  </header>
-
-  <!-- Messages area -->
-  <div id="messages" class="flex-1 overflow-y-auto py-4 space-y-1" phx-hook="ScrollBottom">
-    <div :if={@messages == []} class="flex items-center justify-center h-full">
-      <div class="text-center space-y-3">
-        <.icon name="hero-chat-bubble-left-right" class="w-12 h-12 text-gray-700 mx-auto" />
-        <p class="text-gray-500 text-sm">Start a conversation</p>
-        <.badge variant="secondary">{@model}</.badge>
-      </div>
-    </div>
-
-    <div :for={msg <- @messages}>
-      <.message_bubble role={msg.role} content={msg.content} />
-    </div>
-
-    <!-- Tool call cards -->
-    <div :for={event <- @events}>
-      <.tool_card
-        :if={event.type == :tool_call}
-        name={event.data.tool_name}
-        status={tool_status(event.data.call_id, @events)}
-        arguments={event.data.arguments}
-        result={tool_result_content(event.data.call_id, @events)}
-      />
-    </div>
-
-    <!-- Pipeline stages -->
-    <.pipeline_stages stages={@stages} />
-
-    <!-- Thinking indicator -->
-    <.thinking_indicator active={@thinking} />
+<div class="flex h-full">
+  <!-- Conversation sidebar (desktop only) -->
+  <div class="hidden lg:block lg:w-52 flex-shrink-0">
+    <.conversation_sidebar
+      conversations={@conversations}
+      current_id={@conversation && @conversation.id}
+      timezone={@timezone}
+    />
   </div>
 
-  <!-- Input area -->
-  <div class="border-t border-gray-800 bg-gray-900/50 p-3 md:p-4">
-    <form phx-submit="send" class="flex gap-2">
-      <label for="message_input" class="sr-only">Message</label>
-      <input
-        id="message_input"
-        type="text"
-        name="message"
-        value={@input}
-        placeholder="Type a message..."
-        autocomplete="off"
-        disabled={@thinking}
-        class={[
-          "flex-1 bg-gray-800 border border-gray-700 text-white rounded-lg px-3 md:px-4 py-2.5 text-sm",
-          "placeholder-gray-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500",
-          "disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px]"
-        ]}
-      />
-      <.button :if={!@thinking} type="submit" class="min-h-[44px]">
-        <.icon name="hero-paper-airplane" class="w-4 h-4 md:hidden" />
-        <span class="hidden md:inline">Send</span>
-      </.button>
-      <.button :if={@thinking} variant="destructive" type="button" phx-click="cancel" class="min-h-[44px]">
-        <.icon name="hero-stop" class="w-4 h-4 md:hidden" />
-        <span class="hidden md:inline">Cancel</span>
-      </.button>
-    </form>
+  <!-- Chat area -->
+  <div class="flex flex-col flex-1 min-w-0">
+    <!-- Header -->
+    <header class="flex items-center gap-2 md:gap-3 px-3 md:px-4 h-14 border-b border-gray-800 bg-gray-900/50">
+      <!-- History sheet (mobile/tablet only) -->
+      <.sheet id="mobile-history" class="lg:hidden">
+        <.sheet_trigger>
+          <button type="button" class="flex items-center justify-center w-8 h-8 rounded-md text-gray-400 hover:bg-gray-800 hover:text-white transition-colors" aria-label="Conversation history">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4">
+              <path fill-rule="evenodd" d="M2 4.75A.75.75 0 0 1 2.75 4h14.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 4.75ZM2 10a.75.75 0 0 1 .75-.75h14.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 10Zm0 5.25a.75.75 0 0 1 .75-.75h14.5a.75.75 0 0 1 0 1.5H2.75a.75.75 0 0 1-.75-.75Z" clip-rule="evenodd" />
+            </svg>
+          </button>
+        </.sheet_trigger>
+        <.sheet_content side="left" class="w-72 p-0 bg-gray-900 border-r border-gray-800 [&>[data-part=close-trigger]]:hidden">
+          <.conversation_sidebar
+            conversations={@conversations}
+            current_id={@conversation && @conversation.id}
+          />
+        </.sheet_content>
+      </.sheet>
+      <.badge variant="secondary">{@model}</.badge>
+      <div class="ml-auto flex items-center gap-1">
+        <button type="button" phx-click="clear" class="flex items-center gap-1 px-2 py-1 rounded-md text-sm text-gray-400 hover:bg-gray-800 hover:text-white transition-colors" aria-label="Clear conversation">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4">
+            <path fill-rule="evenodd" d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 1 0 .23 1.482l.149-.022.841 10.518A2.75 2.75 0 0 0 7.596 19h4.807a2.75 2.75 0 0 0 2.742-2.53l.841-10.519.149.023a.75.75 0 0 0 .23-1.482A41.03 41.03 0 0 0 14 4.193V3.75A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.5.06l.3 7.5a.75.75 0 1 0 1.5-.06l-.3-7.5Zm4.34.06a.75.75 0 1 0-1.5-.06l-.3 7.5a.75.75 0 1 0 1.5.06l.3-7.5Z" clip-rule="evenodd" />
+          </svg>
+          <span class="hidden md:inline">Clear</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Messages area -->
+    <div id="messages" data-testid="messages" role="log" aria-live="polite" class="flex-1 overflow-y-auto py-4 space-y-1" phx-hook="ScrollBottom">
+      <div :if={@messages == []} class="flex items-center justify-center h-full">
+        <div class="text-center space-y-3">
+          <.icon name="hero-chat-bubble-left-right" class="w-12 h-12 text-gray-700 mx-auto" />
+          <p class="text-gray-500 text-sm" data-testid="empty-state">Start a conversation</p>
+          <.badge variant="secondary">{@model}</.badge>
+        </div>
+      </div>
+
+      <div :for={msg <- @messages}>
+        <.message_bubble role={msg.role} content={msg.content} model={@model} user_initials={@user_initials} />
+      </div>
+
+      <!-- Tool call cards -->
+      <div :for={event <- @events}>
+        <.tool_card
+          :if={event.type == :tool_call}
+          name={event.data.tool_name}
+          status={tool_status(event.data.call_id, @events)}
+        />
+      </div>
+
+      <!-- Pipeline stages -->
+      <.pipeline_stages stages={@stages} />
+
+      <!-- Thinking indicator -->
+      <.thinking_indicator active={@thinking} />
+    </div>
+
+    <!-- Input area -->
+    <div class="border-t border-gray-800 bg-gray-900/50 p-3">
+      <form phx-submit="send" class="flex gap-2">
+        <label for="message_input" class="sr-only">Message</label>
+        <input
+          id="message_input"
+          type="text"
+          name="message"
+          value={@input}
+          placeholder="Type a message..."
+          autocomplete="off"
+          disabled={@thinking}
+          class={[
+            "flex-1 bg-gray-800 border border-gray-700 text-white rounded-lg px-3 md:px-4 py-2.5 text-sm",
+            "placeholder-gray-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500",
+            "disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px]"
+          ]}
+        />
+        <.button :if={!@thinking} type="submit" class="min-h-[44px]" aria-label="Send message">
+          Send
+        </.button>
+        <.button :if={@thinking} variant="destructive" type="button" phx-click="cancel" class="min-h-[44px]" aria-label="Cancel">
+          Cancel
+        </.button>
+      </form>
+    </div>
   </div>
 </div>

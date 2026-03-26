@@ -12,7 +12,8 @@ defmodule AgentExWeb.ChatComponents do
   @doc "Renders a chat message bubble."
   attr(:role, :atom, required: true, values: [:user, :assistant, :system, :tool])
   attr(:content, :string, required: true)
-  attr(:source, :string, default: nil)
+  attr(:model, :string, default: nil)
+  attr(:user_initials, :string, default: "U")
 
   def message_bubble(assigns) do
     ~H"""
@@ -20,22 +21,23 @@ defmodule AgentExWeb.ChatComponents do
       "flex gap-3 px-4 py-3",
       @role == :user && "justify-end"
     ]}>
-      <div :if={@role != :user} class="flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold bg-indigo-600 text-white">
-        {role_icon(@role)}
+      <div
+        :if={@role != :user}
+        class="flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-[9px] font-bold bg-indigo-600 text-white"
+        title={@model}
+      >
+        {model_label(@model)}
       </div>
 
       <div class={[
         "max-w-[75%] rounded-xl px-4 py-2.5 text-sm leading-relaxed",
         message_style(@role)
       ]}>
-        <p :if={@source && @role == :assistant} class="text-xs text-gray-500 mb-1">
-          {@source}
-        </p>
         <div class="whitespace-pre-wrap break-words">{@content}</div>
       </div>
 
       <div :if={@role == :user} class="flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold bg-gray-600 text-white">
-        U
+        {@user_initials}
       </div>
     </div>
     """
@@ -44,8 +46,6 @@ defmodule AgentExWeb.ChatComponents do
   @doc "Renders a tool call/result card."
   attr(:name, :string, required: true)
   attr(:status, :atom, default: :pending, values: [:pending, :running, :complete, :error])
-  attr(:arguments, :string, default: nil)
-  attr(:result, :string, default: nil)
 
   def tool_card(assigns) do
     ~H"""
@@ -61,19 +61,6 @@ defmodule AgentExWeb.ChatComponents do
             {@status}
           </.badge>
         </.card_header>
-
-        <.card_content :if={@arguments} class="px-3 py-2 border-t border-gray-800">
-          <p class="text-xs text-gray-600 mb-1">Arguments</p>
-          <pre class="text-xs text-gray-400 font-mono overflow-x-auto">{@arguments}</pre>
-        </.card_content>
-
-        <.card_content :if={@result} class="px-3 py-2 border-t border-gray-800">
-          <p class="text-xs text-gray-600 mb-1">Result</p>
-          <pre class={[
-            "text-xs font-mono overflow-x-auto",
-            @status == :error && "text-red-400" || "text-gray-400"
-          ]}>{@result}</pre>
-        </.card_content>
       </.card>
     </div>
     """
@@ -116,10 +103,17 @@ defmodule AgentExWeb.ChatComponents do
 
   # -- Helpers --
 
-  defp role_icon(:assistant), do: "A"
-  defp role_icon(:system), do: "S"
-  defp role_icon(:tool), do: "T"
-  defp role_icon(_), do: "?"
+  defp model_label(nil), do: "AI"
+
+  defp model_label(model) do
+    label =
+      model
+      |> String.replace(~r/[-_\.]\d.*$/, "")
+      |> String.upcase()
+      |> String.slice(0, 3)
+
+    if label == "", do: "AI", else: label
+  end
 
   defp message_style(:user), do: "bg-indigo-600 text-white"
   defp message_style(:assistant), do: "bg-gray-800 text-gray-200"

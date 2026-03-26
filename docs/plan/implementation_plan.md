@@ -16,10 +16,10 @@ that decides which pipe pattern to compose.
 # ...informed by Tier 3 memory of past successful workflows
 ```
 
-**Status:** Phases 1–4b implemented (2026-03-23). Auth + password registration
+**Status:** Phases 1–4d implemented. Auth + password registration
 implemented (2026-03-22). Phase 4b (User Timezone + User Scoping) merged (2026-03-23).
-Phase 4c (Conversation History) planned. Phase 4d (Dashboard Refactor) next, then
-Phase 4c → Phase 5+.
+Phase 4d (Dashboard Refactor) merged (2026-03-23). Phase 4c (Conversation History)
+implemented (2026-03-25). Phase 5 (Agent Builder + Unified Tool Management) next.
 
 **Table of Contents**
 

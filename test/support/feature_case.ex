@@ -37,5 +37,6 @@ defmodule AgentExWeb.FeatureCase do
     |> fill_in(css("#login_form_password_email"), with: user.email)
     |> fill_in(css("#login_form_password_password"), with: password)
     |> click(css("#login_form_password button"))
+    |> assert_has(css("main"))
   end
 end

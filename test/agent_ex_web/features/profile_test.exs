@@ -22,6 +22,7 @@ defmodule AgentExWeb.Features.ProfileTest do
     test "update username", %{session: session} do
       session
       |> visit("/users/profile")
+      |> assert_has(css("#username_form"))
       |> fill_in(css("#username_form input[name='user[username]']"), with: "new_username")
       |> click(button("Update username"))
       |> assert_has(css("p", text: "Username updated successfully", count: :any))

@@ -9,7 +9,7 @@ defmodule AgentExWeb.UserAuthTest do
   import AgentEx.AccountsFixtures
 
   @remember_me_cookie "_agent_ex_web_user_remember_me"
-  @remember_me_cookie_max_age 60 * 60 * 24 * 14
+  @remember_me_cookie_max_age 15 * 60
 
   setup %{conn: conn} do
     conn =
