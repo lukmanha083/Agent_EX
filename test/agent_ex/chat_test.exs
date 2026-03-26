@@ -47,7 +47,10 @@ defmodule AgentEx.ChatTest do
   describe "list_conversations/1" do
     setup [:create_user, :create_conversation]
 
-    test "returns conversations for user ordered by updated_at desc", %{user: user, conversation: convo} do
+    test "returns conversations for user ordered by updated_at desc", %{
+      user: user,
+      conversation: convo
+    } do
       conversations = Chat.list_conversations(user.id)
       assert length(conversations) == 1
       assert hd(conversations).id == convo.id

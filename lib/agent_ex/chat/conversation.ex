@@ -3,12 +3,12 @@ defmodule AgentEx.Chat.Conversation do
   import Ecto.Changeset
 
   schema "conversations" do
-    belongs_to :user, AgentEx.Accounts.User
-    has_many :messages, AgentEx.Chat.Message
+    belongs_to(:user, AgentEx.Accounts.User)
+    has_many(:messages, AgentEx.Chat.Message)
 
-    field :title, :string
-    field :model, :string
-    field :provider, :string
+    field(:title, :string)
+    field(:model, :string)
+    field(:provider, :string)
 
     timestamps(type: :utc_datetime_usec)
   end

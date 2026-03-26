@@ -3,10 +3,10 @@ defmodule AgentEx.Chat.Message do
   import Ecto.Changeset
 
   schema "conversation_messages" do
-    belongs_to :conversation, AgentEx.Chat.Conversation
+    belongs_to(:conversation, AgentEx.Chat.Conversation)
 
-    field :role, :string
-    field :content, :string
+    field(:role, :string)
+    field(:content, :string)
 
     timestamps(type: :utc_datetime_usec, updated_at: false)
   end
