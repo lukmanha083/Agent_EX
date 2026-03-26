@@ -33,6 +33,7 @@ defmodule AgentExWeb.ChatLive do
        tools: load_chat_tools(),
        agent_id: user_agent_id(user),
        user_initials: AgentExWeb.Layouts.initials(user.username || user.email),
+       timezone: user.timezone || "Etc/UTC",
        conversation: nil,
        conversations: conversations
      )}

@@ -6,9 +6,10 @@ defmodule AgentExWeb.ConversationComponents do
 
   attr(:conversations, :list, required: true)
   attr(:current_id, :any, default: nil)
+  attr(:timezone, :string, default: "Etc/UTC")
 
   def conversation_sidebar(assigns) do
-    grouped = group_by_date(assigns.conversations)
+    grouped = group_by_date(assigns.conversations, assigns.timezone)
     assigns = assign(assigns, :grouped, grouped)
 
     ~H"""
@@ -87,13 +88,13 @@ defmodule AgentExWeb.ConversationComponents do
     """
   end
 
-  defp group_by_date(conversations) do
-    today = Date.utc_today()
+  defp group_by_date(conversations, timezone) do
+    today = local_today(timezone)
     yesterday = Date.add(today, -1)
 
     {today_list, yesterday_list, older_list} =
       Enum.reduce(conversations, {[], [], []}, fn convo, {t, y, o} ->
-        date = conversation_date(convo.updated_at)
+        date = conversation_date(convo.updated_at, timezone)
 
         cond do
           date == today -> {[convo | t], y, o}
@@ -109,6 +110,19 @@ defmodule AgentExWeb.ConversationComponents do
     ]
   end
 
-  defp conversation_date(%DateTime{} = dt), do: DateTime.to_date(dt)
-  defp conversation_date(_), do: nil
+  defp local_today(timezone) do
+    case DateTime.now(timezone) do
+      {:ok, dt} -> DateTime.to_date(dt)
+      _ -> Date.utc_today()
+    end
+  end
+
+  defp conversation_date(%DateTime{} = dt, timezone) do
+    case DateTime.shift_zone(dt, timezone) do
+      {:ok, shifted} -> DateTime.to_date(shifted)
+      _ -> DateTime.to_date(dt)
+    end
+  end
+
+  defp conversation_date(_, _), do: nil
 end
