@@ -39,11 +39,11 @@
     </header>
 
     <!-- Messages area -->
-    <div id="messages" class="flex-1 overflow-y-auto py-4 space-y-1" phx-hook="ScrollBottom">
+    <div id="messages" data-testid="messages" class="flex-1 overflow-y-auto py-4 space-y-1" phx-hook="ScrollBottom">
       <div :if={@messages == []} class="flex items-center justify-center h-full">
         <div class="text-center space-y-3">
           <.icon name="hero-chat-bubble-left-right" class="w-12 h-12 text-gray-700 mx-auto" />
-          <p class="text-gray-500 text-sm">Start a conversation</p>
+          <p class="text-gray-500 text-sm" data-testid="empty-state">Start a conversation</p>
           <.badge variant="secondary">{@model}</.badge>
         </div>
       </div>

@@ -12,7 +12,7 @@ defmodule AgentExWeb.ConversationComponents do
     assigns = assign(assigns, :grouped, grouped)
 
     ~H"""
-    <div class="flex flex-col h-full w-full bg-gray-900 border-r border-gray-800">
+    <div class="flex flex-col h-full w-full bg-gray-900 border-r border-gray-800" data-testid="conversation-sidebar">
       <!-- Header -->
       <div class="flex items-center justify-between h-14 px-3 border-b border-gray-800">
         <span class="text-sm font-semibold text-white">History</span>
@@ -57,10 +57,13 @@ defmodule AgentExWeb.ConversationComponents do
 
   def conversation_item(assigns) do
     ~H"""
-    <div class={[
-      "flex items-center gap-2 px-2 py-1.5 rounded-md text-sm transition-colors group",
-      @active && "bg-gray-800 text-white font-medium" || "text-gray-400 hover:bg-gray-800/50 hover:text-gray-200"
-    ]}>
+    <div
+      data-testid={"conversation-item-#{@conversation.id}"}
+      class={[
+        "flex items-center gap-2 px-2 py-1.5 rounded-md text-sm transition-colors group",
+        @active && "bg-gray-800 text-white font-medium" || "text-gray-400 hover:bg-gray-800/50 hover:text-gray-200"
+      ]}
+    >
       <.link
         patch={~p"/chat/#{@conversation.id}"}
         class="flex items-center gap-2 flex-1 min-w-0"
