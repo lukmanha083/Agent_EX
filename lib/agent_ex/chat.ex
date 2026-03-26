@@ -55,14 +55,14 @@ defmodule AgentEx.Chat do
   def list_messages(conversation_id) do
     Message
     |> where(conversation_id: ^conversation_id)
-    |> order_by(asc: :inserted_at)
+    |> order_by(asc: :inserted_at, asc: :id)
     |> Repo.all()
   end
 
   def list_recent_messages(conversation_id, limit) do
     Message
     |> where(conversation_id: ^conversation_id)
-    |> order_by(desc: :inserted_at)
+    |> order_by(desc: :inserted_at, desc: :id)
     |> limit(^limit)
     |> Repo.all()
     |> Enum.reverse()

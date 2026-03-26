@@ -72,18 +72,25 @@ defmodule AgentExWeb.ChatLive do
 
   @impl true
   def handle_event("new_chat", _params, socket) do
+    socket = cancel_active_run(socket)
     {:noreply, push_patch(socket, to: ~p"/chat")}
   end
 
-  def handle_event("send", %{"message" => message}, socket) when message != "" do
-    socket = ensure_conversation(socket, message)
+  def handle_event("send", %{"message" => raw_message}, socket) do
+    message = String.trim(raw_message)
 
-    case socket.assigns.conversation do
-      nil ->
-        {:noreply, socket}
+    if message == "" do
+      {:noreply, socket}
+    else
+      socket = ensure_conversation(socket, message)
 
-      conversation ->
-        send_message(socket, conversation, message)
+      case socket.assigns.conversation do
+        nil ->
+          {:noreply, socket}
+
+        conversation ->
+          send_message(socket, conversation, message)
+      end
     end
   end
 
@@ -335,6 +342,8 @@ defmodule AgentExWeb.ChatLive do
   end
 
   defp load_conversation(socket, conversation) do
+    socket = cancel_active_run(socket)
+
     # Load messages from Postgres
     db_messages =
       Chat.list_messages(conversation.id)
@@ -348,7 +357,6 @@ defmodule AgentExWeb.ChatLive do
 
     case Memory.start_session(agent_id, session_id) do
       {:ok, _} ->
-        # New session — hydrate from DB
         hydrate_working_memory(agent_id, session_id, db_messages)
 
       {:error, {:already_started, _}} ->
@@ -366,6 +374,16 @@ defmodule AgentExWeb.ChatLive do
       thinking: false,
       run_id: nil
     )
+  end
+
+  defp cancel_active_run(socket) do
+    if socket.assigns.run_id do
+      EventLoop.cancel(socket.assigns.run_id)
+      Phoenix.PubSub.unsubscribe(AgentEx.PubSub, "run:#{socket.assigns.run_id}")
+      assign(socket, run_id: nil, thinking: false)
+    else
+      socket
+    end
   end
 
   defp hydrate_working_memory(agent_id, session_id, messages) do

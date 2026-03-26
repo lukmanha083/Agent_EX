@@ -106,10 +106,13 @@ defmodule AgentExWeb.ChatComponents do
   defp model_label(nil), do: "AI"
 
   defp model_label(model) do
-    model
-    |> String.replace(~r/[-_\.]\d.*$/, "")
-    |> String.upcase()
-    |> String.slice(0, 3)
+    label =
+      model
+      |> String.replace(~r/[-_\.]\d.*$/, "")
+      |> String.upcase()
+      |> String.slice(0, 3)
+
+    if label == "", do: "AI", else: label
   end
 
   defp message_style(:user), do: "bg-indigo-600 text-white"
