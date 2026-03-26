@@ -91,7 +91,12 @@ defmodule AgentExWeb.Features.ConversationHistoryTest do
         |> assert_has(css("[data-testid='conversation-item-#{convo.id}']"))
 
       accept_confirm(session, fn s ->
-        click(s, css("[data-testid='conversation-item-#{convo.id}'] button[aria-label='Delete conversation']"))
+        click(
+          s,
+          css(
+            "[data-testid='conversation-item-#{convo.id}'] button[aria-label='Delete conversation']"
+          )
+        )
       end)
 
       session
@@ -143,5 +148,4 @@ defmodule AgentExWeb.Features.ConversationHistoryTest do
       |> assert_has(css("[data-testid='empty-state']"))
     end
   end
-
 end

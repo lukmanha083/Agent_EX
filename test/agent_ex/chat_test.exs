@@ -189,8 +189,6 @@ defmodule AgentEx.ChatTest do
     end
 
     test "title update notifies caller via send when notify_pid is set", %{conversation: convo} do
-      # Simulate what generate_title_async does after LLM responds:
-      # update the title and send notification
       convo_id = convo.id
       title = "System Info Query"
       {:ok, _} = Chat.update_conversation_title(convo, title)
