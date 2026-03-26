@@ -40,17 +40,22 @@ defmodule AgentExWeb.ChatLive do
 
   @impl true
   def handle_params(%{"conversation_id" => id}, _uri, socket) do
-    user = socket.assigns.current_scope.user
+    # Skip reload if this conversation is already loaded (e.g. from ensure_conversation)
+    if socket.assigns.conversation && to_string(socket.assigns.conversation.id) == to_string(id) do
+      {:noreply, socket}
+    else
+      user = socket.assigns.current_scope.user
 
-    case Chat.get_user_conversation(user.id, id) do
-      nil ->
-        {:noreply,
-         socket
-         |> put_flash(:error, "Conversation not found")
-         |> push_navigate(to: ~p"/chat")}
+      case Chat.get_user_conversation(user.id, id) do
+        nil ->
+          {:noreply,
+           socket
+           |> put_flash(:error, "Conversation not found")
+           |> push_navigate(to: ~p"/chat")}
 
-      conversation ->
-        {:noreply, load_conversation(socket, conversation)}
+        conversation ->
+          {:noreply, load_conversation(socket, conversation)}
+      end
     end
   end
 
