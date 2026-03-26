@@ -73,7 +73,7 @@ defmodule AgentExWeb.ConversationComponents do
         phx-click="delete_conversation"
         phx-value-id={@conversation.id}
         data-confirm="Delete this conversation?"
-        class="sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 p-1 rounded text-gray-500 hover:text-red-400 transition-opacity shrink-0"
+        class="p-1 rounded text-gray-600 hover:text-red-400 transition-colors shrink-0"
         aria-label="Delete conversation"
       >
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-3 h-3">
