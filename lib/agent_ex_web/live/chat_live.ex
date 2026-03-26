@@ -115,6 +115,7 @@ defmodule AgentExWeb.ChatLive do
   end
 
   def handle_event("clear", _params, socket) do
+    socket = cancel_active_run(socket)
     {:noreply, push_patch(socket, to: ~p"/chat")}
   end
 
@@ -145,6 +146,19 @@ defmodule AgentExWeb.ChatLive do
     else
       {:noreply, socket}
     end
+  end
+
+  def handle_info({:title_updated, conversation_id, title}, socket) do
+    conversations = Chat.list_conversations(socket.assigns.current_scope.user.id)
+
+    conversation =
+      if socket.assigns.conversation && socket.assigns.conversation.id == conversation_id do
+        %{socket.assigns.conversation | title: title}
+      else
+        socket.assigns.conversation
+      end
+
+    {:noreply, assign(socket, conversations: conversations, conversation: conversation)}
   end
 
   def handle_info({ref, _result}, socket) when is_reference(ref) do
@@ -420,8 +434,11 @@ defmodule AgentExWeb.ChatLive do
     if length(messages) == 2 do
       user_msg = Enum.find(messages, &(&1.role == :user))
 
-      if user_msg,
-        do: Chat.generate_title_async(conversation, user_msg.content, assistant_content)
+      if user_msg do
+        Chat.generate_title_async(conversation, user_msg.content, assistant_content,
+          notify_pid: self()
+        )
+      end
     end
   end
 

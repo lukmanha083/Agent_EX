@@ -83,39 +83,51 @@ defmodule AgentEx.Chat do
     if String.length(trimmed) > 50, do: title <> "...", else: title
   end
 
-  def generate_title_async(%Conversation{} = conversation, user_message, assistant_message) do
+  def generate_title_async(
+        %Conversation{} = conversation,
+        user_message,
+        assistant_message,
+        opts \\ []
+      ) do
+    notify_pid = Keyword.get(opts, :notify_pid)
+
     Task.Supervisor.start_child(AgentEx.TaskSupervisor, fn ->
-      client =
-        AgentEx.ModelClient.new(
-          model: conversation.model,
-          provider: safe_provider_atom(conversation.provider)
-        )
-
-      messages = [
-        AgentEx.Message.system(
-          "Generate a short title (max 6 words) for this conversation. " <>
-            "Reply with ONLY the title, no quotes or punctuation."
-        ),
-        AgentEx.Message.user(
-          "User: #{String.slice(user_message, 0, 200)}\n" <>
-            "Assistant: #{String.slice(assistant_message, 0, 200)}"
-        )
-      ]
-
-      case AgentEx.ModelClient.create(client, messages) do
-        {:ok, response} ->
-          title =
-            response.content
-            |> String.trim()
-            |> String.trim("\"")
-            |> String.slice(0, 60)
-
-          update_conversation_title(conversation, title)
-
-        _error ->
-          :ok
-      end
+      do_generate_title(conversation, user_message, assistant_message, notify_pid)
     end)
+  end
+
+  defp do_generate_title(conversation, user_message, assistant_message, notify_pid) do
+    client =
+      AgentEx.ModelClient.new(
+        model: conversation.model,
+        provider: safe_provider_atom(conversation.provider)
+      )
+
+    messages = [
+      AgentEx.Message.system("""
+      Summarize this conversation in 2-5 words as a short title.
+      Rules: No apologies. No filler words. No quotes. No punctuation.
+      Just the topic. Examples: "Disk Space Check", "System OS Info", "Weather Forecast".
+      """),
+      AgentEx.Message.user(
+        "User: #{String.slice(user_message, 0, 200)}\n" <>
+          "Assistant: #{String.slice(assistant_message, 0, 200)}"
+      )
+    ]
+
+    with {:ok, response} <- AgentEx.ModelClient.create(client, messages),
+         title when title != "" <- clean_title(response.content) do
+      update_conversation_title(conversation, title)
+      if notify_pid, do: send(notify_pid, {:title_updated, conversation.id, title})
+    end
+  end
+
+  defp clean_title(raw) do
+    raw
+    |> String.trim()
+    |> String.trim("\"")
+    |> String.replace(~r/^["'\s]+|["'\s]+$/, "")
+    |> String.slice(0, 60)
   end
 
   defp safe_provider_atom(provider) when provider in ["openai", "anthropic", "moonshot"],
