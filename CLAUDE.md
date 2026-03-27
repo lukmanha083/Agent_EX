@@ -38,6 +38,7 @@ Companion to the Python learning project at `../agent/`.
 | Plugin system | `AgentEx.ToolPlugin` (behaviour) + `AgentEx.PluginRegistry` (lifecycle) |
 | Pipeline composition | `AgentEx.Pipe` (through/fan_out/merge/route/delegate_tool) |
 | Memory promotion | `AgentEx.Memory.Promotion` (session summaries + save_memory tool) |
+| Agent config/builder | `AgentEx.AgentConfig` + `AgentEx.AgentStore` (ETS/DETS) |
 
 ## Documentation
 - `docs/overview.md` — Project overview, motivation, and quick start
@@ -72,6 +73,8 @@ Companion to the Python learning project at `../agent/`.
 - `lib/agent_ex/mcp/client.ex` — MCP JSON-RPC 2.0 client GenServer
 - `lib/agent_ex/mcp/transport.ex` — Stdio and HTTP transport adapters for MCP
 - `lib/agent_ex/mcp/tool_adapter.ex` — Convert MCP tools ↔ AgentEx tools
+- `lib/agent_ex/agent_config.ex` — Agent definition struct (name, prompt, model, tools, memory, intervention)
+- `lib/agent_ex/agent_store.ex` — ETS/DETS persistence for agent configs
 - `lib/agent_ex/example.ex` — Usage example
 
 ### 3-Tier Memory System + Knowledge Graph (`AgentEx.Memory`)

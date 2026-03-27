@@ -2,6 +2,7 @@ import "phoenix_html"
 import {Socket} from "phoenix"
 import {LiveSocket} from "phoenix_live_view"
 import TimezoneDetect from "./hooks/timezone_detect"
+import Sortable from "./hooks/sortable"
 
 // SaladUI — import all component JS so any component works without extra setup
 import SaladUILib from "salad_ui"
@@ -40,6 +41,7 @@ document.addEventListener('click', (e) => {
 let Hooks = {}
 Hooks.TimezoneDetect = TimezoneDetect
 Hooks.SaladUI = SaladUILib.SaladUIHook
+Hooks.Sortable = Sortable
 
 // Auto-scroll chat messages to bottom on update
 Hooks.ScrollBottom = {

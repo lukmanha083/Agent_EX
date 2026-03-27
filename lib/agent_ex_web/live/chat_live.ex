@@ -1,7 +1,7 @@
 defmodule AgentExWeb.ChatLive do
   use AgentExWeb, :live_view
 
-  alias AgentEx.{Chat, EventLoop, Memory}
+  alias AgentEx.{AgentStore, Chat, EventLoop, Memory}
   alias AgentEx.EventLoop.Event
 
   import AgentExWeb.ChatComponents
@@ -16,8 +16,10 @@ defmodule AgentExWeb.ChatLive do
   def mount(_params, _session, socket) do
     user = socket.assigns.current_scope.user
 
-    provider = user.provider || "openai"
-    model = user.model || default_model_for(provider)
+    agents = AgentStore.list(user.id)
+    active_agent = List.first(agents)
+
+    {provider, model, tools, system_prompt} = load_from_agent(active_agent, user)
     conversations = Chat.list_conversations(user.id)
 
     {:ok,
@@ -30,7 +32,10 @@ defmodule AgentExWeb.ChatLive do
        input: "",
        provider: provider,
        model: model,
-       tools: load_chat_tools(),
+       tools: tools,
+       system_prompt: system_prompt,
+       active_agent: active_agent,
+       agents: agents,
        agent_id: user_agent_id(user),
        user_initials: AgentExWeb.Layouts.initials(user.username || user.email),
        timezone: user.timezone || "Etc/UTC",
@@ -301,7 +306,7 @@ defmodule AgentExWeb.ChatLive do
         client = build_model_client(socket.assigns.provider, socket.assigns.model)
 
         input_messages = [
-          AgentEx.Message.system("You are a helpful AI assistant."),
+          AgentEx.Message.system(socket.assigns.system_prompt),
           AgentEx.Message.user(message)
         ]
 
@@ -450,14 +455,17 @@ defmodule AgentExWeb.ChatLive do
 
   defp user_agent_id(user), do: "user_#{user.id}_chat"
 
-  defp load_chat_tools do
-    case Application.get_env(:agent_ex, :chat_tools, []) do
-      :demo -> demo_tools()
-      tools when is_list(tools) -> tools
-    end
+  defp load_from_agent(nil, user) do
+    provider = user.provider || "openai"
+    model = user.model || default_model_for(provider)
+    {provider, model, default_tools(), "You are a helpful AI assistant."}
   end
 
-  defp demo_tools do
+  defp load_from_agent(agent, _user) do
+    {agent.provider, agent.model, default_tools(), agent.system_prompt}
+  end
+
+  defp default_tools do
     [
       AgentEx.Tool.new(
         name: "get_system_info",

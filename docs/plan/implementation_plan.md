@@ -16,10 +16,11 @@ that decides which pipe pattern to compose.
 # ...informed by Tier 3 memory of past successful workflows
 ```
 
-**Status:** Phases 1–4d implemented. Auth + password registration
+**Status:** Phases 1–5 implemented. Auth + password registration
 implemented (2026-03-22). Phase 4b (User Timezone + User Scoping) merged (2026-03-23).
 Phase 4d (Dashboard Refactor) merged (2026-03-23). Phase 4c (Conversation History)
-implemented (2026-03-25). Phase 5 (Agent Builder + Unified Tool Management) next.
+implemented (2026-03-25). Phase 5 (Agent Builder + Unified Tool Management) implemented
+(2026-03-26). Phase 5b (Chat Orchestrator + REST API Tools + Agent-as-Tool) next.
 
 **Table of Contents**
 
@@ -33,9 +34,11 @@ implemented (2026-03-25). Phase 5 (Agent Builder + Unified Tool Management) next
 8. [Phase 4c — Conversation History](#phase-4c--conversation-history)
 9. [Phase 4d — Dashboard Refactor (SaladUI + Responsive Layout)](#phase-4d--dashboard-refactor-saladui--responsive-layout)
 10. [Phase 5 — Agent Builder + Unified Tool Management](#phase-5--agent-builder--unified-tool-management)
-11. [Phase 6 — Flow Builder + Triggers](#phase-6--flow-builder--triggers)
-12. [Phase 7 — Run View + Memory Inspector](#phase-7--run-view--memory-inspector)
-13. [File Manifest](#file-manifest)
+11. [Phase 5b — Chat Orchestrator + REST API Tools + Agent-as-Tool](#phase-5b--chat-orchestrator--rest-api-tools--agent-as-tool)
+12. [Phase 5c — Workflow Engine (Static Pipelines)](#phase-5c--workflow-engine-static-pipelines)
+13. [Phase 6 — Flow Builder + Triggers](#phase-6--flow-builder--triggers)
+14. [Phase 7 — Run View + Memory Inspector](#phase-7--run-view--memory-inspector)
+15. [File Manifest](#file-manifest)
 14. [Architecture Diagrams](#architecture-diagrams)
 
 ---
@@ -146,6 +149,12 @@ Phase 4 (Phoenix + EventLoop) ──▶ Phase 4b (Timezone + Scoping) ──▶ 
                                   Phase 4d (Dashboard Refactor) ──▶ Phase 5 (Agent Builder + Tools)
                                                                               │
                                                                               ▼
+                                                                    Phase 5b (Chat Orchestrator + REST Tools)
+                                                                              │
+                                                                              ▼
+                                                                    Phase 5c (Workflow Engine)
+                                                                              │
+                                                                              ▼
                                                                     Phase 6 (Flow Builder + Triggers)
                                                                               │
                                                                               ▼
@@ -158,11 +167,13 @@ Phase 4 (Phoenix + EventLoop) ──▶ Phase 4b (Timezone + Scoping) ──▶ 
 - Phase 4c depends on Phase 4b (user-scoped agent_id + Postgres).
 - Phase 4d depends on Phase 4b (Phoenix infrastructure). Can run in **parallel** with Phase 4c.
 - Phase 5 depends on Phase 4c + Phase 4d (SaladUI components needed for builder UI) + Phase 3.
-- Phase 6 depends on Phase 5 (agent configs) + Phase 3 (Pipe/Swarm composition).
+- Phase 5b depends on Phase 5 (AgentStore) + Phase 3 (Pipe.delegate_tool, Swarm).
+- Phase 5c depends on Phase 5b (HttpTool, ToolAssembler) for tool sources in workflow nodes.
+- Phase 6 depends on Phase 5c (workflow execution model) + Phase 3 (Pipe/Swarm composition).
   - Phase 6 cron triggers use user timezone for schedule interpretation.
 - Phase 7 depends on Phase 6 (execution model) but can start in parallel for memory parts.
 
-**Recommended order:** 1+2 (parallel) → 3 → 4 → 4b → 4d → 4c → 5 → 6 → 7.
+**Recommended order:** 1+2 (parallel) → 3 → 4 → 4b → 4d → 4c → 5 → 5b → 5c → 6 → 7.
 
 ---
 
@@ -1222,6 +1233,847 @@ live permission decision matrix.
 | Modify | `lib/agent_ex_web/components/layouts/app.html.heex` | Tabbed workspace nav |
 | Modify | `assets/js/app.js` | Register Sortable hook |
 | Modify | `lib/agent_ex_web/live/chat_live.ex` | Load tools from agent config instead of app config |
+
+---
+
+## Phase 5b — Chat Orchestrator + REST API Tools + Agent-as-Tool
+
+### Core Insight
+
+**Every agent is a tool. Every tool source is equal. The LLM reasons about
+which pattern to use.** The chat model doesn't just answer questions — it's an
+orchestrator that decomposes tasks, delegates to specialist agents, and
+composes results. The pattern (sequential, parallel, swarm) emerges from the
+LLM's reasoning, not from hardcoded logic.
+
+```text
+User: "Research AAPL and write me an investment report"
+                    │
+                    ▼
+┌─────────────────────────────────────────────────────────────┐
+│  CHAT ORCHESTRATOR (LLM reasoning)                          │
+│                                                             │
+│  System: "You are a task orchestrator. You have specialist  │
+│  agents and tools available. Decompose complex tasks into   │
+│  steps. Delegate to the right specialist. For independent   │
+│  work, call multiple tools in one turn (parallel). For      │
+│  sequential work, chain results from one to the next."      │
+│                                                             │
+│  Tools (auto-assembled):                                    │
+│  ├─ delegate_to_researcher    ← AgentStore → delegate_tool  │
+│  ├─ delegate_to_analyst       ← AgentStore → delegate_tool  │
+│  ├─ delegate_to_writer        ← AgentStore → delegate_tool  │
+│  ├─ stock_api.get_quote       ← REST API tool (HTTP)        │
+│  ├─ mcp.sqlite.query          ← MCP server tool             │
+│  ├─ filesystem.read_file      ← Plugin tool                 │
+│  └─ get_current_time          ← Local function tool         │
+└─────────────────────────────────────────────────────────────┘
+        │
+        ▼ LLM reasons: "I need research first, then analysis, then writing"
+        │
+        ▼ Step 1: calls delegate_to_researcher("Find recent AAPL news")
+        │          └─ Researcher runs its own ToolCallerLoop with its own tools
+        │          └─ Returns research summary
+        │
+        ▼ Step 2: calls delegate_to_analyst(research_summary + "Analyze fundamentals")
+        │          └─ Analyst runs with stock_api tools
+        │          └─ Returns analysis
+        │
+        ▼ Step 3: calls delegate_to_writer(analysis + "Write investment report")
+        │          └─ Writer runs with no tools (pure LLM)
+        │          └─ Returns final report
+        │
+        ▼ Chat returns report to user
+```
+
+### Problem
+
+1. **Chat doesn't use agents** — AgentStore has agent configs but ChatLive still
+   uses hardcoded demo tools. No bridge between stored agents and the chat model.
+
+2. **No REST API tools** — MCP and plugins exist, but there's no way to define
+   HTTP API tools (like n8n HTTP Request nodes) through the UI. Many real-world
+   integrations are simple REST calls.
+
+3. **No orchestration in chat** — the chat model answers directly with its own
+   tools. It can't delegate to specialist agents or compose multi-step workflows.
+
+4. **Pattern selection is manual** — Pipe vs Swarm is chosen in code. The LLM
+   should reason about which pattern fits the task.
+
+### Solution
+
+Three sub-systems that work together:
+
+#### 5b-A: REST API Tool Builder
+
+Define HTTP tools through a UI form — like n8n's HTTP Request node:
+
+```text
+┌─────────────────────────────────────────────────────────────┐
+│  New HTTP Tool                                               │
+├─────────────────────────────────────────────────────────────┤
+│  Name: stock_api.get_quote                                   │
+│  Description: Fetch stock quote by ticker symbol             │
+│  Kind: [read ▼]                                              │
+│                                                              │
+│  Method: [GET ▼]                                             │
+│  URL Template: https://api.example.com/quote/{{ticker}}      │
+│  Headers:                                                    │
+│    Authorization: Bearer {{api_key}}                         │
+│  Parameters:                                                 │
+│    ┌──────────┬──────────┬─────────────┬──────────┐         │
+│    │ Name     │ Type     │ Description │ Required │         │
+│    ├──────────┼──────────┼─────────────┼──────────┤         │
+│    │ ticker   │ string   │ Stock symbol│ yes      │         │
+│    └──────────┴──────────┴─────────────┴──────────┘         │
+│  Response: [json_body ▼]  JSONPath: $.data                   │
+│                                                              │
+│  [Test] [Save]                                               │
+└─────────────────────────────────────────────────────────────┘
+```
+
+Backend: `HttpTool` struct that serializes to/from ETS/DETS and generates a
+`Tool.new` with a `Req`-based function at runtime.
+
+```elixir
+defmodule AgentEx.HttpTool do
+  defstruct [:id, :user_id, :name, :description, :kind,
+             :method, :url_template, :headers, :parameters,
+             :response_type, :response_path,
+             :auth_type, :auth_config,
+             :inserted_at, :updated_at]
+
+  def to_tool(%__MODULE__{} = config) do
+    Tool.new(
+      name: config.name,
+      description: config.description,
+      kind: config.kind,
+      parameters: build_json_schema(config.parameters),
+      function: fn args ->
+        url = interpolate(config.url_template, args)
+        headers = interpolate_headers(config.headers, args)
+
+        case Req.request(method: config.method, url: url, headers: headers) do
+          {:ok, %{status: s, body: body}} when s in 200..299 ->
+            {:ok, extract_response(body, config.response_path)}
+          {:ok, %{status: s, body: body}} ->
+            {:error, "HTTP #{s}: #{inspect(body)}"}
+          {:error, e} ->
+            {:error, inspect(e)}
+        end
+      end
+    )
+  end
+end
+```
+
+#### 5b-B: Agent-as-Tool Bridge
+
+Auto-generates `delegate_to_*` tools from `AgentStore` for the chat orchestrator:
+
+```elixir
+defmodule AgentEx.AgentBridge do
+  @moduledoc """
+  Converts AgentStore configs into delegate tools for the chat orchestrator.
+  Each agent becomes a callable tool — the LLM delegates by calling it.
+  """
+
+  alias AgentEx.{AgentConfig, AgentStore, Pipe, Tool}
+
+  @doc """
+  Build delegate tools for all agents owned by a user.
+  Each agent becomes: delegate_to_<name>(task) → runs agent's full loop → returns result.
+  """
+  def delegate_tools(user_id, model_client, opts \\ []) do
+    AgentStore.list(user_id)
+    |> Enum.map(fn config -> delegate_tool_from_config(config, model_client, opts) end)
+  end
+
+  defp delegate_tool_from_config(%AgentConfig{} = config, model_client, opts) do
+    pipe_agent = Pipe.Agent.new(
+      name: config.name,
+      system_message: config.system_prompt,
+      tools: resolve_tools(config, opts),
+      intervention: resolve_intervention(config)
+    )
+
+    Pipe.delegate_tool(config.name, pipe_agent, model_client,
+      memory: %{agent_id: "agent_#{config.id}"}
+    )
+  end
+
+  defp resolve_tools(%AgentConfig{tool_ids: ids}, opts) do
+    # Resolve tool_ids → actual Tool structs from:
+    # 1. HttpTool configs (REST API tools)
+    # 2. MCP connected tools
+    # 3. Plugin tools
+    # 4. Built-in tools
+    # Phase 5b starts with all available tools; per-agent filtering in future
+    Keyword.get(opts, :available_tools, [])
+  end
+
+  defp resolve_intervention(%AgentConfig{intervention_pipeline: []}), do: []
+  defp resolve_intervention(%AgentConfig{intervention_pipeline: handler_ids}) do
+    # Resolve handler IDs to actual intervention handler modules
+    Enum.filter_map(handler_ids, fn id ->
+      case id do
+        "permission_handler" -> AgentEx.Intervention.PermissionHandler
+        "write_gate_handler" -> AgentEx.Intervention.WriteGateHandler
+        "log_handler" -> AgentEx.Intervention.LogHandler
+        _ -> nil
+      end
+    end)
+  end
+end
+```
+
+#### 5b-C: Chat Orchestrator
+
+Rewires `ChatLive.send_message/3` to assemble **all tool sources** into a unified
+tool list, with agents as delegate tools and an orchestrator system prompt:
+
+```text
+┌───────────────────────────────────────────────────────┐
+│  Tool Assembly (on each message send)                  │
+│                                                        │
+│  1. Utility tools (get_current_time, etc.)             │
+│  2. REST API tools (HttpTool.list → Tool)              │
+│  3. MCP tools (connected servers → ToolAdapter)        │
+│  4. Plugin tools (attached plugins → tools)            │
+│  5. Agent delegate tools (AgentBridge.delegate_tools)  │
+│                                                        │
+│  ALL → flat [%Tool{}] list → ToolAgent → EventLoop     │
+└───────────────────────────────────────────────────────┘
+```
+
+The chat model gets an orchestrator system prompt that teaches it to reason:
+
+```elixir
+@orchestrator_prompt """
+You are an AI assistant with access to specialist agents and tools.
+
+## How to work:
+- For simple questions, answer directly using your knowledge.
+- For tasks requiring specific tools, use them directly.
+- For complex tasks, decompose into steps and delegate to specialist agents.
+- When delegating, pass clear task descriptions to each agent.
+- Each specialist runs independently with its own tools and returns a result.
+- You can call multiple agents in one turn if their work is independent.
+
+## Available specialists:
+{{agent_descriptions}}
+
+## Pattern selection:
+- **Direct**: Simple questions → answer without tools
+- **Tool use**: Specific data needed → call the relevant tool
+- **Sequential delegation**: Task A's output feeds Task B → delegate one at a time
+- **Parallel delegation**: Independent subtasks → call multiple delegates in one turn
+- **Conversation**: Agent needs context → use transfer/handoff tools
+"""
+```
+
+#### LLM-Driven Pattern Selection
+
+The orchestrator doesn't hardcode Pipeline vs Swarm. The LLM **reasons** about
+which pattern fits:
+
+| User task | LLM reasoning | Pattern that emerges |
+|---|---|---|
+| "What time is it?" | "I can answer directly" | Direct (no tools) |
+| "What's AAPL stock price?" | "I need the stock API tool" | Single tool call |
+| "Research AAPL and write a report" | "Step 1: research, Step 2: write using research" | Sequential delegation |
+| "Compare AAPL and GOOGL stocks" | "Both analyses are independent" | Parallel delegation (2 tool calls in 1 turn) |
+| "Help me debug this code" | "This needs back-and-forth with the coder agent" | Single delegation with follow-ups |
+
+The key insight: **Pipeline = sequential delegate calls. Fan-out = parallel
+delegate calls in one LLM turn. Swarm = agents with transfer_to_* tools routing
+themselves.** All three patterns emerge from the same tool-calling mechanism.
+
+### Design Decisions
+
+| ID | Decision | Rationale |
+|---|---|---|
+| D1 | REST API tools stored in ETS/DETS (like AgentStore) | Consistent with existing persistence pattern. No DB migration needed. |
+| D2 | `HttpTool.to_tool/1` generates closures at runtime | Tool functions must be closures (can't serialize fns). Regenerate on boot from config. |
+| D3 | URL template uses `{{param}}` interpolation | Simple, safe (no code eval). Like n8n/Postman variables. |
+| D4 | Agent delegate tools regenerated per message send | Agent configs may change between messages. Small cost for correctness. |
+| D5 | Orchestrator prompt is dynamic, lists available agents | LLM needs to know what specialists exist to reason about delegation. |
+| D6 | No explicit Pipeline/Swarm selection in UI | The LLM reasons about patterns. Users define agents and tools; orchestration is emergent. |
+| D7 | All tool sources flattened into single `[Tool]` list | LLM can't distinguish tool sources — they're all just callable functions. Unified is simpler. |
+| D8 | `AgentBridge` is stateless module, not GenServer | No state to manage — it reads AgentStore and builds tools on demand. |
+
+### Files
+
+| Action | File | Purpose |
+|---|---|---|
+| Create | `lib/agent_ex/http_tool.ex` | HTTP tool definition struct + `to_tool/1` runtime conversion |
+| Create | `lib/agent_ex/http_tool_store.ex` | ETS/DETS persistence for HTTP tool configs |
+| Create | `lib/agent_ex/agent_bridge.ex` | Convert AgentStore agents → delegate tools for orchestrator |
+| Create | `lib/agent_ex/tool_assembler.ex` | Assemble all tool sources into unified `[Tool]` list per user |
+| Create | `lib/agent_ex_web/live/http_tool_builder_live.ex` | REST API tool builder form |
+| Create | `lib/agent_ex_web/live/http_tool_builder_live.html.heex` | Template |
+| Create | `lib/agent_ex_web/components/http_tool_components.ex` | HTTP tool form fields, parameter table, test panel |
+| Modify | `lib/agent_ex_web/live/tools_live.ex` | Add "HTTP API" tab, link to HTTP tool builder |
+| Modify | `lib/agent_ex_web/live/tools_live.html.heex` | Template update for HTTP tab |
+| Modify | `lib/agent_ex_web/live/chat_live.ex` | Replace `default_tools()` with `ToolAssembler.assemble/2`, use orchestrator prompt |
+| Modify | `lib/agent_ex/application.ex` | Add `HttpToolStore` to supervision tree |
+| Modify | `lib/agent_ex_web/router.ex` | Add `/tools/http/new`, `/tools/http/:id/edit` routes |
+
+### Implementation Order
+
+```text
+5b-A: HttpTool struct + HttpToolStore + UI builder form
+  │
+  ├─ Can be used standalone (REST API tools in chat without agents)
+  │
+5b-B: AgentBridge + ToolAssembler
+  │
+  ├─ Connects AgentStore → delegate tools
+  ├─ Unifies all tool sources into single list
+  │
+5b-C: Chat Orchestrator integration
+  │
+  ├─ ChatLive uses ToolAssembler instead of default_tools()
+  ├─ Dynamic orchestrator system prompt with agent descriptions
+  └─ EventLoop.run receives full unified tool list
+```
+
+### ToolAssembler — The Unification Layer
+
+```elixir
+defmodule AgentEx.ToolAssembler do
+  @moduledoc """
+  Assembles all tool sources into a unified [Tool] list for a user.
+  Called on each message send to get the freshest tool set.
+
+  Sources:
+  1. Built-in utility tools (time, system info)
+  2. HTTP API tools (from HttpToolStore)
+  3. MCP server tools (from connected MCP clients)
+  4. Plugin tools (from PluginRegistry)
+  5. Agent delegate tools (from AgentBridge)
+  """
+
+  alias AgentEx.{AgentBridge, HttpToolStore, Tool}
+
+  def assemble(user_id, model_client, opts \\ []) do
+    builtin = builtin_tools()
+    http_tools = http_api_tools(user_id)
+    # mcp_tools = mcp_connected_tools(user_id)   # future
+    # plugin_tools = plugin_attached_tools(user_id)  # future
+
+    available = builtin ++ http_tools
+
+    delegate_tools =
+      AgentBridge.delegate_tools(user_id, model_client,
+        available_tools: available
+      )
+
+    available ++ delegate_tools
+  end
+
+  def orchestrator_prompt(user_id) do
+    agents = AgentEx.AgentStore.list(user_id)
+
+    agent_descriptions =
+      Enum.map_join(agents, "\n", fn a ->
+        "- **#{a.name}**: #{a.description || a.system_prompt}"
+      end)
+
+    if agents == [] do
+      "You are a helpful AI assistant."
+    else
+      \"\"\"
+      You are an AI assistant with access to specialist agents and tools.
+
+      For simple questions, answer directly. For complex tasks, decompose
+      into steps and delegate to the right specialist. Each specialist runs
+      independently and returns a result. You can call multiple specialists
+      in one turn if their work is independent.
+
+      Available specialists:
+      #{agent_descriptions}
+      \"\"\"
+    end
+  end
+
+  defp builtin_tools do
+    [
+      Tool.new(
+        name: "get_current_time",
+        description: "Get the current date and time",
+        parameters: %{"type" => "object", "properties" => %{}, "required" => []},
+        kind: :read,
+        function: fn _args -> {:ok, DateTime.utc_now() |> DateTime.to_string()} end
+      )
+    ]
+  end
+
+  defp http_api_tools(user_id) do
+    HttpToolStore.list(user_id)
+    |> Enum.map(&AgentEx.HttpTool.to_tool/1)
+  end
+end
+```
+
+### How Chat Changes
+
+```elixir
+# Before (Phase 5):
+tools = default_tools()  # hardcoded 3 demo tools
+system_prompt = "You are a helpful AI assistant."
+
+# After (Phase 5b):
+tools = ToolAssembler.assemble(user.id, client)
+system_prompt = ToolAssembler.orchestrator_prompt(user.id)
+# tools now includes: builtins + HTTP API tools + delegate_to_* for each agent
+# system_prompt dynamically lists available specialists
+```
+
+### How an Agent's Own Tools Work
+
+Each agent has `tool_ids` in its config. When the chat orchestrator delegates
+to an agent via `delegate_to_researcher("Find AAPL news")`, the `AgentBridge`
+resolves the agent's own tools:
+
+```text
+Chat Orchestrator
+  tools: [delegate_to_researcher, delegate_to_analyst, stock_api.get_quote, ...]
+  │
+  ▼ calls delegate_to_researcher("Find AAPL news")
+  │
+  ▼ AgentBridge builds Pipe.Agent with researcher's own tools:
+    ┌─────────────────────────────────┐
+    │ Researcher Agent                │
+    │ system: "You are a researcher"  │
+    │ tools: [web_search, web_fetch]  │  ← agent's own tool_ids resolved
+    │ intervention: [LogHandler]      │
+    │                                 │
+    │ Runs Pipe.through() → isolated  │
+    │ ToolCallerLoop with own tools   │
+    └─────────────────────────────────┘
+    │
+    ▼ Returns research summary to orchestrator
+```
+
+---
+
+## Phase 5c — Workflow Engine (Static Pipelines)
+
+### Core Insight
+
+**Not everything needs LLM reasoning.** Many tasks are deterministic data
+transformations: fetch JSON → extract fields → filter → transform → output.
+Like n8n, users define these visually as node graphs. Data flows through
+operators via the pipe operator — no LLM calls, no token cost, predictable
+output.
+
+This complements Phase 5b (LLM orchestrator): the chat model can **delegate
+to a workflow** just like it delegates to an agent, but the workflow runs
+deterministically.
+
+```text
+Phase 5b (LLM reasoning):     Phase 5c (Static pipeline):
+  User → Orchestrator LLM       User → Workflow Runner
+    ↓ reasons about task           ↓ follows defined DAG
+    ↓ calls delegate tools         ↓ executes operators
+    ↓ each agent uses LLM          ↓ NO LLM calls
+    ↓ unpredictable output         ↓ predictable output
+    ↓ costs tokens                 ↓ zero token cost
+```
+
+### Problem
+
+1. **Simple data tasks waste LLM tokens** — fetching an API, extracting fields,
+   and formatting output doesn't need reasoning. But currently the only way to
+   chain operations is through LLM tool calling.
+
+2. **No visual workflow builder** — users familiar with n8n/Zapier expect to
+   drag nodes, connect them, and see data flow. Current Pipe composition is
+   code-only.
+
+3. **No JSON operators** — the codebase has Tool structs but no built-in
+   operators for common data transformations (extract, filter, map, merge).
+
+4. **No deterministic execution engine** — `ToolCallerLoop` is designed for
+   LLM-driven iteration. Static pipelines need a simpler runner that just
+   executes nodes in topological order.
+
+### Solution
+
+#### The Two Worlds
+
+| Aspect | Chat Orchestrator (5b) | Workflow Engine (5c) |
+|---|---|---|
+| Who decides next step | LLM reasoning | DAG topology |
+| Tool selection | LLM picks from available | User defines at build time |
+| Data between stages | Natural language strings | Typed JSON objects |
+| Cost per run | LLM tokens per stage | Zero (just computation) |
+| Output | Unpredictable (creative) | Deterministic (measured) |
+| Best for | Complex reasoning, synthesis | Data pipelines, integrations |
+
+**They compose:** A workflow can be wrapped as a tool for the chat orchestrator.
+An agent node in a workflow delegates to an LLM. Users choose the right tool
+for each job.
+
+#### Workflow Data Model
+
+```elixir
+defmodule AgentEx.Workflow do
+  defstruct [
+    :id,
+    :user_id,
+    :name,
+    :description,
+    nodes: [],          # [WorkflowNode.t()]
+    edges: [],          # [WorkflowEdge.t()]
+    inserted_at: nil,
+    updated_at: nil
+  ]
+end
+
+defmodule AgentEx.Workflow.Node do
+  defstruct [
+    :id,                # unique within workflow
+    :type,              # :trigger | :http_request | :json_extract | :json_transform |
+                        # :json_filter | :set | :if_branch | :switch | :code |
+                        # :agent | :tool | :merge | :output
+    :label,             # display name
+    :config,            # type-specific configuration map
+    :position           # {x, y} for visual editor
+  ]
+end
+
+defmodule AgentEx.Workflow.Edge do
+  defstruct [
+    :id,
+    :source_node_id,
+    :target_node_id,
+    :source_port,       # "output" | "true" | "false" | "case_1" etc.
+    :target_port        # "input"
+  ]
+end
+```
+
+#### Built-in Operators
+
+These are the n8n equivalents — pure functions that transform JSON:
+
+```text
+┌─────────────────────────────────────────────────────────────┐
+│  DATA OPERATORS (no LLM, no side effects)                   │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  json_extract   — Pull fields from object via path          │
+│                   Config: paths: ["data.price", "meta.ts"]  │
+│                   In: %{"data" => %{"price" => 42}}         │
+│                   Out: %{"price" => 42, "ts" => nil}        │
+│                                                             │
+│  json_transform — Rename/reshape fields                     │
+│                   Config: mappings: [{"old", "new"}, ...]   │
+│                   In: %{"price" => 42}                      │
+│                   Out: %{"stock_price" => 42}               │
+│                                                             │
+│  json_filter    — Filter array items by condition           │
+│                   Config: path: "items", condition: "> 10"  │
+│                   In: %{"items" => [5, 15, 3, 20]}          │
+│                   Out: %{"items" => [15, 20]}               │
+│                                                             │
+│  json_merge     — Deep merge multiple inputs                │
+│                   In: [%{"a" => 1}, %{"b" => 2}]            │
+│                   Out: %{"a" => 1, "b" => 2}                │
+│                                                             │
+│  set            — Set static key-value pairs                │
+│                   Config: values: %{"status" => "processed"}│
+│                   In: %{"data" => 1}                        │
+│                   Out: %{"data" => 1, "status" => "proc.."} │
+│                                                             │
+│  code           — Custom Elixir expression (sandboxed)      │
+│                   Config: expression: "Map.put(input, ...)" │
+│                   Evaluated in restricted sandbox            │
+│                                                             │
+├─────────────────────────────────────────────────────────────┤
+│  FLOW CONTROL OPERATORS                                     │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  if_branch      — Binary split based on condition           │
+│                   Config: path: "status", equals: "active"  │
+│                   Ports: "true" and "false"                  │
+│                                                             │
+│  switch         — Multi-way routing by value                │
+│                   Config: path: "type", cases: ["a","b","c"]│
+│                   Ports: "case_a", "case_b", "case_c", "def"│
+│                                                             │
+│  split          — Fan out array items to parallel branches  │
+│                   Config: path: "items"                     │
+│                   Runs downstream nodes once per item       │
+│                                                             │
+│  merge          — Collect parallel branch results           │
+│                   Waits for all incoming edges              │
+│                   Combines into array or merged object      │
+│                                                             │
+├─────────────────────────────────────────────────────────────┤
+│  I/O OPERATORS (side effects)                               │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  trigger        — Manual / cron / webhook start point       │
+│                   Config: type, schedule, payload template  │
+│                                                             │
+│  http_request   — REST API call (uses HttpTool from 5b)     │
+│                   Config: method, url, headers, body        │
+│                                                             │
+│  tool           — Call any registered AgentEx tool          │
+│                   Config: tool_name, param_mapping          │
+│                                                             │
+│  agent          — Delegate to LLM agent (LLM node)         │
+│                   Config: agent_id, task_template           │
+│                   This is the ONLY node that costs tokens   │
+│                                                             │
+│  output         — Terminal node, emits workflow result      │
+│                   Config: format (json | text | table)      │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+#### Workflow Runner (Static Execution Engine)
+
+```elixir
+defmodule AgentEx.Workflow.Runner do
+  @moduledoc """
+  Executes a workflow DAG deterministically. No LLM calls unless an
+  :agent node is encountered. Data flows as JSON maps between nodes.
+
+  Execution:
+  1. Topological sort of nodes from trigger → output
+  2. Execute each node with its input data
+  3. Route output to connected nodes via edges
+  4. Branch/merge as defined by flow control operators
+  5. Collect output node results
+  """
+
+  def run(%Workflow{} = workflow, trigger_data \\ %{}, opts \\ []) do
+    run_id = opts[:run_id] || generate_run_id()
+    sorted = topological_sort(workflow.nodes, workflow.edges)
+    node_map = Map.new(workflow.nodes, &{&1.id, &1})
+    edge_map = group_edges_by_source(workflow.edges)
+
+    execute_dag(sorted, node_map, edge_map, %{
+      trigger: trigger_data,
+      results: %{},
+      run_id: run_id
+    })
+  end
+
+  defp execute_dag([], _nodes, _edges, state), do: {:ok, state.results}
+
+  defp execute_dag([node_id | rest], nodes, edges, state) do
+    node = nodes[node_id]
+    input = gather_input(node_id, state, edges)
+
+    case execute_node(node, input, state) do
+      {:ok, output} ->
+        state = put_in(state, [:results, node_id], output)
+        broadcast_node_complete(state.run_id, node_id, output)
+        execute_dag(rest, nodes, edges, state)
+
+      {:branch, port, output} ->
+        # For if/switch: only follow edges matching the port
+        state = put_in(state, [:results, node_id], output)
+        filtered_rest = filter_branch(rest, edges, node_id, port)
+        execute_dag(filtered_rest, nodes, edges, state)
+
+      {:error, reason} ->
+        broadcast_node_error(state.run_id, node_id, reason)
+        {:error, node_id, reason}
+    end
+  end
+end
+```
+
+#### JSON Path + Expression Engine
+
+For referencing data between nodes:
+
+```text
+Syntax: {{node_id.path.to.field}}
+
+Examples:
+  {{trigger.body.ticker}}           → trigger payload's ticker
+  {{http_request_1.data.price}}     → HTTP response nested field
+  {{json_extract_1.name}}           → extracted field
+
+In node configs:
+  URL: "https://api.example.com/quote/{{trigger.body.ticker}}"
+  Condition: "{{http_request_1.status}} == 200"
+  Expression: "{{json_extract_1.price}} * {{set_1.multiplier}}"
+```
+
+Implemented as simple template interpolation + JSONPath-style field access:
+
+```elixir
+defmodule AgentEx.Workflow.Expression do
+  @doc "Resolve {{node.path}} references against workflow state."
+  def interpolate(template, results) when is_binary(template) do
+    Regex.replace(~r/\{\{(\w+)\.(.+?)\}\}/, template, fn _, node_id, path ->
+      case get_in(results, [node_id | String.split(path, ".")]) do
+        nil -> ""
+        value -> to_string(value)
+      end
+    end)
+  end
+
+  @doc "Evaluate simple conditions for if/switch nodes."
+  def evaluate_condition(condition, results) do
+    # Supports: ==, !=, >, <, contains, matches
+    # All values resolved from {{node.path}} references
+    # No arbitrary code execution
+  end
+end
+```
+
+#### Visual Workflow Editor
+
+```text
+┌─────────────────────────────────────────────────────────────┐
+│  Workflows                                       [+ New]    │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ┌──────────┐    ┌──────────────┐    ┌─────────────┐       │
+│  │ 📡       │    │ 🔧           │    │ 📤          │       │
+│  │ Trigger  ├───▶│ HTTP Request ├───▶│ JSON Extract│       │
+│  │ ──────── │    │ ──────────── │    │ ──────────  │       │
+│  │ manual   │    │ GET /quote/  │    │ paths:      │       │
+│  │          │    │ {{ticker}}   │    │ data.price  │       │
+│  └──────────┘    └──────────────┘    │ data.volume │       │
+│                                      └──────┬──────┘       │
+│                                             │               │
+│                                      ┌──────▼──────┐       │
+│                                      │ ❓          │       │
+│                                      │ IF Branch   │       │
+│                                      │ ──────────  │       │
+│                                      │ price > 100 │       │
+│                                      └──┬──────┬───┘       │
+│                                    true │      │ false      │
+│                               ┌────────▼┐  ┌──▼────────┐  │
+│                               │ 🤖 Agent│  │ ✏️ Set     │  │
+│                               │ Analyst │  │ status:   │  │
+│                               │ "Analyze│  │ "skipped" │  │
+│                               │  this"  │  └──────┬────┘  │
+│                               └────┬────┘         │        │
+│                                    │         ┌────▼────┐   │
+│                                    └────────▶│ 📊      │   │
+│                                              │ Output  │   │
+│                                              │ JSON    │   │
+│                                              └─────────┘   │
+│                                                             │
+│  Node palette:                                              │
+│  [Trigger] [HTTP] [Extract] [Transform] [Filter] [Set]     │
+│  [IF] [Switch] [Split] [Merge] [Code] [Agent] [Tool]       │
+│  [Output]                                                   │
+│                                                             │
+│  [Save] [Run Now] [Run History]                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+#### Workflow as Tool (Composability)
+
+A saved workflow becomes callable as a tool — both from the chat orchestrator
+and from other workflows:
+
+```elixir
+defmodule AgentEx.Workflow.Tool do
+  @doc "Wrap a workflow as a Tool.t() for use in chat or other workflows."
+  def to_tool(%Workflow{} = workflow) do
+    # Infer parameters from trigger node config
+    trigger_node = find_trigger(workflow)
+    params = trigger_params_to_schema(trigger_node)
+
+    Tool.new(
+      name: "workflow.#{workflow.id}",
+      description: workflow.description || "Run workflow: #{workflow.name}",
+      kind: :write,
+      parameters: params,
+      function: fn args ->
+        case Runner.run(workflow, args) do
+          {:ok, results} ->
+            output_node = find_output(workflow)
+            {:ok, Jason.encode!(results[output_node.id])}
+          {:error, node_id, reason} ->
+            {:error, "Workflow failed at #{node_id}: #{reason}"}
+        end
+      end
+    )
+  end
+end
+```
+
+This means:
+- Chat orchestrator can call `workflow.stock_pipeline` as a tool
+- Workflows can nest: a workflow node calls another workflow
+- Agents inside a workflow use LLM; everything else is deterministic
+
+### Design Decisions
+
+| ID | Decision | Rationale |
+|---|---|---|
+| D1 | Workflows stored in ETS/DETS (WorkflowStore) | Consistent with AgentStore/HttpToolStore pattern. |
+| D2 | Nodes are typed operators, not generic "functions" | Predictable behavior, schema-aware connections, better UX. |
+| D3 | JSON maps flow between nodes, not strings | Structured data enables field-level connections and validation. |
+| D4 | `{{node.path}}` template syntax | Simple, no code eval, familiar from n8n/Postman. |
+| D5 | Topological sort for execution order | DAG guarantees no cycles; deterministic execution. |
+| D6 | Agent node is the only LLM-calling node | Clear cost boundary. Users see exactly where tokens are spent. |
+| D7 | Workflows wrap as Tool.t() | Composable with chat orchestrator and other workflows. |
+| D8 | Expression conditions are declarative, not Elixir eval | Security: no arbitrary code execution in conditions. |
+| D9 | Code node uses restricted sandbox | Power users get Elixir expressions, but in a safe subset. |
+| D10 | Visual editor uses JS canvas + SVG connections | Same pattern planned for Phase 6 flow editor. Share the hook. |
+
+### Files
+
+| Action | File | Purpose |
+|---|---|---|
+| Create | `lib/agent_ex/workflow.ex` | Workflow + Node + Edge structs |
+| Create | `lib/agent_ex/workflow/store.ex` | ETS/DETS persistence for workflows |
+| Create | `lib/agent_ex/workflow/runner.ex` | Static DAG execution engine |
+| Create | `lib/agent_ex/workflow/operators.ex` | Built-in operator implementations (extract, transform, filter, merge, set, branch, split) |
+| Create | `lib/agent_ex/workflow/expression.ex` | `{{node.path}}` interpolation + condition evaluation |
+| Create | `lib/agent_ex/workflow/tool.ex` | Wrap workflow as Tool.t() for composability |
+| Create | `lib/agent_ex_web/live/workflows_live.ex` | Workflow list + visual editor |
+| Create | `lib/agent_ex_web/live/workflows_live.html.heex` | Template |
+| Create | `lib/agent_ex_web/components/workflow_components.ex` | Node palette, node cards, edge rendering |
+| Create | `assets/js/hooks/workflow_editor.js` | Canvas drag-drop + SVG edge drawing |
+| Modify | `lib/agent_ex/application.ex` | Add WorkflowStore to supervision tree |
+| Modify | `lib/agent_ex_web/router.ex` | Add `/workflows`, `/workflows/:id` routes |
+| Modify | `lib/agent_ex_web/components/layouts/app.html.heex` | Add Workflows nav item |
+| Modify | `assets/js/app.js` | Register WorkflowEditor hook |
+| Modify | `lib/agent_ex/tool_assembler.ex` | Include workflow tools in assembled tool list |
+
+### Implementation Order
+
+```text
+5c-A: Core structs + WorkflowStore + Operators
+  │
+  ├─ Workflow/Node/Edge structs
+  ├─ Expression engine ({{node.path}} interpolation)
+  ├─ Built-in operators (extract, transform, filter, set, branch, merge)
+  ├─ WorkflowStore (ETS/DETS persistence)
+  │
+5c-B: Runner + Workflow-as-Tool
+  │
+  ├─ Topological sort + DAG execution
+  ├─ Event broadcasting for run tracking
+  ├─ Workflow.Tool.to_tool/1 for composability
+  ├─ ToolAssembler integration
+  │
+5c-C: Visual Editor + UI
+  │
+  ├─ WorkflowsLive (list + editor)
+  ├─ Node palette, drag-drop canvas
+  ├─ SVG edge connections
+  ├─ Node configuration panels
+  ├─ Run button + execution trace
+  └─ Sidebar nav integration
+```
 
 ---
 

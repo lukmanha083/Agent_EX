@@ -1,8 +1,7 @@
 import Config
 
 config :agent_ex,
-  dets_dir: "priv/data/dev",
-  chat_tools: :demo
+  dets_dir: "priv/data/dev"
 
 # Database
 config :agent_ex, AgentEx.Repo,
