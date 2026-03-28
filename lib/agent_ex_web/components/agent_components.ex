@@ -104,6 +104,7 @@ defmodule AgentExWeb.AgentComponents do
   attr :model_options, :list, required: true
   attr :intervention_pipeline, :list, default: []
   attr :sandbox, :map, default: %{}
+  attr :project_root_path, :string, default: nil
 
   def agent_editor_dialog(assigns) do
     ~H"""
@@ -137,7 +138,7 @@ defmodule AgentExWeb.AgentComponents do
 
             <%!-- Sandbox boundary section --%>
             <div class="border-t border-gray-800 pt-4">
-              <.sandbox_section sandbox={@sandbox} />
+              <.sandbox_section sandbox={@sandbox} project_root_path={@project_root_path} />
             </div>
 
             <%!-- Intervention pipeline section --%>

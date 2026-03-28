@@ -116,11 +116,11 @@ defmodule AgentExWeb.InterventionComponents do
 
   @doc "Sandbox boundary section embedded in the agent editor."
   attr :sandbox, :map, default: %{}
+  attr :project_root_path, :string, default: nil
 
   def sandbox_section(assigns) do
     assigns =
       assign(assigns,
-        root_path: assigns.sandbox["root_path"] || "",
         disallowed_commands: assigns.sandbox["disallowed_commands"] || []
       )
 
@@ -133,24 +133,27 @@ defmodule AgentExWeb.InterventionComponents do
         </p>
       </div>
 
-      <%!-- Root path --%>
+      <%!-- Root path from project (read-only) --%>
       <div>
         <label class="block text-xs font-medium text-gray-300 mb-1">Root Directory</label>
-        <div class="flex gap-2">
-          <input
-            type="text"
-            name="sandbox_root_path"
-            value={@root_path}
-            placeholder="/home/user/project"
-            phx-blur="update_sandbox_root"
-            phx-keydown="update_sandbox_root"
-            phx-key="Enter"
-            class="flex-1 rounded-md border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
-          />
-        </div>
-        <p class="text-[10px] text-gray-500 mt-1">
-          File tools will be confined to this directory. Leave empty for no restriction.
-        </p>
+        <%= if @project_root_path && @project_root_path != "" do %>
+          <div class="flex items-center gap-2 rounded-md border border-gray-700/50 bg-gray-800/50 px-3 py-1.5">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-3.5 h-3.5 text-indigo-400 shrink-0">
+              <path d="M3.75 3A1.75 1.75 0 0 0 2 4.75v1.27a3.18 3.18 0 0 1 .75-.27h10.5c.268 0 .526.033.75.27V6.75A1.75 1.75 0 0 0 12.25 5H8.836a.25.25 0 0 1-.177-.073L7.323 3.513A1.75 1.75 0 0 0 6.086 3H3.75ZM3.75 7.5A1.75 1.75 0 0 0 2 9.25v3c0 .966.784 1.75 1.75 1.75h8.5A1.75 1.75 0 0 0 14 12.25v-3A1.75 1.75 0 0 0 12.25 7.5H3.75Z" />
+            </svg>
+            <code class="text-xs text-gray-300 font-mono truncate">{@project_root_path}</code>
+          </div>
+          <p class="text-[10px] text-gray-500 mt-1">
+            Inherited from project. Change it in project settings.
+          </p>
+        <% else %>
+          <div class="rounded-md border border-gray-700/50 bg-gray-800/50 px-3 py-1.5">
+            <span class="text-xs text-gray-500 italic">No root path set on project — unrestricted.</span>
+          </div>
+          <p class="text-[10px] text-gray-500 mt-1">
+            Set a root path in project settings to confine file tools.
+          </p>
+        <% end %>
       </div>
 
       <%!-- Disallowed commands --%>

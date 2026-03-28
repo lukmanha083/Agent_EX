@@ -31,7 +31,6 @@ defmodule AgentEx.AgentConfig do
         }
 
   @type sandbox :: %{
-          optional(:root_path) => String.t(),
           optional(:disallowed_commands) => [String.t()]
         }
 

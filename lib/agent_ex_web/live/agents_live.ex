@@ -182,11 +182,6 @@ defmodule AgentExWeb.AgentsLive do
 
   # -- Sandbox events --
 
-  def handle_event("update_sandbox_root", %{"value" => path}, socket) do
-    sandbox = Map.put(socket.assigns.sandbox, "root_path", String.trim(path))
-    {:noreply, assign(socket, sandbox: sandbox)}
-  end
-
   def handle_event("add_disallowed_command", %{"value" => raw}, socket) do
     cmds =
       raw
