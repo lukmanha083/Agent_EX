@@ -1,7 +1,7 @@
 defmodule AgentExWeb.ChatLive do
   use AgentExWeb, :live_view
 
-  alias AgentEx.{AgentStore, Chat, EventLoop, Memory}
+  alias AgentEx.{AgentStore, Chat, EventLoop, Memory, Projects}
   alias AgentEx.EventLoop.Event
 
   import AgentExWeb.ChatComponents
@@ -15,12 +15,13 @@ defmodule AgentExWeb.ChatLive do
   @impl true
   def mount(_params, _session, socket) do
     user = socket.assigns.current_scope.user
+    {:ok, project} = Projects.ensure_default_project(user.id)
 
-    agents = AgentStore.list(user.id)
+    agents = AgentStore.list(user.id, project.id)
     active_agent = List.first(agents)
 
     {provider, model, tools, system_prompt} = load_from_agent(active_agent, user)
-    conversations = Chat.list_conversations(user.id)
+    conversations = Chat.list_conversations(user.id, project.id)
 
     {:ok,
      assign(socket,
@@ -36,7 +37,8 @@ defmodule AgentExWeb.ChatLive do
        system_prompt: system_prompt,
        active_agent: active_agent,
        agents: agents,
-       agent_id: user_agent_id(user),
+       agent_id: project_agent_id(user, project),
+       project: project,
        user_initials: AgentExWeb.Layouts.initials(user.username || user.email),
        timezone: user.timezone || "Etc/UTC",
        conversation: nil,
@@ -127,10 +129,11 @@ defmodule AgentExWeb.ChatLive do
 
   def handle_event("delete_conversation", %{"id" => id}, socket) do
     user = socket.assigns.current_scope.user
+    project = socket.assigns.project
 
     with conversation when not is_nil(conversation) <- Chat.get_user_conversation(user.id, id),
          {:ok, _} <- Chat.delete_conversation(conversation) do
-      conversations = Chat.list_conversations(user.id)
+      conversations = Chat.list_conversations(user.id, project.id)
       socket = assign(socket, conversations: conversations)
 
       viewing_deleted? =
@@ -155,7 +158,7 @@ defmodule AgentExWeb.ChatLive do
   end
 
   def handle_info({:title_updated, conversation_id, title}, socket) do
-    conversations = Chat.list_conversations(socket.assigns.current_scope.user.id)
+    conversations = Chat.list_conversations(socket.assigns.current_scope.user.id, socket.assigns.project.id)
 
     conversation =
       if socket.assigns.conversation && socket.assigns.conversation.id == conversation_id do
@@ -250,7 +253,7 @@ defmodule AgentExWeb.ChatLive do
        thinking: false,
        stages: [],
        run_id: nil,
-       conversations: Chat.list_conversations(socket.assigns.current_scope.user.id)
+       conversations: Chat.list_conversations(socket.assigns.current_scope.user.id, socket.assigns.project.id)
      )}
   end
 
@@ -338,10 +341,12 @@ defmodule AgentExWeb.ChatLive do
     case socket.assigns.conversation do
       nil ->
         user = socket.assigns.current_scope.user
+        project = socket.assigns.project
         title = Chat.auto_title(first_message)
 
         case Chat.create_conversation(%{
                user_id: user.id,
+               project_id: project.id,
                title: title,
                model: socket.assigns.model,
                provider: socket.assigns.provider
@@ -350,7 +355,7 @@ defmodule AgentExWeb.ChatLive do
             session_id = "conversation-#{conversation.id}"
             Memory.start_session(socket.assigns.agent_id, session_id)
 
-            conversations = Chat.list_conversations(user.id)
+            conversations = Chat.list_conversations(user.id, project.id)
 
             socket
             |> assign(conversation: conversation, conversations: conversations)
@@ -453,7 +458,7 @@ defmodule AgentExWeb.ChatLive do
   defp role_atom("system"), do: :system
   defp role_atom(_other), do: :user
 
-  defp user_agent_id(user), do: "user_#{user.id}_chat"
+  defp project_agent_id(user, project), do: "u#{user.id}_p#{project.id}_chat"
 
   defp load_from_agent(nil, user) do
     provider = user.provider || "openai"

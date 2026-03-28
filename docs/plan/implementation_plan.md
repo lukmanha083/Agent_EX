@@ -22,7 +22,8 @@ Phase 4d (Dashboard Refactor) merged (2026-03-23). Phase 4c (Conversation Histor
 implemented (2026-03-25). Phase 5 (Agent Builder + Unified Tool Management) implemented
 (2026-03-26). Intervention redesign: embedded in agent editor with per-handler config
 (WriteGateHandler allowlist), sandbox boundary (root_path, disallowed commands) (2026-03-27).
-Phase 5b (Chat Orchestrator + REST API Tools + Agent-as-Tool) next.
+Phase 5a (Project Scope) next — must land before app grows more complex.
+Phase 5b (Chat Orchestrator + REST API Tools + Agent-as-Tool) follows.
 Phase 8 (Hybrid Bridge — Remote Computer Use) is the final phase.
 
 **Table of Contents**
@@ -37,7 +38,8 @@ Phase 8 (Hybrid Bridge — Remote Computer Use) is the final phase.
 8. [Phase 4c — Conversation History](#phase-4c--conversation-history)
 9. [Phase 4d — Dashboard Refactor (SaladUI + Responsive Layout)](#phase-4d--dashboard-refactor-saladui--responsive-layout)
 10. [Phase 5 — Agent Builder + Unified Tool Management](#phase-5--agent-builder--unified-tool-management)
-11. [Phase 5b — Chat Orchestrator + REST API Tools + Agent-as-Tool](#phase-5b--chat-orchestrator--rest-api-tools--agent-as-tool)
+11. [Phase 5a — Project Scope](#phase-5a--project-scope)
+12. [Phase 5b — Chat Orchestrator + REST API Tools + Agent-as-Tool](#phase-5b--chat-orchestrator--rest-api-tools--agent-as-tool)
 12. [Phase 5c — Workflow Engine (Static Pipelines)](#phase-5c--workflow-engine-static-pipelines)
 13. [Phase 6 — Flow Builder + Triggers](#phase-6--flow-builder--triggers)
 14. [Phase 7 — Run View + Memory Inspector](#phase-7--run-view--memory-inspector)
@@ -153,6 +155,9 @@ Phase 4 (Phoenix + EventLoop) ──▶ Phase 4b (Timezone + Scoping) ──▶ 
                                   Phase 4d (Dashboard Refactor) ──▶ Phase 5 (Agent Builder + Tools)
                                                                               │
                                                                               ▼
+                                                                    Phase 5a (Project Scope)
+                                                                              │
+                                                                              ▼
                                                                     Phase 5b (Chat Orchestrator + REST Tools)
                                                                               │
                                                                               ▼
@@ -183,7 +188,7 @@ Phase 4 (Phoenix + EventLoop) ──▶ Phase 4b (Timezone + Scoping) ──▶ 
   - Phase 8 uses the MCP transport layer (Phase 1 MCP.Client) as the bridge protocol.
   - Phase 8 WebSocket transport leverages Phoenix Channels (Phase 4).
 
-**Recommended order:** 1+2 (parallel) → 3 → 4 → 4b → 4d → 4c → 5 → 5b → 5c → 6 → 7 → 8.
+**Recommended order:** 1+2 (parallel) → 3 → 4 → 4b → 4d → 4c → 5 → **5a** → 5b → 5c → 6 → 7 → 8.
 
 ---
 
@@ -1243,6 +1248,308 @@ live permission decision matrix.
 | Modify | `lib/agent_ex_web/components/layouts/app.html.heex` | Tabbed workspace nav |
 | Modify | `assets/js/app.js` | Register Sortable hook |
 | Modify | `lib/agent_ex_web/live/chat_live.ex` | Load tools from agent config instead of app config |
+
+---
+
+## Phase 5a — Project Scope
+
+### Problem
+
+All agents, conversations, tools, and memory exist in a flat per-user namespace.
+As usage grows, this causes:
+
+1. **Memory pollution** — a stock research agent's Tier 3 semantic search returns
+   marketing campaign outcomes. `ContextBuilder` injects irrelevant context.
+2. **Sandbox mismatch** — different work domains need different `root_path`
+   directories. One sandbox config can't serve all domains.
+3. **Tool sprawl** — tools for one domain clutter another agent's available tools.
+4. **No clean boundaries** — deleting a "project" means manually finding and
+   deleting the right agents, conversations, and memory entries.
+5. **Budget bleed** — autonomous agent costs can't be tracked per domain.
+
+### Solution
+
+A **project** layer between user and everything else. Every component binds to
+a project. Memory, agents, conversations, tools, sandbox, and budget are all
+project-scoped.
+
+```text
+User
+├── Project: "AAPL Research" (sandbox: ~/projects/trading)
+│   ├── Agents: researcher, analyst
+│   ├── Conversations: 12 (all stock-related)
+│   ├── Memory: stock outcomes, trading strategies (isolated)
+│   ├── Tools: stock API, financial data
+│   └── Budget: $50/month
+│
+├── Project: "Marketing Automation" (sandbox: ~/projects/marketing)
+│   ├── Agents: campaign manager, content writer
+│   ├── Conversations: 8 (all marketing-related)
+│   ├── Memory: campaign outcomes, audience insights (isolated)
+│   ├── Tools: analytics API, email tools
+│   └── Budget: $30/month
+│
+└── Default Project (auto-created on signup, no friction)
+    ├── Agents: general assistant
+    ├── Conversations: 27 (daily tasks)
+    └── Memory: user preferences
+```
+
+### Database Changes
+
+**New table: `projects`**
+
+```elixir
+create table(:projects) do
+  add :user_id, references(:users, on_delete: :delete_all), null: false
+  add :name, :string, null: false
+  add :description, :string
+  add :root_path, :string
+  add :is_default, :boolean, default: false, null: false
+
+  timestamps(type: :utc_datetime_usec)
+end
+
+create index(:projects, [:user_id])
+create unique_index(:projects, [:user_id, :name])
+create unique_index(:projects, [:user_id],
+  where: "is_default = true", name: :projects_one_default_per_user)
+```
+
+**Alter table: `conversations`**
+
+```elixir
+alter table(:conversations) do
+  add :project_id, references(:projects, on_delete: :delete_all)
+end
+
+# Backfill: assign all existing conversations to the user's default project
+execute \"\"\"
+UPDATE conversations SET project_id = (
+  SELECT id FROM projects WHERE user_id = conversations.user_id AND is_default = true
+)
+\"\"\"
+
+alter table(:conversations) do
+  modify :project_id, :bigint, null: false
+end
+
+create index(:conversations, [:project_id])
+create index(:conversations, [:project_id, :updated_at])
+```
+
+### Schema Changes
+
+**Project schema:**
+
+```elixir
+defmodule AgentEx.Projects.Project do
+  use Ecto.Schema
+  import Ecto.Changeset
+
+  schema "projects" do
+    belongs_to(:user, AgentEx.Accounts.User)
+    has_many(:conversations, AgentEx.Chat.Conversation)
+
+    field(:name, :string)
+    field(:description, :string)
+    field(:root_path, :string)
+    field(:is_default, :boolean, default: false)
+
+    timestamps(type: :utc_datetime_usec)
+  end
+
+  def changeset(project, attrs) do
+    project
+    |> cast(attrs, [:user_id, :name, :description, :root_path, :is_default])
+    |> validate_required([:user_id, :name])
+    |> unique_constraint([:user_id, :name])
+    |> foreign_key_constraint(:user_id)
+  end
+end
+```
+
+**Conversation schema update:**
+
+```elixir
+schema "conversations" do
+  belongs_to(:user, AgentEx.Accounts.User)
+  belongs_to(:project, AgentEx.Projects.Project)  # NEW
+  has_many(:messages, AgentEx.Chat.Message)
+  # ...
+end
+```
+
+### ETS/DETS Key Changes
+
+**AgentStore:** Key changes from `{user_id, agent_id}` to
+`{user_id, project_id, agent_id}`:
+
+```elixir
+# Before
+def get(user_id, agent_id) do
+  case :ets.lookup(:agent_configs, {user_id, agent_id}) do ...
+
+# After
+def get(user_id, project_id, agent_id) do
+  case :ets.lookup(:agent_configs, {user_id, project_id, agent_id}) do ...
+
+def list(user_id, project_id) do
+  :ets.foldl(fn
+    {{^user_id, ^project_id, _agent_id}, config}, acc -> [config | acc]
+    _, acc -> acc
+  end, [], :agent_configs)
+end
+```
+
+**AgentConfig:** Add `project_id` as an enforced key:
+
+```elixir
+@enforce_keys [:id, :user_id, :project_id, :name]
+defstruct [
+  :id,
+  :user_id,
+  :project_id,
+  # ...
+]
+```
+
+### Memory Scoping Strategy
+
+**Agent IDs carry project context** — instead of refactoring all memory store
+keys, the `agent_id` becomes project-unique by convention:
+
+```elixir
+# In ChatLive, when constructing memory opts:
+agent_id = "u#{user.id}_p#{project.id}_chat"
+
+# In AgentsLive, when constructing memory opts for custom agents:
+agent_id = "u#{user.id}_p#{project.id}_#{agent_config.id}"
+```
+
+This means **all memory tiers** (Tier 1/2/3 + KG) get project isolation for
+free without changing their key structures. The convention is enforced at the
+UI/context layer, not the storage layer.
+
+### Chat Query Changes
+
+All conversation queries gain `project_id`:
+
+```elixir
+# Before
+def list_conversations(user_id) do
+  Conversation |> where(user_id: ^user_id) |> ...
+
+# After
+def list_conversations(user_id, project_id) do
+  Conversation |> where(user_id: ^user_id, project_id: ^project_id) |> ...
+```
+
+### Default Project (Zero Friction)
+
+Every user gets a default project auto-created on registration:
+
+```elixir
+# In Accounts.register_user/1, after user insert:
+def register_user(attrs) do
+  Multi.new()
+  |> Multi.insert(:user, User.registration_changeset(%User{}, attrs))
+  |> Multi.insert(:default_project, fn %{user: user} ->
+    Project.changeset(%Project{}, %{
+      user_id: user.id,
+      name: "Default",
+      is_default: true
+    })
+  end)
+  |> Repo.transaction()
+end
+```
+
+New users see no "project" UI until they create a second project. The default
+project is selected automatically. The sidebar shows a project switcher only
+when multiple projects exist.
+
+### UI Changes
+
+**Project switcher** in sidebar (only visible with 2+ projects):
+
+```text
+Sidebar (when multiple projects exist):
+┌──────────────────┐
+│ [▼ AAPL Research]│  ← dropdown project switcher
+├──────────────────┤
+│ Chat             │
+│ Agents           │  ← all scoped to selected project
+│ Tools            │
+├──────────────────┤
+│ Projects         │  ← project CRUD page
+└──────────────────┘
+```
+
+**Projects page** (`/projects`): list, create, edit, delete projects. Each
+project card shows agent count, conversation count, and sandbox path.
+
+### Design Decisions
+
+| ID | Decision | Rationale |
+|---|---|---|
+| P1 | Default project auto-created on signup | Zero friction. New users don't see "project" concept until they need it. |
+| P2 | Memory scoped via agent_id convention | Avoids refactoring all memory store keys. `"u42_p7_researcher"` is unique per project. Enforced at the UI layer, not storage layer. |
+| P3 | `project_id` FK on conversations | Database-level enforcement. Cascade delete cleans up conversations when project deleted. |
+| P4 | `project_id` in AgentStore composite key | ETS/DETS isolation. `list(user_id, project_id)` returns only project agents. |
+| P5 | `root_path` on Project, not AgentConfig | Sandbox is a project-level concern. All agents in a project share the same root directory. Agent-level `sandbox.root_path` removed in favor of `project.root_path`. |
+| P6 | Single default per user (unique partial index) | Postgres enforces at most one `is_default=true` per user_id. No ambiguity. |
+| P7 | Project switcher hidden for single-project users | Progressive disclosure. Don't show complexity until it's needed. |
+| P8 | Backfill migration assigns existing conversations to default project | Non-breaking. All existing data continues to work. |
+
+### Files
+
+| Action | File | Purpose |
+|---|---|---|
+| Create | `lib/agent_ex/projects.ex` | Project context module (CRUD, default project logic) |
+| Create | `lib/agent_ex/projects/project.ex` | Project Ecto schema |
+| Create | `priv/repo/migrations/*_create_projects.exs` | Projects table + conversations FK migration |
+| Create | `lib/agent_ex_web/live/projects_live.ex` | Project list + CRUD page |
+| Create | `lib/agent_ex_web/live/projects_live.html.heex` | Template |
+| Create | `lib/agent_ex_web/components/project_components.ex` | Project cards, switcher dropdown, editor form |
+| Modify | `lib/agent_ex/chat/conversation.ex` | Add `belongs_to :project` |
+| Modify | `lib/agent_ex/chat.ex` | Add `project_id` to all query functions |
+| Modify | `lib/agent_ex/agent_config.ex` | Add `project_id` enforced key |
+| Modify | `lib/agent_ex/agent_store.ex` | Change keys to `{user_id, project_id, agent_id}` |
+| Modify | `lib/agent_ex/accounts.ex` | Create default project on user registration |
+| Modify | `lib/agent_ex_web/live/chat_live.ex` | Project-scoped conversations + agent_id |
+| Modify | `lib/agent_ex_web/live/agents_live.ex` | Project-scoped agent listing + creation |
+| Modify | `lib/agent_ex_web/live/tools_live.ex` | Project-scoped tool display |
+| Modify | `lib/agent_ex_web/components/layouts/app.html.heex` | Project switcher in sidebar |
+| Modify | `lib/agent_ex_web/router.ex` | Add `/projects` route |
+
+### Implementation Order
+
+```text
+5a-A: Database + Schema
+  │
+  ├─ Migration: projects table + conversations FK + backfill
+  ├─ Project schema + changeset
+  ├─ Projects context module (CRUD + default project)
+  ├─ Accounts: create default project on registration
+  │
+5a-B: Backend Scoping
+  │
+  ├─ AgentConfig: add project_id enforced key
+  ├─ AgentStore: change composite keys to {user_id, project_id, agent_id}
+  ├─ Chat: add project_id to all query functions
+  ├─ Conversation schema: add belongs_to :project
+  ├─ ChatLive: project-scoped agent_id convention for memory
+  │
+5a-C: UI
+  │
+  ├─ ProjectsLive (list + CRUD page)
+  ├─ ProjectComponents (cards, switcher, editor)
+  ├─ Sidebar: project switcher (hidden for single-project users)
+  ├─ AgentsLive: project-scoped listing
+  ├─ ToolsLive: project-scoped display
+  └─ Router: /projects route
+```
 
 ---
 

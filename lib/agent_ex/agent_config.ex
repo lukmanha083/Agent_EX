@@ -6,10 +6,11 @@ defmodule AgentEx.AgentConfig do
   Maps to AutoGen's agent configuration but persisted for the UI-driven builder.
   """
 
-  @enforce_keys [:id, :user_id, :name]
+  @enforce_keys [:id, :user_id, :project_id, :name]
   defstruct [
     :id,
     :user_id,
+    :project_id,
     :name,
     :description,
     system_prompt: "You are a helpful AI assistant.",
@@ -45,6 +46,7 @@ defmodule AgentEx.AgentConfig do
   @type t :: %__MODULE__{
           id: String.t(),
           user_id: integer(),
+          project_id: integer(),
           name: String.t(),
           description: String.t() | nil,
           system_prompt: String.t(),
@@ -89,7 +91,7 @@ defmodule AgentEx.AgentConfig do
   @doc "Update an existing agent config, bumping the updated_at timestamp."
   def update(%__MODULE__{} = config, attrs) when is_map(attrs) do
     config
-    |> Map.merge(Map.take(attrs, [:name, :description, :system_prompt, :provider, :model, :tool_ids, :intervention_pipeline, :sandbox, :execution_mode, :budget]))
+    |> Map.merge(Map.take(attrs, [:name, :description, :system_prompt, :provider, :model, :tool_ids, :intervention_pipeline, :sandbox, :execution_mode, :budget, :project_id]))
     |> Map.put(:updated_at, DateTime.utc_now())
   end
 

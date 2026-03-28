@@ -21,9 +21,9 @@ defmodule AgentEx.Chat do
     Repo.get_by(Conversation, id: conversation_id, user_id: user_id)
   end
 
-  def list_conversations(user_id) do
+  def list_conversations(user_id, project_id) do
     Conversation
-    |> where(user_id: ^user_id)
+    |> where(user_id: ^user_id, project_id: ^project_id)
     |> order_by(desc: :updated_at)
     |> Repo.all()
   end

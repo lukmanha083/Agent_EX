@@ -44,6 +44,7 @@ defmodule AgentExWeb.Router do
       on_mount: [{AgentExWeb.UserAuth, :require_authenticated}] do
       live("/chat", ChatLive, :index)
       live("/chat/:conversation_id", ChatLive, :show)
+      live("/projects", ProjectsLive, :index)
       live("/agents", AgentsLive, :index)
       live("/tools", ToolsLive, :index)
 

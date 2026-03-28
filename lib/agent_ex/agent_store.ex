@@ -2,7 +2,7 @@ defmodule AgentEx.AgentStore do
   @moduledoc """
   ETS + DETS persistence for agent configs.
   Same pattern as PersistentMemory.Store — ETS for fast reads, DETS for disk persistence.
-  Keys are `{user_id, agent_id}` for per-user isolation.
+  Keys are `{user_id, project_id, agent_id}` for per-user, per-project isolation.
   """
 
   use GenServer
@@ -24,21 +24,21 @@ defmodule AgentEx.AgentStore do
     GenServer.call(__MODULE__, {:save, config})
   end
 
-  @doc "Get a specific agent config by user_id and agent_id."
-  def get(user_id, agent_id) do
-    case :ets.lookup(:agent_configs, {user_id, agent_id}) do
-      [{{^user_id, ^agent_id}, config}] -> {:ok, config}
+  @doc "Get a specific agent config by user_id, project_id, and agent_id."
+  def get(user_id, project_id, agent_id) do
+    case :ets.lookup(:agent_configs, {user_id, project_id, agent_id}) do
+      [{{^user_id, ^project_id, ^agent_id}, config}] -> {:ok, config}
       [] -> :not_found
     end
   rescue
     ArgumentError -> :not_found
   end
 
-  @doc "List all agent configs for a user."
-  def list(user_id) do
+  @doc "List all agent configs for a user within a project."
+  def list(user_id, project_id) do
     :ets.foldl(
       fn
-        {{^user_id, _agent_id}, config}, acc -> [config | acc]
+        {{^user_id, ^project_id, _agent_id}, config}, acc -> [config | acc]
         _, acc -> acc
       end,
       [],
@@ -50,8 +50,8 @@ defmodule AgentEx.AgentStore do
   end
 
   @doc "Delete an agent config."
-  def delete(user_id, agent_id) do
-    GenServer.call(__MODULE__, {:delete, user_id, agent_id})
+  def delete(user_id, project_id, agent_id) do
+    GenServer.call(__MODULE__, {:delete, user_id, project_id, agent_id})
   end
 
   # --- Server callbacks ---
@@ -84,15 +84,15 @@ defmodule AgentEx.AgentStore do
 
   @impl GenServer
   def handle_call({:save, %AgentConfig{} = config}, _from, state) do
-    key = {config.user_id, config.id}
+    key = {config.user_id, config.project_id, config.id}
     :ets.insert(state.ets_table, {key, config})
     :dets.insert(state.dets_table, {key, config})
     {:reply, {:ok, config}, state}
   end
 
   @impl GenServer
-  def handle_call({:delete, user_id, agent_id}, _from, state) do
-    key = {user_id, agent_id}
+  def handle_call({:delete, user_id, project_id, agent_id}, _from, state) do
+    key = {user_id, project_id, agent_id}
     :ets.delete(state.ets_table, key)
     :dets.delete(state.dets_table, key)
     {:reply, :ok, state}

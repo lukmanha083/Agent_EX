@@ -1,7 +1,7 @@
 defmodule AgentExWeb.AgentsLive do
   use AgentExWeb, :live_view
 
-  alias AgentEx.{AgentConfig, AgentStore}
+  alias AgentEx.{AgentConfig, AgentStore, Projects}
 
   import AgentExWeb.AgentComponents
   import AgentExWeb.ProviderHelpers,
@@ -10,11 +10,13 @@ defmodule AgentExWeb.AgentsLive do
   @impl true
   def mount(_params, _session, socket) do
     user = socket.assigns.current_scope.user
-    agents = AgentStore.list(user.id)
+    {:ok, project} = Projects.ensure_default_project(user.id)
+    agents = AgentStore.list(user.id, project.id)
     default_provider = "openai"
 
     {:ok,
      assign(socket,
+       project: project,
        agents: agents,
        editing: nil,
        show_editor: false,
@@ -47,8 +49,9 @@ defmodule AgentExWeb.AgentsLive do
 
   def handle_event("edit_agent", %{"id" => id}, socket) do
     user = socket.assigns.current_scope.user
+    project = socket.assigns.project
 
-    case AgentStore.get(user.id, id) do
+    case AgentStore.get(user.id, project.id, id) do
       {:ok, agent} ->
         {:noreply,
          assign(socket,
@@ -91,6 +94,7 @@ defmodule AgentExWeb.AgentsLive do
 
   def handle_event("save_agent", params, socket) do
     user = socket.assigns.current_scope.user
+    project = socket.assigns.project
 
     attrs =
       form_to_attrs(params, socket.assigns.intervention_pipeline, socket.assigns.sandbox)
@@ -99,12 +103,12 @@ defmodule AgentExWeb.AgentsLive do
       if socket.assigns.editing do
         AgentConfig.update(socket.assigns.editing, attrs)
       else
-        AgentConfig.new(Map.put(attrs, :user_id, user.id))
+        AgentConfig.new(attrs |> Map.put(:user_id, user.id) |> Map.put(:project_id, project.id))
       end
 
     case AgentStore.save(config) do
       {:ok, _config} ->
-        agents = AgentStore.list(user.id)
+        agents = AgentStore.list(user.id, project.id)
 
         {:noreply,
          socket
@@ -118,8 +122,9 @@ defmodule AgentExWeb.AgentsLive do
 
   def handle_event("delete_agent", %{"id" => id}, socket) do
     user = socket.assigns.current_scope.user
-    AgentStore.delete(user.id, id)
-    agents = AgentStore.list(user.id)
+    project = socket.assigns.project
+    AgentStore.delete(user.id, project.id, id)
+    agents = AgentStore.list(user.id, project.id)
     {:noreply, assign(socket, agents: agents)}
   end
 

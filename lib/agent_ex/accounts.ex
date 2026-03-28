@@ -75,9 +75,19 @@ defmodule AgentEx.Accounts do
 
   """
   def register_user(attrs) do
-    %User{}
-    |> User.registration_changeset(attrs)
-    |> Repo.insert()
+    alias AgentEx.Projects.Project
+
+    Ecto.Multi.new()
+    |> Ecto.Multi.insert(:user, User.registration_changeset(%User{}, attrs))
+    |> Ecto.Multi.insert(:default_project, fn %{user: user} ->
+      Project.changeset(%Project{}, %{user_id: user.id, name: "Default", is_default: true})
+    end)
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{user: user}} -> {:ok, user}
+      {:error, :user, changeset, _} -> {:error, changeset}
+      {:error, :default_project, changeset, _} -> {:error, changeset}
+    end
   end
 
   @doc """
