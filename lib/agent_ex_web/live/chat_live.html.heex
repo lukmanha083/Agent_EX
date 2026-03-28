@@ -28,6 +28,7 @@
           />
         </.sheet_content>
       </.sheet>
+      <.badge :if={assigns[:current_project]} variant="outline" class="text-indigo-400 border-indigo-500/30">{@current_project.name}</.badge>
       <.badge variant="secondary">{@model}</.badge>
       <div class="ml-auto flex items-center gap-1">
         <button type="button" phx-click="clear" class="flex items-center gap-1 px-2 py-1 rounded-md text-sm text-gray-400 hover:bg-gray-800 hover:text-white transition-colors" aria-label="Clear conversation">

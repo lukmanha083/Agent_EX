@@ -3,7 +3,10 @@
   <header class="flex items-center justify-between px-4 md:px-6 h-14 border-b border-gray-800 bg-gray-900/50 shrink-0">
     <div>
       <h1 class="text-base font-semibold text-white">Tools</h1>
-      <p class="text-xs text-gray-500">Manage tool sources and connections</p>
+      <p class="text-xs text-gray-500">
+        <span :if={assigns[:current_project]} class="text-indigo-400">{@current_project.name}</span>
+        <span :if={assigns[:current_project]}> — </span>Manage tool sources and connections
+      </p>
     </div>
   </header>
 
