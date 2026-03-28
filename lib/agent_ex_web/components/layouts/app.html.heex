@@ -94,14 +94,16 @@
   <!-- Sidebar -->
   <aside class="hidden lg:flex lg:w-56 flex-col flex-shrink-0 bg-gray-900 border-r border-gray-800">
     <!-- Logo -->
-    <div class="flex items-center gap-2 h-14 px-3 lg:px-4 border-b border-gray-800">
-      <img src={~p"/images/logo-icon.svg"} alt="AgentEx" class="h-7 w-7 shrink-0 mx-auto lg:mx-0" />
-      <span class="hidden lg:inline font-semibold text-white text-sm truncate">AgentEx</span>
+    <div class="flex items-center gap-2.5 h-14 px-3 lg:px-4 border-b border-gray-800">
+      <img src={~p"/images/logo-icon.svg"} alt="AgentEx" class="h-8 w-8 shrink-0 mx-auto lg:mx-0" />
+      <span class="hidden lg:inline font-semibold text-white text-base truncate">AgentEx</span>
     </div>
 
     <!-- Project switcher -->
     <%= if assigns[:projects] do %>
-      <div class="flex items-center gap-1.5 px-3 py-2 border-b border-gray-800">
+      <div class="px-3 py-2 border-b border-gray-800 space-y-1.5">
+        <p class="px-1 text-[11px] font-medium text-gray-500 uppercase tracking-wider">Project</p>
+        <div class="flex items-center gap-1.5">
         <form method="post" action="/projects/switch/0" id="desktop-project-form" class="flex-1 min-w-0">
           <input type="hidden" name="_csrf_token" value={Phoenix.Controller.get_csrf_token()} />
           <select
@@ -121,6 +123,7 @@
             <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
           </svg>
         </.link>
+        </div>
       </div>
     <% end %>
 
