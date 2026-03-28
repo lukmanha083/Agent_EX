@@ -1555,6 +1555,61 @@ project card shows agent count, conversation count, and sandbox path.
 
 ## Phase 5b — Chat Orchestrator + REST API Tools + Agent-as-Tool
 
+### Context Engineering: How AgentConfig Feeds the LLM
+
+AgentConfig now stores structured identity, goals, constraints, tool guidance,
+and output format as separate fields (not crammed into a single system_prompt).
+`ContextBuilder` must compose these into the LLM's context window in this order:
+
+```text
+[System Message 1: Identity + Goal]
+  Built from: role, expertise, personality, goal, success_criteria
+  "You are {role}, an expert in {expertise}. Your goal: {goal}."
+
+[System Message 2: Constraints + Scope]
+  Built from: constraints, scope
+  "Rules:\n- {constraint_1}\n- {constraint_2}\nScope: {scope}"
+
+[System Message 3: Tool Guidance]
+  Built from: tool_guidance
+  "When to use tools:\n{tool_guidance}"
+
+[System Message 4: Knowledge] (RAG-retrieved, future)
+  From Tier 3 semantic search + KG retrieval
+
+[System Message 5: Memory] (existing ContextBuilder)
+  Tier 2 key-value facts + Tier 3 past outcomes + KG entities
+
+[System Message 6: Few-Shot Examples] (from tool_examples)
+  Formatted as user/assistant message pairs with tool calls
+
+[System Message 7: Output Format]
+  Built from: output_format
+  "Respond using this structure:\n{output_format}"
+
+[System Message 8: Additional Instructions]
+  Built from: system_prompt (free-form, appended last)
+
+[User Message: actual task]
+[... conversation history ...]
+```
+
+`AgentConfig.build_system_messages/1` composes messages 1-3, 7-8 from the struct
+fields. `ContextBuilder.build/3` adds messages 4-6 from the memory system.
+The chat orchestrator calls both and concatenates before the first LLM call.
+
+**Research backing:**
+- Few-shot tool examples improve Claude accuracy from 16% → 52% (LangChain 2024)
+- Persona/role assignment measurably improves reasoning (EMNLP 2024)
+- Structured identity (CrewAI: role/goal/backstory) outperforms blob system prompts
+- Tool guidance (when/how to use tools) reduces tool confusion errors
+- Dynamic instructions (OpenAI Agents SDK) allow runtime context injection
+
+**Form enforcement:** The agent editor UI uses separate form fields for each
+category (Identity, Goal, Constraints, Tool Guidance, Output Format) with
+section labels and placeholders. Users can't skip structuring their agent —
+the form guides them through each concern.
+
 ### Core Insight
 
 **Every agent is a tool. Every tool source is equal. The LLM reasons about
@@ -3653,6 +3708,8 @@ future reasoning.
    └─ Bridge reads token from ~/.agentex/token (not CLI arg)
    └─ Bridge reads policy from ~/.agentex/policy.json (if exists)
    └─ Connects to Phoenix Channel "bridge:{opaque_id}" over WSS
+   └─ Server sends sandbox config (root_path) on join
+   └─ Bridge auto-creates root_path directory via mkdir_p (no-op if exists)
    └─ Server binds token to machine fingerprint on first connect
 
 3. Agent needs to execute a tool
@@ -3784,9 +3841,11 @@ defmodule AgentEx.Bridge do
   end
 
   @impl true
-  def handle_join("bridge:" <> _id, %{"session_key" => key}, state) do
+  def handle_join("bridge:" <> _id, %{"session_key" => key, "sandbox" => sandbox}, state) do
+    # Auto-create sandbox root directory on user's machine if it doesn't exist
+    Executor.ensure_sandbox_dir(sandbox)
     IO.puts("[Bridge] Connected. Policy: #{Policy.summary(state.policy)}")
-    {:ok, %{state | session_key: key, reconnect_delay: @reconnect_base_ms}}
+    {:ok, %{state | session_key: key, sandbox: sandbox, reconnect_delay: @reconnect_base_ms}}
   end
 
   @impl true
@@ -4034,6 +4093,7 @@ end
 | D18 | Server-side result sanitization | Even after bridge scrubs, server re-sanitizes results. Scrubs XSS payloads before rendering in UI. Defense in depth — don't trust bridge output. |
 | D19 | Binary integrity via checksums | Download page shows SHA-256 checksum. Bridge verifies its own integrity on startup (embedded hash). Version check on connect — server warns if outdated. |
 | D20 | BEAM clustering for scale | Multiple AgentEx nodes share Registry via `:pg`. Bridge connects to any node; calls route cross-node. |
+| D20a | Auto-create sandbox root_path directory | Local mode: `Projects.ensure_root_path_dir/1` on project create/update. Bridge mode: `Executor.ensure_sandbox_dir/1` on first connection. `mkdir_p` is non-destructive (no-op if exists). User never has to manually create directories. |
 | D21 | Autonomous mode requires sandbox | UI validates: `execution_mode: :autonomous` cannot be saved without a `root_path`. Prevents accidental unrestricted autonomous agents. |
 | D22 | Budget as Gate 4 replacement | `max_iterations`, `max_wall_time_s`, `max_cost_usd` enforce autonomy boundaries. Agent stops gracefully when any limit is reached. |
 | D23 | Memory as reward signal | Tier 3 stores experiment outcomes, ContextBuilder injects them into next iteration. In-context RL — LLM improves via richer memory, not weight updates. |
@@ -4100,7 +4160,7 @@ Why BEAM/Elixir is uniquely suited for the bridge pattern:
 | Create | `lib/agent_ex_web/components/bridge_components.ex` | Status indicator, token display (show-once), download + checksum |
 | Create | `lib/agent_ex/bridge_app.ex` | Escript entry point: reads `~/.agentex/token`, enforces WSS |
 | Create | `lib/agent_ex/bridge/client.ex` | Bridge-side WebSocket client with backoff + jitter reconnect |
-| Create | `lib/agent_ex/bridge/executor.ex` | Bridge-side tool execution with local policy enforcement |
+| Create | `lib/agent_ex/bridge/executor.ex` | Bridge-side tool execution with local policy enforcement + auto-create sandbox root_path directory |
 | Create | `lib/agent_ex/bridge/policy.ex` | Parse + apply `~/.agentex/policy.json`, safe defaults |
 | Create | `lib/agent_ex/bridge/confirmation.ex` | TTY confirmation prompts for write operations |
 | Modify | `lib/agent_ex/application.ex` | Add Bridge.Registry to supervision tree |
@@ -4135,7 +4195,7 @@ Why BEAM/Elixir is uniquely suited for the bridge pattern:
 8-C: Bridge Client (User's Machine)
   │
   ├─ Bridge.Client (WSS connection, token from file, backoff reconnect)
-  ├─ Bridge.Executor (local execution with policy + sandbox)
+  ├─ Bridge.Executor (local execution with policy + sandbox + auto-create root_path dir)
   ├─ Bridge.Confirmation (TTY prompts for write operations)
   ├─ BridgeApp (entry point, WSS enforcement, version check)
   ├─ Burrito packaging (single binary, embedded integrity hash)

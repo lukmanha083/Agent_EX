@@ -217,31 +217,39 @@ defmodule AgentExWeb.AgentsLive do
     end)
   end
 
+  @form_fields ~w(name description role expertise personality goal success_criteria constraints scope tool_guidance output_format system_prompt provider model)
+
   defp empty_form do
-    %{
-      "name" => "",
-      "description" => "",
-      "system_prompt" => "You are a helpful AI assistant.",
-      "provider" => "openai",
-      "model" => "gpt-4o-mini"
-    }
+    Map.new(@form_fields, &{&1, ""})
+    |> Map.merge(%{"provider" => "openai", "model" => "gpt-4o-mini"})
   end
 
   defp agent_to_form(agent) do
-    %{
-      "name" => agent.name,
-      "description" => agent.description || "",
-      "system_prompt" => agent.system_prompt,
-      "provider" => agent.provider,
-      "model" => agent.model
-    }
+    string_fields = ~w(name description role personality goal success_criteria scope tool_guidance output_format system_prompt provider model)
+
+    base = Map.new(string_fields, fn f -> {f, Map.get(agent, String.to_existing_atom(f)) || ""} end)
+
+    Map.merge(base, %{
+      "expertise" => Enum.join(agent.expertise || [], ", "),
+      "constraints" => Enum.join(agent.constraints || [], "\n")
+    })
   end
 
   defp form_to_attrs(params, intervention_pipeline, sandbox) do
     %{
       name: String.trim(params["name"] || ""),
       description: blank_to_nil(params["description"]),
-      system_prompt: params["system_prompt"] || "You are a helpful AI assistant.",
+      role: blank_to_nil(params["role"]),
+      expertise: split_list(params["expertise"], ","),
+      personality: blank_to_nil(params["personality"]),
+      goal: blank_to_nil(params["goal"]),
+      success_criteria: blank_to_nil(params["success_criteria"]),
+      constraints: split_list(params["constraints"], "\n"),
+      scope: blank_to_nil(params["scope"]),
+      tool_guidance: blank_to_nil(params["tool_guidance"]),
+      tool_examples: [],
+      output_format: blank_to_nil(params["output_format"]),
+      system_prompt: blank_to_nil(params["system_prompt"]),
       provider: params["provider"] || "openai",
       model: params["model"] || default_model_for(params["provider"] || "openai"),
       tool_ids: [],
@@ -253,13 +261,22 @@ defmodule AgentExWeb.AgentsLive do
   defp merge_form_params(form, params, provider, provider_changed?) do
     model = if provider_changed?, do: default_model_for(provider), else: params["model"] || ""
 
-    Map.merge(form, %{
-      "name" => params["name"] || "",
-      "description" => params["description"] || "",
-      "system_prompt" => params["system_prompt"] || "",
-      "provider" => provider,
-      "model" => model
-    })
+    Enum.reduce(@form_fields, form, fn field, acc ->
+      value =
+        case field do
+          "provider" -> provider
+          "model" -> model
+          _ -> params[field] || ""
+        end
+
+      Map.put(acc, field, value)
+    end)
+  end
+
+  defp split_list(nil, _sep), do: []
+
+  defp split_list(str, sep) when is_binary(str) do
+    str |> String.split(sep, trim: true) |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
   end
 
   defp model_select_options(provider) do

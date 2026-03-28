@@ -48,7 +48,8 @@ defmodule AgentExWeb.AgentComponents do
           </div>
           <div>
             <h3 class="text-sm font-semibold text-white">{@agent.name}</h3>
-            <p class="text-xs text-gray-500">{@agent.provider}/{@agent.model}</p>
+            <p :if={@agent.role} class="text-[10px] text-indigo-400 truncate max-w-[150px]">{@agent.role}</p>
+            <p class="text-[10px] text-gray-500">{@agent.provider}/{@agent.model}</p>
           </div>
         </div>
         <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -126,15 +127,56 @@ defmodule AgentExWeb.AgentComponents do
           <div class="flex-1 overflow-y-auto p-6 space-y-4">
             <input :if={@agent} type="hidden" name="agent_id" value={@agent.id} />
 
-            <.input type="text" name="name" value={@form["name"]} label="Name" placeholder="e.g. Researcher" required />
-            <.input type="text" name="description" value={@form["description"]} label="Description" placeholder="Brief description of this agent's role" />
+            <%!-- Section: Identity --%>
+            <fieldset class="space-y-3">
+              <legend class="text-xs font-medium text-gray-500 uppercase tracking-wider">Identity</legend>
+              <.input type="text" name="name" value={@form["name"]} label="Name" placeholder="e.g. Security Auditor" required />
+              <.input type="text" name="role" value={@form["role"]} label="Role" placeholder="e.g. Senior security auditor specializing in web applications" />
+              <.input type="text" name="expertise" value={@form["expertise"]} label="Expertise" placeholder="e.g. OWASP Top 10, secure code review, threat modeling (comma-separated)" />
+              <.input type="text" name="personality" value={@form["personality"]} label="Communication Style" placeholder="e.g. methodical, cites evidence, errs on the side of caution" />
+              <.input type="text" name="description" value={@form["description"]} label="Description" placeholder="Brief summary shown on agent card" />
+            </fieldset>
 
-            <div class="grid grid-cols-2 gap-3">
-              <.input type="select" name="provider" value={@form["provider"]} label="Provider" options={@provider_options} />
-              <.input type="select" name="model" value={@form["model"]} label="Model" options={@model_options} />
-            </div>
+            <%!-- Section: Goal --%>
+            <fieldset class="space-y-3 border-t border-gray-800 pt-4">
+              <legend class="text-xs font-medium text-gray-500 uppercase tracking-wider">Goal</legend>
+              <.input type="textarea" name="goal" value={@form["goal"]} label="Primary Goal" placeholder="e.g. Identify security vulnerabilities in code changes before they reach production" class="min-h-[60px]" />
+              <.input type="text" name="success_criteria" value={@form["success_criteria"]} label="Success Criteria" placeholder="e.g. All critical findings have remediation steps, zero false negatives on OWASP Top 10" />
+            </fieldset>
 
-            <.input type="textarea" name="system_prompt" value={@form["system_prompt"]} label="System Prompt" placeholder="You are a helpful AI assistant." />
+            <%!-- Section: Constraints --%>
+            <fieldset class="space-y-3 border-t border-gray-800 pt-4">
+              <legend class="text-xs font-medium text-gray-500 uppercase tracking-wider">Constraints</legend>
+              <.input type="textarea" name="constraints" value={@form["constraints"]} label="Constraints" placeholder="e.g. Never execute code directly — only analyze and report&#10;Flag uncertainty explicitly rather than guessing (one per line)" class="min-h-[60px]" />
+              <.input type="text" name="scope" value={@form["scope"]} label="Scope" placeholder="e.g. Only review files changed in the current PR" />
+            </fieldset>
+
+            <%!-- Section: Tool Guidance --%>
+            <fieldset class="space-y-3 border-t border-gray-800 pt-4">
+              <legend class="text-xs font-medium text-gray-500 uppercase tracking-wider">Tool Guidance</legend>
+              <.input type="textarea" name="tool_guidance" value={@form["tool_guidance"]} label="Tool Usage Instructions" placeholder="e.g. Always use search_code before read_file to find relevant files.&#10;Run tests after any code change.&#10;Use save_memory to record important findings." class="min-h-[60px]" />
+            </fieldset>
+
+            <%!-- Section: Output Format --%>
+            <fieldset class="space-y-3 border-t border-gray-800 pt-4">
+              <legend class="text-xs font-medium text-gray-500 uppercase tracking-wider">Output Format</legend>
+              <.input type="textarea" name="output_format" value={@form["output_format"]} label="Response Template" placeholder="e.g. ## Findings&#10;...&#10;## Severity&#10;...&#10;## Remediation&#10;..." class="min-h-[60px]" />
+            </fieldset>
+
+            <%!-- Section: Additional Instructions --%>
+            <fieldset class="space-y-3 border-t border-gray-800 pt-4">
+              <legend class="text-xs font-medium text-gray-500 uppercase tracking-wider">Additional Instructions</legend>
+              <.input type="textarea" name="system_prompt" value={@form["system_prompt"]} label="System Prompt" placeholder="Any additional free-form instructions not covered above" class="min-h-[60px]" />
+            </fieldset>
+
+            <%!-- Section: Provider/Model --%>
+            <fieldset class="border-t border-gray-800 pt-4">
+              <legend class="text-xs font-medium text-gray-500 uppercase tracking-wider">Model</legend>
+              <div class="grid grid-cols-2 gap-3 mt-3">
+                <.input type="select" name="provider" value={@form["provider"]} label="Provider" options={@provider_options} />
+                <.input type="select" name="model" value={@form["model"]} label="Model" options={@model_options} />
+              </div>
+            </fieldset>
 
             <%!-- Sandbox boundary section --%>
             <div class="border-t border-gray-800 pt-4">
