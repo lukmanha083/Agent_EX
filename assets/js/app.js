@@ -43,6 +43,17 @@ Hooks.TimezoneDetect = TimezoneDetect
 Hooks.SaladUI = SaladUILib.SaladUIHook
 Hooks.Sortable = Sortable
 
+// Clear input value after Enter key pushes the event
+Hooks.ClearOnEnter = {
+  mounted() {
+    this.el.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        requestAnimationFrame(() => { this.el.value = "" })
+      }
+    })
+  }
+}
+
 // Auto-scroll chat messages to bottom on update
 Hooks.ScrollBottom = {
   mounted() {

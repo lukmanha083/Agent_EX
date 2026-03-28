@@ -17,9 +17,30 @@ defmodule AgentEx.AgentConfig do
     model: "gpt-4o-mini",
     tool_ids: [],
     intervention_pipeline: [],
+    sandbox: %{},
+    execution_mode: :interactive,
+    budget: %{},
     inserted_at: nil,
     updated_at: nil
   ]
+
+  @type handler_entry :: %{
+          required(:id) => String.t(),
+          optional(:allowed_writes) => [String.t()]
+        }
+
+  @type sandbox :: %{
+          optional(:root_path) => String.t(),
+          optional(:disallowed_commands) => [String.t()]
+        }
+
+  @type execution_mode :: :interactive | :autonomous
+
+  @type budget :: %{
+          optional(:max_iterations) => pos_integer(),
+          optional(:max_wall_time_s) => pos_integer(),
+          optional(:max_cost_usd) => float()
+        }
 
   @type t :: %__MODULE__{
           id: String.t(),
@@ -30,7 +51,10 @@ defmodule AgentEx.AgentConfig do
           provider: String.t(),
           model: String.t(),
           tool_ids: [String.t()],
-          intervention_pipeline: [String.t()],
+          intervention_pipeline: [handler_entry()],
+          sandbox: sandbox(),
+          execution_mode: execution_mode(),
+          budget: budget(),
           inserted_at: DateTime.t() | nil,
           updated_at: DateTime.t() | nil
         }
@@ -40,7 +64,10 @@ defmodule AgentEx.AgentConfig do
     provider: "openai",
     model: "gpt-4o-mini",
     tool_ids: [],
-    intervention_pipeline: []
+    intervention_pipeline: [],
+    sandbox: %{},
+    execution_mode: :interactive,
+    budget: %{}
   }
 
   @doc "Create a new agent config with a generated ID and timestamps."
@@ -62,7 +89,7 @@ defmodule AgentEx.AgentConfig do
   @doc "Update an existing agent config, bumping the updated_at timestamp."
   def update(%__MODULE__{} = config, attrs) when is_map(attrs) do
     config
-    |> Map.merge(Map.take(attrs, [:name, :description, :system_prompt, :provider, :model, :tool_ids, :intervention_pipeline]))
+    |> Map.merge(Map.take(attrs, [:name, :description, :system_prompt, :provider, :model, :tool_ids, :intervention_pipeline, :sandbox, :execution_mode, :budget]))
     |> Map.put(:updated_at, DateTime.utc_now())
   end
 

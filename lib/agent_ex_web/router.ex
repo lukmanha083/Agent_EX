@@ -46,7 +46,7 @@ defmodule AgentExWeb.Router do
       live("/chat/:conversation_id", ChatLive, :show)
       live("/agents", AgentsLive, :index)
       live("/tools", ToolsLive, :index)
-      live("/interventions", InterventionBuilderLive, :index)
+
       live("/users/profile", UserLive.Profile, :edit)
       live("/users/profile/confirm-email/:token", UserLive.Profile, :confirm_email)
       live("/users/settings", UserLive.Settings, :edit)

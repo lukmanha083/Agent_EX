@@ -8,6 +8,7 @@ defmodule AgentExWeb.AgentComponents do
   use AgentExWeb, :html
 
   import AgentExWeb.CoreComponents, except: [button: 1]
+  import AgentExWeb.InterventionComponents
   import SaladUI.Button
 
   @doc "Renders a grid of agent cards with a 'New Agent' button."
@@ -87,6 +88,9 @@ defmodule AgentExWeb.AgentComponents do
         <.badge :if={@agent.intervention_pipeline != []} variant="outline" class="text-[10px]">
           {length(@agent.intervention_pipeline)} handlers
         </.badge>
+        <.badge :if={sandbox_configured?(@agent)} variant="outline" class="text-[10px] text-amber-400 border-amber-500/30">
+          sandboxed
+        </.badge>
       </div>
     </div>
     """
@@ -98,6 +102,8 @@ defmodule AgentExWeb.AgentComponents do
   attr :show, :boolean, default: false
   attr :provider_options, :list, required: true
   attr :model_options, :list, required: true
+  attr :intervention_pipeline, :list, default: []
+  attr :sandbox, :map, default: %{}
 
   def agent_editor_dialog(assigns) do
     ~H"""
@@ -105,30 +111,42 @@ defmodule AgentExWeb.AgentComponents do
       <!-- Backdrop -->
       <div class="fixed inset-0 bg-black/60" phx-click="close_editor"></div>
       <!-- Panel -->
-      <div class="relative z-10 w-full max-w-lg mx-4 rounded-lg border border-gray-800 bg-gray-900 p-6 shadow-xl">
-        <div class="mb-4">
+      <div class="relative z-10 w-full max-w-lg mx-4 max-h-[90vh] rounded-lg border border-gray-800 bg-gray-900 shadow-xl flex flex-col">
+        <div class="p-6 pb-0 shrink-0">
           <h2 class="text-lg font-semibold text-white">
             {if @agent, do: "Edit Agent", else: "New Agent"}
           </h2>
           <p class="text-sm text-gray-400 mt-1">
-            Configure agent name, model, system prompt, and capabilities.
+            Configure agent identity, safety boundaries, and intervention pipeline.
           </p>
         </div>
 
-        <.form for={@form} phx-submit="save_agent" phx-change="validate_agent" class="space-y-4">
-          <input :if={@agent} type="hidden" name="agent_id" value={@agent.id} />
+        <.form for={@form} phx-submit="save_agent" phx-change="validate_agent" class="flex flex-col flex-1 min-h-0">
+          <div class="flex-1 overflow-y-auto p-6 space-y-4">
+            <input :if={@agent} type="hidden" name="agent_id" value={@agent.id} />
 
-          <.input type="text" name="name" value={@form["name"]} label="Name" placeholder="e.g. Researcher" required />
-          <.input type="text" name="description" value={@form["description"]} label="Description" placeholder="Brief description of this agent's role" />
+            <.input type="text" name="name" value={@form["name"]} label="Name" placeholder="e.g. Researcher" required />
+            <.input type="text" name="description" value={@form["description"]} label="Description" placeholder="Brief description of this agent's role" />
 
-          <div class="grid grid-cols-2 gap-3">
-            <.input type="select" name="provider" value={@form["provider"]} label="Provider" options={@provider_options} />
-            <.input type="select" name="model" value={@form["model"]} label="Model" options={@model_options} />
+            <div class="grid grid-cols-2 gap-3">
+              <.input type="select" name="provider" value={@form["provider"]} label="Provider" options={@provider_options} />
+              <.input type="select" name="model" value={@form["model"]} label="Model" options={@model_options} />
+            </div>
+
+            <.input type="textarea" name="system_prompt" value={@form["system_prompt"]} label="System Prompt" placeholder="You are a helpful AI assistant." />
+
+            <%!-- Sandbox boundary section --%>
+            <div class="border-t border-gray-800 pt-4">
+              <.sandbox_section sandbox={@sandbox} />
+            </div>
+
+            <%!-- Intervention pipeline section --%>
+            <div class="border-t border-gray-800 pt-4">
+              <.intervention_section pipeline={@intervention_pipeline} />
+            </div>
           </div>
 
-          <.input type="textarea" name="system_prompt" value={@form["system_prompt"]} label="System Prompt" placeholder="You are a helpful AI assistant." />
-
-          <div class="flex justify-end gap-2 pt-2">
+          <div class="flex justify-end gap-2 p-6 pt-4 border-t border-gray-800 shrink-0">
             <.button type="button" variant="outline" phx-click="close_editor" class="border-gray-700 text-gray-300 hover:bg-gray-800">
               Cancel
             </.button>
@@ -142,4 +160,9 @@ defmodule AgentExWeb.AgentComponents do
     """
   end
 
+  defp sandbox_configured?(%{sandbox: sandbox}) when is_map(sandbox) do
+    (sandbox["root_path"] || "") != "" or (sandbox["disallowed_commands"] || []) != []
+  end
+
+  defp sandbox_configured?(_), do: false
 end

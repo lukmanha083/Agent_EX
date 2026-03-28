@@ -19,11 +19,15 @@ defmodule AgentExWeb.AgentsLive do
        editing: nil,
        show_editor: false,
        form: empty_form(),
+       intervention_pipeline: [],
+       sandbox: %{},
        selected_provider: default_provider,
        provider_options: provider_options(),
        model_options: model_select_options(default_provider)
      )}
   end
+
+  # -- Agent CRUD events --
 
   @impl true
   def handle_event("new_agent", _params, socket) do
@@ -34,6 +38,8 @@ defmodule AgentExWeb.AgentsLive do
        editing: nil,
        show_editor: true,
        form: empty_form(),
+       intervention_pipeline: [],
+       sandbox: %{},
        selected_provider: default_provider,
        model_options: model_select_options(default_provider)
      )}
@@ -49,6 +55,8 @@ defmodule AgentExWeb.AgentsLive do
            editing: agent,
            show_editor: true,
            form: agent_to_form(agent),
+           intervention_pipeline: agent.intervention_pipeline || [],
+           sandbox: agent.sandbox || %{},
            selected_provider: agent.provider,
            model_options: model_select_options(agent.provider)
          )}
@@ -84,11 +92,14 @@ defmodule AgentExWeb.AgentsLive do
   def handle_event("save_agent", params, socket) do
     user = socket.assigns.current_scope.user
 
+    attrs =
+      form_to_attrs(params, socket.assigns.intervention_pipeline, socket.assigns.sandbox)
+
     config =
       if socket.assigns.editing do
-        AgentConfig.update(socket.assigns.editing, form_to_attrs(params))
+        AgentConfig.update(socket.assigns.editing, attrs)
       else
-        AgentConfig.new(Map.put(form_to_attrs(params), :user_id, user.id))
+        AgentConfig.new(Map.put(attrs, :user_id, user.id))
       end
 
     case AgentStore.save(config) do
@@ -112,6 +123,100 @@ defmodule AgentExWeb.AgentsLive do
     {:noreply, assign(socket, agents: agents)}
   end
 
+  # -- Intervention pipeline events --
+
+  def handle_event("add_handler", %{"id" => id}, socket) do
+    pipeline = socket.assigns.intervention_pipeline
+
+    if Enum.any?(pipeline, &(&1["id"] == id)) do
+      {:noreply, socket}
+    else
+      {:noreply, assign(socket, intervention_pipeline: pipeline ++ [%{"id" => id}])}
+    end
+  end
+
+  def handle_event("remove_handler", %{"id" => id}, socket) do
+    pipeline = Enum.reject(socket.assigns.intervention_pipeline, &(&1["id"] == id))
+    {:noreply, assign(socket, intervention_pipeline: pipeline)}
+  end
+
+  def handle_event("reorder_pipeline", %{"ids" => ids}, socket) do
+    old = socket.assigns.intervention_pipeline
+    lookup = Map.new(old, &{&1["id"], &1})
+    reordered = Enum.map(ids, &(lookup[&1] || %{"id" => &1}))
+    {:noreply, assign(socket, intervention_pipeline: reordered)}
+  end
+
+  # -- WriteGateHandler allowlist events --
+
+  def handle_event("add_allowed_write", %{"value" => raw}, socket) do
+    tools =
+      raw
+      |> String.split([",", " "], trim: true)
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+
+    if tools == [] do
+      {:noreply, socket}
+    else
+      pipeline = update_write_gate(socket.assigns.intervention_pipeline, fn current ->
+        Enum.uniq(current ++ tools)
+      end)
+
+      {:noreply, assign(socket, intervention_pipeline: pipeline)}
+    end
+  end
+
+  def handle_event("remove_allowed_write", %{"tool" => tool}, socket) do
+    pipeline = update_write_gate(socket.assigns.intervention_pipeline, fn current ->
+      Enum.reject(current, &(&1 == tool))
+    end)
+
+    {:noreply, assign(socket, intervention_pipeline: pipeline)}
+  end
+
+  # -- Sandbox events --
+
+  def handle_event("update_sandbox_root", %{"value" => path}, socket) do
+    sandbox = Map.put(socket.assigns.sandbox, "root_path", String.trim(path))
+    {:noreply, assign(socket, sandbox: sandbox)}
+  end
+
+  def handle_event("add_disallowed_command", %{"value" => raw}, socket) do
+    cmds =
+      raw
+      |> String.split([",", " "], trim: true)
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+
+    if cmds == [] do
+      {:noreply, socket}
+    else
+      current = socket.assigns.sandbox["disallowed_commands"] || []
+      sandbox = Map.put(socket.assigns.sandbox, "disallowed_commands", Enum.uniq(current ++ cmds))
+      {:noreply, assign(socket, sandbox: sandbox)}
+    end
+  end
+
+  def handle_event("remove_disallowed_command", %{"cmd" => cmd}, socket) do
+    current = socket.assigns.sandbox["disallowed_commands"] || []
+    sandbox = Map.put(socket.assigns.sandbox, "disallowed_commands", Enum.reject(current, &(&1 == cmd)))
+    {:noreply, assign(socket, sandbox: sandbox)}
+  end
+
+  # -- Private helpers --
+
+  defp update_write_gate(pipeline, update_fn) do
+    Enum.map(pipeline, fn
+      %{"id" => "write_gate_handler"} = entry ->
+        current = entry["allowed_writes"] || []
+        Map.put(entry, "allowed_writes", update_fn.(current))
+
+      other ->
+        other
+    end)
+  end
+
   defp empty_form do
     %{
       "name" => "",
@@ -132,7 +237,7 @@ defmodule AgentExWeb.AgentsLive do
     }
   end
 
-  defp form_to_attrs(params) do
+  defp form_to_attrs(params, intervention_pipeline, sandbox) do
     %{
       name: String.trim(params["name"] || ""),
       description: blank_to_nil(params["description"]),
@@ -140,7 +245,8 @@ defmodule AgentExWeb.AgentsLive do
       provider: params["provider"] || "openai",
       model: params["model"] || default_model_for(params["provider"] || "openai"),
       tool_ids: [],
-      intervention_pipeline: []
+      intervention_pipeline: intervention_pipeline,
+      sandbox: sandbox
     }
   end
 
