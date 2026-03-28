@@ -1,7 +1,7 @@
 defmodule AgentExWeb.AgentsLive do
   use AgentExWeb, :live_view
 
-  alias AgentEx.{AgentConfig, AgentStore, Projects}
+  alias AgentEx.{AgentConfig, AgentStore}
 
   import AgentExWeb.AgentComponents
   import AgentExWeb.ProviderHelpers,
@@ -10,7 +10,7 @@ defmodule AgentExWeb.AgentsLive do
   @impl true
   def mount(_params, _session, socket) do
     user = socket.assigns.current_scope.user
-    {:ok, project} = Projects.ensure_default_project(user.id)
+    project = socket.assigns.current_project
     agents = AgentStore.list(user.id, project.id)
     default_provider = "openai"
 

@@ -1,7 +1,7 @@
 defmodule AgentExWeb.ChatLive do
   use AgentExWeb, :live_view
 
-  alias AgentEx.{AgentStore, Chat, EventLoop, Memory, Projects}
+  alias AgentEx.{AgentStore, Chat, EventLoop, Memory}
   alias AgentEx.EventLoop.Event
 
   import AgentExWeb.ChatComponents
@@ -15,7 +15,7 @@ defmodule AgentExWeb.ChatLive do
   @impl true
   def mount(_params, _session, socket) do
     user = socket.assigns.current_scope.user
-    {:ok, project} = Projects.ensure_default_project(user.id)
+    project = socket.assigns.current_project
 
     agents = AgentStore.list(user.id, project.id)
     active_agent = List.first(agents)

@@ -242,7 +242,7 @@ defmodule AgentExWeb.UserAuth do
     socket = mount_current_scope(socket, session)
 
     if socket.assigns.current_scope && socket.assigns.current_scope.user do
-      {:cont, socket}
+      {:cont, mount_current_project(socket)}
     else
       socket =
         socket
@@ -276,6 +276,19 @@ defmodule AgentExWeb.UserAuth do
         end || {nil, nil}
 
       Scope.for_user(user)
+    end)
+  end
+
+  defp mount_current_project(socket) do
+    user = socket.assigns.current_scope.user
+
+    socket
+    |> Phoenix.Component.assign_new(:current_project, fn ->
+      {:ok, project} = AgentEx.Projects.ensure_default_project(user.id)
+      project
+    end)
+    |> Phoenix.Component.assign_new(:projects, fn ->
+      AgentEx.Projects.list_projects(user.id)
     end)
   end
 
