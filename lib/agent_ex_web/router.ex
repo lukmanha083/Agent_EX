@@ -54,6 +54,7 @@ defmodule AgentExWeb.Router do
     end
 
     post("/users/update-password", UserSessionController, :update_password)
+    post("/projects/switch/:id", ProjectController, :switch)
   end
 
   scope "/", AgentExWeb do
