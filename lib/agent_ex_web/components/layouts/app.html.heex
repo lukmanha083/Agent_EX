@@ -15,9 +15,9 @@
             <img src={~p"/images/logo-icon.svg"} alt="AgentEx" class="h-7 w-7" />
             <span class="font-semibold text-white text-sm">AgentEx</span>
           </div>
-          <%= if assigns[:projects] && length(@projects) > 1 do %>
-            <div class="px-3 pt-3 pb-1">
-              <form method="post" action="/projects/switch/0" id="mobile-project-form">
+          <%= if assigns[:projects] do %>
+            <div class="flex items-center gap-1.5 px-3 pt-3 pb-1">
+              <form method="post" action="/projects/switch/0" id="mobile-project-form" class="flex-1 min-w-0">
                 <input type="hidden" name="_csrf_token" value={Phoenix.Controller.get_csrf_token()} />
                 <select
                   name="id"
@@ -31,6 +31,11 @@
                   <% end %>
                 </select>
               </form>
+              <.link navigate={~p"/projects"} class="flex items-center justify-center w-8 h-8 rounded-md text-gray-400 hover:bg-gray-800 hover:text-white transition-colors shrink-0" aria-label="Manage projects">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4">
+                  <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
+                </svg>
+              </.link>
             </div>
           <% end %>
           <nav class="flex-1 px-3 py-4 space-y-1">
@@ -43,15 +48,6 @@
                 <path d="M3.505 2.365A41.369 41.369 0 0 1 9 2c1.863 0 3.697.124 5.495.365 1.247.167 2.18 1.108 2.435 2.268a4.45 4.45 0 0 0-.577-.069 43.36 43.36 0 0 0-4.353 0C9.168 4.749 7 6.733 7 9.035c0 1.358.635 2.565 1.625 3.346-.463.305-.96.559-1.484.756-1.077.405-1.916-.265-1.916-1.378V10.5c0-.235.007-.467.022-.696A4.998 4.998 0 0 1 2 5.869V5.75c0-1.505.923-2.97 2.17-3.29a.228.228 0 0 0-.165-.035ZM12 8.217a33.36 33.36 0 0 0-3.397.166c-1.04.152-1.853 1.03-1.853 2.163v1.01c0 1.133.813 2.01 1.853 2.163A33.36 33.36 0 0 0 12 13.885a33.36 33.36 0 0 0 3.397-.166c1.04-.152 1.853-1.03 1.853-2.163v-1.01c0-1.133-.813-2.01-1.853-2.163A33.36 33.36 0 0 0 12 8.217Z" />
               </svg>
               Chat
-            </.link>
-            <.link navigate={~p"/projects"} class={[
-              "flex items-center gap-3 px-2 py-2 text-sm rounded-md transition-colors",
-              nav_active?(@socket, AgentExWeb.ProjectsLive) && "bg-gray-800 text-white font-medium" || "text-gray-400 hover:bg-gray-800/50 hover:text-gray-200"
-            ]}>
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4 shrink-0">
-                <path d="M3.75 3A1.75 1.75 0 0 0 2 4.75v3.26a3.235 3.235 0 0 1 1.75-.51h12.5c.644 0 1.245.188 1.75.51V6.75A1.75 1.75 0 0 0 16.25 5h-4.836a.25.25 0 0 1-.177-.073L9.823 3.513A1.75 1.75 0 0 0 8.586 3H3.75ZM3.75 9A1.75 1.75 0 0 0 2 10.75v4.5c0 .966.784 1.75 1.75 1.75h12.5A1.75 1.75 0 0 0 18 15.25v-4.5A1.75 1.75 0 0 0 16.25 9H3.75Z" />
-              </svg>
-              Projects
             </.link>
             <.link navigate={~p"/agents"} class={[
               "flex items-center gap-3 px-2 py-2 text-sm rounded-md transition-colors",
@@ -104,9 +100,9 @@
     </div>
 
     <!-- Project switcher -->
-    <%= if assigns[:projects] && length(@projects) > 1 do %>
-      <div class="px-3 py-2 border-b border-gray-800">
-        <form method="post" action="/projects/switch/0" id="desktop-project-form">
+    <%= if assigns[:projects] do %>
+      <div class="flex items-center gap-1.5 px-3 py-2 border-b border-gray-800">
+        <form method="post" action="/projects/switch/0" id="desktop-project-form" class="flex-1 min-w-0">
           <input type="hidden" name="_csrf_token" value={Phoenix.Controller.get_csrf_token()} />
           <select
             name="id"
@@ -120,6 +116,11 @@
             <% end %>
           </select>
         </form>
+        <.link navigate={~p"/projects"} class="flex items-center justify-center w-8 h-8 rounded-md text-gray-400 hover:bg-gray-800 hover:text-white transition-colors shrink-0" aria-label="Manage projects">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4">
+            <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
+          </svg>
+        </.link>
       </div>
     <% end %>
 
@@ -134,15 +135,6 @@
           <path d="M3.505 2.365A41.369 41.369 0 0 1 9 2c1.863 0 3.697.124 5.495.365 1.247.167 2.18 1.108 2.435 2.268a4.45 4.45 0 0 0-.577-.069 43.36 43.36 0 0 0-4.353 0C9.168 4.749 7 6.733 7 9.035c0 1.358.635 2.565 1.625 3.346-.463.305-.96.559-1.484.756-1.077.405-1.916-.265-1.916-1.378V10.5c0-.235.007-.467.022-.696A4.998 4.998 0 0 1 2 5.869V5.75c0-1.505.923-2.97 2.17-3.29a.228.228 0 0 0-.165-.035ZM12 8.217a33.36 33.36 0 0 0-3.397.166c-1.04.152-1.853 1.03-1.853 2.163v1.01c0 1.133.813 2.01 1.853 2.163A33.36 33.36 0 0 0 12 13.885a33.36 33.36 0 0 0 3.397-.166c1.04-.152 1.853-1.03 1.853-2.163v-1.01c0-1.133-.813-2.01-1.853-2.163A33.36 33.36 0 0 0 12 8.217Z" />
         </svg>
         <span class="text-sm">Chat</span>
-      </.link>
-      <.link navigate={~p"/projects"} class={[
-        "flex items-center gap-3 px-2 py-2 rounded-md transition-colors",
-        nav_active?(@socket, AgentExWeb.ProjectsLive) && "bg-gray-800 text-white font-medium" || "text-gray-400 hover:bg-gray-800/50 hover:text-gray-200"
-      ]}>
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4 shrink-0">
-          <path d="M3.75 3A1.75 1.75 0 0 0 2 4.75v3.26a3.235 3.235 0 0 1 1.75-.51h12.5c.644 0 1.245.188 1.75.51V6.75A1.75 1.75 0 0 0 16.25 5h-4.836a.25.25 0 0 1-.177-.073L9.823 3.513A1.75 1.75 0 0 0 8.586 3H3.75ZM3.75 9A1.75 1.75 0 0 0 2 10.75v4.5c0 .966.784 1.75 1.75 1.75h12.5A1.75 1.75 0 0 0 18 15.25v-4.5A1.75 1.75 0 0 0 16.25 9H3.75Z" />
-        </svg>
-        <span class="text-sm">Projects</span>
       </.link>
       <.link navigate={~p"/agents"} class={[
         "flex items-center gap-3 px-2 py-2 rounded-md transition-colors",
