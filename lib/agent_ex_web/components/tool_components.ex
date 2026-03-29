@@ -146,7 +146,8 @@ defmodule AgentExWeb.ToolComponents do
       <% else %>
         <.tool_source_card
           :for={server <- @servers}
-          name={server.name}
+          name={server[:id] || server.name}
+          display_name={server.name}
           description={"#{server.transport} transport"}
           version=""
           tool_count={server.tool_count}
@@ -194,6 +195,7 @@ defmodule AgentExWeb.ToolComponents do
 
   @doc "Renders a tool source card (plugin, MCP server, etc.)."
   attr(:name, :string, required: true)
+  attr(:display_name, :string, default: nil)
   attr(:description, :string, default: "")
   attr(:version, :string, default: "")
   attr(:tool_count, :integer, default: 0)
@@ -212,7 +214,7 @@ defmodule AgentExWeb.ToolComponents do
         </div>
         <div>
           <div class="flex items-center gap-2">
-            <span class="text-sm font-medium text-white">{@name}</span>
+            <span class="text-sm font-medium text-white">{@display_name || @name}</span>
             <span :if={@version != ""} class="text-[10px] text-gray-500">{@version}</span>
           </div>
           <p :if={@description != ""} class="text-xs text-gray-400">{@description}</p>

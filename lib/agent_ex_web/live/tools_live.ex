@@ -38,6 +38,7 @@ defmodule AgentExWeb.ToolsLive do
       {:noreply, put_flash(socket, :error, "Name and command are required")}
     else
       server = %{
+        id: Base.url_encode64(:crypto.strong_rand_bytes(8), padding: false),
         name: name,
         transport: transport,
         command: command,
@@ -89,7 +90,7 @@ defmodule AgentExWeb.ToolsLive do
   defp update_mcp_attached(socket, "mcp", name, value) do
     servers =
       Enum.map(socket.assigns.mcp_servers, fn s ->
-        if s.name == name, do: Map.put(s, :attached, value), else: s
+        if s.id == name or s.name == name, do: Map.put(s, :attached, value), else: s
       end)
 
     assign(socket, mcp_servers: servers)
