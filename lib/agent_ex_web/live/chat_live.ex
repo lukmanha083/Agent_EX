@@ -158,7 +158,8 @@ defmodule AgentExWeb.ChatLive do
   end
 
   def handle_info({:title_updated, conversation_id, title}, socket) do
-    conversations = Chat.list_conversations(socket.assigns.current_scope.user.id, socket.assigns.project.id)
+    conversations =
+      Chat.list_conversations(socket.assigns.current_scope.user.id, socket.assigns.project.id)
 
     conversation =
       if socket.assigns.conversation && socket.assigns.conversation.id == conversation_id do
@@ -253,7 +254,8 @@ defmodule AgentExWeb.ChatLive do
        thinking: false,
        stages: [],
        run_id: nil,
-       conversations: Chat.list_conversations(socket.assigns.current_scope.user.id, socket.assigns.project.id)
+       conversations:
+         Chat.list_conversations(socket.assigns.current_scope.user.id, socket.assigns.project.id)
      )}
   end
 

@@ -38,7 +38,7 @@ defmodule AgentExWeb.InterventionComponents do
   def handler_meta(id), do: Enum.find(@available_handlers, &(&1.id == id))
 
   @doc "Intervention pipeline section embedded in the agent editor."
-  attr :pipeline, :list, default: []
+  attr(:pipeline, :list, default: [])
 
   def intervention_section(assigns) do
     active_ids = MapSet.new(assigns.pipeline, & &1["id"])
@@ -115,8 +115,8 @@ defmodule AgentExWeb.InterventionComponents do
   end
 
   @doc "Sandbox boundary section embedded in the agent editor."
-  attr :sandbox, :map, default: %{}
-  attr :project_root_path, :string, default: nil
+  attr(:sandbox, :map, default: %{})
+  attr(:project_root_path, :string, default: nil)
 
   def sandbox_section(assigns) do
     assigns =
@@ -200,9 +200,9 @@ defmodule AgentExWeb.InterventionComponents do
     """
   end
 
-  attr :handler, :map, required: true
-  attr :index, :integer, required: true
-  attr :active, :boolean, required: true
+  attr(:handler, :map, required: true)
+  attr(:index, :integer, required: true)
+  attr(:active, :boolean, required: true)
 
   defp pipeline_handler_card(assigns) do
     ~H"""
@@ -265,7 +265,7 @@ defmodule AgentExWeb.InterventionComponents do
     """
   end
 
-  attr :allowed_writes, :list, required: true
+  attr(:allowed_writes, :list, required: true)
 
   defp write_gate_config(assigns) do
     ~H"""

@@ -12,7 +12,7 @@ defmodule AgentExWeb.AgentComponents do
   import SaladUI.Button
 
   @doc "Renders a grid of agent cards with a 'New Agent' button."
-  attr :agents, :list, required: true
+  attr(:agents, :list, required: true)
 
   def agent_grid(assigns) do
     ~H"""
@@ -34,7 +34,7 @@ defmodule AgentExWeb.AgentComponents do
   end
 
   @doc "Renders a single agent card."
-  attr :agent, :map, required: true
+  attr(:agent, :map, required: true)
 
   def agent_card(assigns) do
     ~H"""
@@ -98,14 +98,14 @@ defmodule AgentExWeb.AgentComponents do
   end
 
   @doc "Renders the agent editor dialog."
-  attr :agent, :map, default: nil
-  attr :form, :map, required: true
-  attr :show, :boolean, default: false
-  attr :provider_options, :list, required: true
-  attr :model_options, :list, required: true
-  attr :intervention_pipeline, :list, default: []
-  attr :sandbox, :map, default: %{}
-  attr :project_root_path, :string, default: nil
+  attr(:agent, :map, default: nil)
+  attr(:form, :map, required: true)
+  attr(:show, :boolean, default: false)
+  attr(:provider_options, :list, required: true)
+  attr(:model_options, :list, required: true)
+  attr(:intervention_pipeline, :list, default: [])
+  attr(:sandbox, :map, default: %{})
+  attr(:project_root_path, :string, default: nil)
 
   def agent_editor_dialog(assigns) do
     ~H"""

@@ -9,7 +9,7 @@ defmodule AgentExWeb.ProjectComponents do
   import SaladUI.Button
 
   @doc "Renders a grid of project cards with a 'New Project' button."
-  attr :projects, :list, required: true
+  attr(:projects, :list, required: true)
 
   def project_grid(assigns) do
     ~H"""
@@ -31,7 +31,7 @@ defmodule AgentExWeb.ProjectComponents do
   end
 
   @doc "Renders a single project card."
-  attr :project, :map, required: true
+  attr(:project, :map, required: true)
 
   def project_card(assigns) do
     ~H"""
@@ -88,9 +88,9 @@ defmodule AgentExWeb.ProjectComponents do
   end
 
   @doc "Renders the project editor dialog."
-  attr :project, :map, default: nil
-  attr :form, :map, required: true
-  attr :show, :boolean, default: false
+  attr(:project, :map, default: nil)
+  attr(:form, :map, required: true)
+  attr(:show, :boolean, default: false)
 
   def project_editor_dialog(assigns) do
     ~H"""
@@ -129,8 +129,8 @@ defmodule AgentExWeb.ProjectComponents do
   end
 
   @doc "Sidebar project switcher — only shown when user has multiple projects."
-  attr :projects, :list, required: true
-  attr :current_project, :map, required: true
+  attr(:projects, :list, required: true)
+  attr(:current_project, :map, required: true)
 
   def project_switcher(assigns) do
     ~H"""

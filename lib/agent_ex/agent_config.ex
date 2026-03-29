@@ -110,11 +110,27 @@ defmodule AgentEx.AgentConfig do
         }
 
   @updatable_fields [
-    :name, :description, :role, :expertise, :personality,
-    :goal, :success_criteria, :constraints, :scope,
-    :tool_ids, :tool_guidance, :tool_examples, :output_format,
-    :system_prompt, :provider, :model,
-    :intervention_pipeline, :sandbox, :execution_mode, :budget, :project_id
+    :name,
+    :description,
+    :role,
+    :expertise,
+    :personality,
+    :goal,
+    :success_criteria,
+    :constraints,
+    :scope,
+    :tool_ids,
+    :tool_guidance,
+    :tool_examples,
+    :output_format,
+    :system_prompt,
+    :provider,
+    :model,
+    :intervention_pipeline,
+    :sandbox,
+    :execution_mode,
+    :budget,
+    :project_id
   ]
 
   @defaults %{

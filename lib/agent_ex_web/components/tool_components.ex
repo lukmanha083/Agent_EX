@@ -13,11 +13,11 @@ defmodule AgentExWeb.ToolComponents do
   # --- Tool source tabs ---
 
   @doc "Renders the tabbed tool management panel."
-  attr :active_tab, :string, default: "builtin"
-  attr :builtin_plugins, :list, default: []
-  attr :available_plugins, :list, default: []
-  attr :mcp_servers, :list, default: []
-  attr :custom_tools, :list, default: []
+  attr(:active_tab, :string, default: "builtin")
+  attr(:builtin_plugins, :list, default: [])
+  attr(:available_plugins, :list, default: [])
+  attr(:mcp_servers, :list, default: [])
+  attr(:custom_tools, :list, default: [])
 
   def tool_tabs(assigns) do
     ~H"""
@@ -58,7 +58,7 @@ defmodule AgentExWeb.ToolComponents do
 
   # --- Built-in tools (FileSystem, ShellExec) ---
 
-  attr :plugins, :list, default: []
+  attr(:plugins, :list, default: [])
 
   defp builtin_tools_panel(assigns) do
     ~H"""
@@ -85,7 +85,7 @@ defmodule AgentExWeb.ToolComponents do
 
   # --- Plugin browser ---
 
-  attr :plugins, :list, default: []
+  attr(:plugins, :list, default: [])
 
   defp plugin_browser(assigns) do
     ~H"""
@@ -119,7 +119,7 @@ defmodule AgentExWeb.ToolComponents do
 
   # --- MCP servers ---
 
-  attr :servers, :list, default: []
+  attr(:servers, :list, default: [])
 
   defp mcp_panel(assigns) do
     ~H"""
@@ -157,7 +157,7 @@ defmodule AgentExWeb.ToolComponents do
 
   # --- Custom tools ---
 
-  attr :tools, :list, default: []
+  attr(:tools, :list, default: [])
 
   defp custom_tools_panel(assigns) do
     ~H"""
@@ -190,12 +190,12 @@ defmodule AgentExWeb.ToolComponents do
   # --- Shared components ---
 
   @doc "Renders a tool source card (plugin, MCP server, etc.)."
-  attr :name, :string, required: true
-  attr :description, :string, default: ""
-  attr :version, :string, default: ""
-  attr :tool_count, :integer, default: 0
-  attr :source, :string, default: "plugin"
-  attr :attached, :boolean, default: false
+  attr(:name, :string, required: true)
+  attr(:description, :string, default: "")
+  attr(:version, :string, default: "")
+  attr(:tool_count, :integer, default: 0)
+  attr(:source, :string, default: "plugin")
+  attr(:attached, :boolean, default: false)
 
   def tool_source_card(assigns) do
     ~H"""
@@ -245,7 +245,7 @@ defmodule AgentExWeb.ToolComponents do
   end
 
   @doc "Renders a single tool card."
-  attr :tool, :map, required: true
+  attr(:tool, :map, required: true)
 
   def tool_card(assigns) do
     ~H"""
@@ -262,8 +262,8 @@ defmodule AgentExWeb.ToolComponents do
   end
 
   @doc "MCP connection dialog."
-  attr :show, :boolean, default: false
-  attr :form, :map, default: %{}
+  attr(:show, :boolean, default: false)
+  attr(:form, :map, default: %{})
 
   def mcp_connect_dialog(assigns) do
     ~H"""
