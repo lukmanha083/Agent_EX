@@ -54,12 +54,12 @@ defmodule AgentExWeb.AgentComponents do
             <p class="text-[10px] text-gray-500">{@agent.provider}/{@agent.model}</p>
           </div>
         </div>
-        <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div class="flex gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-within:opacity-100 transition-opacity">
           <button
             type="button"
             phx-click="edit_agent"
             phx-value-id={@agent.id}
-            class="p-1.5 rounded-md text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
+            class="p-1.5 rounded-md text-gray-400 hover:text-white hover:bg-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 transition-colors"
             aria-label="Edit agent"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-3.5 h-3.5">
@@ -72,7 +72,7 @@ defmodule AgentExWeb.AgentComponents do
             phx-click="delete_agent"
             phx-value-id={@agent.id}
             data-confirm="Delete this agent?"
-            class="p-1.5 rounded-md text-gray-400 hover:text-red-400 hover:bg-gray-800 transition-colors"
+            class="p-1.5 rounded-md text-gray-400 hover:text-red-400 hover:bg-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 transition-colors"
             aria-label="Delete agent"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-3.5 h-3.5">
@@ -86,10 +86,10 @@ defmodule AgentExWeb.AgentComponents do
 
       <div class="mt-auto flex items-center gap-2 flex-wrap">
         <.badge variant="secondary" class="text-[10px]">
-          {length(@agent.tool_ids)} tools
+          {length(@agent.tool_ids || [])} tools
         </.badge>
-        <.badge :if={@agent.intervention_pipeline != []} variant="outline" class="text-[10px]">
-          {length(@agent.intervention_pipeline)} handlers
+        <.badge :if={(@agent.intervention_pipeline || []) != []} variant="outline" class="text-[10px]">
+          {length(@agent.intervention_pipeline || [])} handlers
         </.badge>
         <.badge :if={sandbox_configured?(@agent, @project_root_path)} variant="outline" class="text-[10px] text-amber-400 border-amber-500/30">
           sandboxed
@@ -111,7 +111,7 @@ defmodule AgentExWeb.AgentComponents do
 
   def agent_editor_dialog(assigns) do
     ~H"""
-    <div :if={@show} class="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true">
+    <div :if={@show} class="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true" phx-window-keydown="close_editor" phx-key="Escape">
       <!-- Backdrop -->
       <div class="fixed inset-0 bg-black/60" phx-click="close_editor"></div>
       <!-- Panel -->

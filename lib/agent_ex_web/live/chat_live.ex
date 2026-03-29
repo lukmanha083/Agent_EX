@@ -15,35 +15,42 @@ defmodule AgentExWeb.ChatLive do
   @impl true
   def mount(_params, _session, socket) do
     user = socket.assigns.current_scope.user
-    project = socket.assigns.current_project
+    project = socket.assigns[:current_project]
 
-    agents = AgentStore.list(user.id, project.id)
-    active_agent = List.first(agents)
+    if is_nil(project) do
+      {:ok,
+       socket
+       |> put_flash(:error, "No project available. Please create one first.")
+       |> redirect(to: ~p"/projects")}
+    else
+      agents = AgentStore.list(user.id, project.id)
+      active_agent = List.first(agents)
 
-    {provider, model, tools, system_prompt} = load_from_agent(active_agent, user)
-    conversations = Chat.list_conversations(user.id, project.id)
+      {provider, model, tools, system_prompt} = load_from_agent(active_agent, user)
+      conversations = Chat.list_conversations(user.id, project.id)
 
-    {:ok,
-     assign(socket,
-       messages: [],
-       events: [],
-       stages: [],
-       thinking: false,
-       run_id: nil,
-       input: "",
-       provider: provider,
-       model: model,
-       tools: tools,
-       system_prompt: system_prompt,
-       active_agent: active_agent,
-       agents: agents,
-       agent_id: project_agent_id(user, project),
-       project: project,
-       user_initials: AgentExWeb.Layouts.initials(user.username || user.email),
-       timezone: user.timezone || "Etc/UTC",
-       conversation: nil,
-       conversations: conversations
-     )}
+      {:ok,
+       assign(socket,
+         messages: [],
+         events: [],
+         stages: [],
+         thinking: false,
+         run_id: nil,
+         input: "",
+         provider: provider,
+         model: model,
+         tools: tools,
+         system_prompt: system_prompt,
+         active_agent: active_agent,
+         agents: agents,
+         agent_id: project_agent_id(user, project),
+         project: project,
+         user_initials: AgentExWeb.Layouts.initials(user.username || user.email),
+         timezone: user.timezone || "Etc/UTC",
+         conversation: nil,
+         conversations: conversations
+       )}
+    end
   end
 
   @impl true

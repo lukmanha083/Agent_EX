@@ -36,14 +36,10 @@ defmodule AgentEx.AgentStore do
 
   @doc "List all agent configs for a user within a project."
   def list(user_id, project_id) do
-    :ets.foldl(
-      fn
-        {{^user_id, ^project_id, _agent_id}, config}, acc -> [config | acc]
-        _, acc -> acc
-      end,
-      [],
-      :agent_configs
-    )
+    pattern = {{user_id, project_id, :_}, :"$1"}
+
+    :ets.match(:agent_configs, pattern)
+    |> List.flatten()
     |> Enum.sort_by(& &1.inserted_at, {:desc, DateTime})
   rescue
     ArgumentError -> []
@@ -142,10 +138,19 @@ defmodule AgentEx.AgentStore do
   defp sync(ets_table, dets_table) do
     :ets.foldl(
       fn {key, value}, acc ->
-        :dets.insert(dets_table, {key, value})
-        acc + 1
+        case :dets.insert(dets_table, {key, value}) do
+          :ok ->
+            acc
+
+          {:error, reason} ->
+            Logger.warning(
+              "AgentStore sync: DETS insert failed for #{inspect(key)}: #{inspect(reason)}"
+            )
+
+            acc
+        end
       end,
-      0,
+      :ok,
       ets_table
     )
 

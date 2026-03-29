@@ -6,7 +6,7 @@ defmodule AgentExWeb.ToolsLive do
   @impl true
   def mount(_params, _session, socket) do
     builtin = list_builtin_plugins()
-    attached = MapSet.new(builtin, & &1.name)
+    attached = MapSet.new(builtin, &{"built-in", &1.name})
 
     {:ok,
      assign(socket,
@@ -61,19 +61,36 @@ defmodule AgentExWeb.ToolsLive do
     {:noreply, put_flash(socket, :info, "Custom tool editor coming in a future update")}
   end
 
-  def handle_event("detach_source", %{"name" => name, "source" => _source}, socket) do
-    attached = MapSet.delete(socket.assigns.attached_sources, name)
+  def handle_event("detach_source", %{"name" => name, "source" => source}, socket) do
+    attached = MapSet.delete(socket.assigns.attached_sources, {source, name})
 
     {:noreply,
-     socket |> assign(attached_sources: attached) |> put_flash(:info, "Detached #{name}")}
+     socket
+     |> update_mcp_attached(source, name, false)
+     |> assign(attached_sources: attached)
+     |> put_flash(:info, "Detached #{name}")}
   end
 
-  def handle_event("attach_source", %{"name" => name, "source" => _source}, socket) do
-    attached = MapSet.put(socket.assigns.attached_sources, name)
+  def handle_event("attach_source", %{"name" => name, "source" => source}, socket) do
+    attached = MapSet.put(socket.assigns.attached_sources, {source, name})
 
     {:noreply,
-     socket |> assign(attached_sources: attached) |> put_flash(:info, "Attached #{name}")}
+     socket
+     |> update_mcp_attached(source, name, true)
+     |> assign(attached_sources: attached)
+     |> put_flash(:info, "Attached #{name}")}
   end
+
+  defp update_mcp_attached(socket, "mcp", name, value) do
+    servers =
+      Enum.map(socket.assigns.mcp_servers, fn s ->
+        if s.name == name, do: Map.put(s, :attached, value), else: s
+      end)
+
+    assign(socket, mcp_servers: servers)
+  end
+
+  defp update_mcp_attached(socket, _source, _name, _value), do: socket
 
   # --- Private helpers ---
 

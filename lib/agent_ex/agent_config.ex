@@ -193,15 +193,18 @@ defmodule AgentEx.AgentConfig do
     Enum.join(sections, "\n\n")
   end
 
-  defp build_identity(%{role: nil, personality: nil, expertise: []}), do: nil
+  defp build_identity(%{role: nil, personality: nil, expertise: expertise})
+       when expertise in [nil, []],
+       do: nil
 
   defp build_identity(config) do
+    expertise = config.expertise || []
     parts = []
     parts = if config.role, do: parts ++ ["You are #{config.role}."], else: parts
 
     parts =
-      if config.expertise != [] do
-        parts ++ ["Your expertise: #{Enum.join(config.expertise, ", ")}."]
+      if expertise != [] do
+        parts ++ ["Your expertise: #{Enum.join(expertise, ", ")}."]
       else
         parts
       end
@@ -231,14 +234,17 @@ defmodule AgentEx.AgentConfig do
     Enum.join(parts, "\n")
   end
 
-  defp build_constraints(%{constraints: [], scope: nil}), do: nil
+  defp build_constraints(%{constraints: constraints, scope: nil})
+       when constraints in [nil, []],
+       do: nil
 
   defp build_constraints(config) do
+    constraints = config.constraints || []
     parts = []
 
     parts =
-      if config.constraints != [] do
-        rules = Enum.map_join(config.constraints, "\n", &"- #{&1}")
+      if constraints != [] do
+        rules = Enum.map_join(constraints, "\n", &"- #{&1}")
         parts ++ ["## Constraints\n#{rules}"]
       else
         parts

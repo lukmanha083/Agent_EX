@@ -94,7 +94,7 @@ defmodule AgentExWeb.ProjectComponents do
 
   def project_editor_dialog(assigns) do
     ~H"""
-    <div :if={@show} class="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true">
+    <div :if={@show} class="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true" phx-window-keydown="close_editor" phx-key="Escape">
       <div class="fixed inset-0 bg-black/60" phx-click="close_editor"></div>
       <div class="relative z-10 w-full max-w-md mx-4 rounded-lg border border-gray-800 bg-gray-900 p-6 shadow-xl">
         <div class="mb-4">

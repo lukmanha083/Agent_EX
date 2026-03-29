@@ -22,7 +22,7 @@ defmodule AgentExWeb.ToolComponents do
 
   def tool_tabs(assigns) do
     ~H"""
-    <.tabs id="tool-tabs" default="builtin" class="w-full">
+    <.tabs id="tool-tabs" default={@active_tab} class="w-full">
       <.tabs_list class="bg-gray-800/50 border border-gray-700 mb-4">
         <.tabs_trigger value="builtin" class="data-[state=active]:bg-gray-700 text-gray-300 data-[state=active]:text-white">
           Built-in
@@ -78,7 +78,7 @@ defmodule AgentExWeb.ToolComponents do
           version={plugin.version}
           tool_count={length(plugin.tool_names)}
           source="built-in"
-          attached={@attached_sources && MapSet.member?(@attached_sources, plugin.name)}
+          attached={@attached_sources && MapSet.member?(@attached_sources, {"built-in", plugin.name})}
         />
       <% end %>
     </div>
@@ -113,7 +113,7 @@ defmodule AgentExWeb.ToolComponents do
           version={plugin.version}
           tool_count={length(plugin[:tool_names] || [])}
           source="plugin"
-          attached={@attached_sources && MapSet.member?(@attached_sources, plugin.name)}
+          attached={@attached_sources && MapSet.member?(@attached_sources, {"plugin", plugin.name})}
         />
       <% end %>
     </div>
@@ -151,7 +151,7 @@ defmodule AgentExWeb.ToolComponents do
           version=""
           tool_count={server.tool_count}
           source="mcp"
-          attached={true}
+          attached={server[:attached] != false}
         />
       <% end %>
     </div>
