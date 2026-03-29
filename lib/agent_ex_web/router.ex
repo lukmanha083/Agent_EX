@@ -44,12 +44,17 @@ defmodule AgentExWeb.Router do
       on_mount: [{AgentExWeb.UserAuth, :require_authenticated}] do
       live("/chat", ChatLive, :index)
       live("/chat/:conversation_id", ChatLive, :show)
+      live("/projects", ProjectsLive, :index)
+      live("/agents", AgentsLive, :index)
+      live("/tools", ToolsLive, :index)
+
       live("/users/profile", UserLive.Profile, :edit)
       live("/users/profile/confirm-email/:token", UserLive.Profile, :confirm_email)
       live("/users/settings", UserLive.Settings, :edit)
     end
 
     post("/users/update-password", UserSessionController, :update_password)
+    post("/projects/switch/:id", ProjectController, :switch)
   end
 
   scope "/", AgentExWeb do

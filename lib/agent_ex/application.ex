@@ -22,6 +22,9 @@ defmodule AgentEx.Application do
       # Plugin system: DynamicSupervisor for stateful plugins
       {DynamicSupervisor, name: AgentEx.PluginSupervisor, strategy: :one_for_one},
 
+      # Agent config store (ETS/DETS for agent definitions)
+      AgentEx.AgentStore,
+
       # EventLoop: ETS-based run tracking
       AgentEx.EventLoop.RunRegistry,
 

@@ -242,7 +242,7 @@ defmodule AgentExWeb.UserAuth do
     socket = mount_current_scope(socket, session)
 
     if socket.assigns.current_scope && socket.assigns.current_scope.user do
-      {:cont, socket}
+      {:cont, mount_current_project(socket, session)}
     else
       socket =
         socket
@@ -277,6 +277,34 @@ defmodule AgentExWeb.UserAuth do
 
       Scope.for_user(user)
     end)
+  end
+
+  defp mount_current_project(socket, session) do
+    user = socket.assigns.current_scope.user
+    selected_id = session["current_project_id"]
+
+    socket
+    |> Phoenix.Component.assign_new(:current_project, fn ->
+      resolve_project(user.id, selected_id)
+    end)
+    |> Phoenix.Component.assign_new(:projects, fn ->
+      AgentEx.Projects.list_projects(user.id)
+    end)
+  end
+
+  defp resolve_project(user_id, selected_id) do
+    project = if selected_id, do: AgentEx.Projects.get_user_project(user_id, selected_id)
+
+    case project do
+      %AgentEx.Projects.Project{} ->
+        project
+
+      _ ->
+        case AgentEx.Projects.ensure_default_project(user_id) do
+          {:ok, default} -> default
+          {:error, _} -> nil
+        end
+    end
   end
 
   @doc "Returns the path to redirect to after log in."

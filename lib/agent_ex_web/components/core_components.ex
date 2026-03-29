@@ -161,6 +161,29 @@ defmodule AgentExWeb.CoreComponents do
     """
   end
 
+  def input(%{type: "textarea"} = assigns) do
+    ~H"""
+    <div>
+      <label :if={@label} for={@id} class="block text-sm font-medium text-gray-300 mb-1">
+        {@label}
+      </label>
+      <textarea
+        name={@name}
+        id={@id}
+        class={[
+          "block w-full rounded-lg bg-gray-800 border border-gray-700 text-white",
+          "placeholder-gray-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500",
+          "text-sm px-3 py-2 resize-none min-h-[100px]",
+          @errors != [] && "border-red-500",
+          @class
+        ]}
+        {@rest}
+      ><%= Phoenix.HTML.Form.normalize_value("textarea", @value) %></textarea>
+      <p :for={msg <- @errors} class="mt-1 text-xs text-red-400">{msg}</p>
+    </div>
+    """
+  end
+
   def input(assigns) do
     ~H"""
     <div>

@@ -1,17 +1,22 @@
 defmodule AgentEx.ChatTest do
   use AgentEx.DataCase, async: true
 
-  alias AgentEx.Chat
+  alias AgentEx.{Chat, Projects}
   alias AgentEx.Chat.{Conversation, Message}
 
   import AgentEx.AccountsFixtures
 
-  defp create_user(_), do: %{user: user_fixture()}
+  defp create_user(_) do
+    user = user_fixture()
+    project = Projects.get_default_project(user.id)
+    %{user: user, project: project}
+  end
 
-  defp create_conversation(%{user: user}) do
+  defp create_conversation(%{user: user, project: project}) do
     {:ok, conversation} =
       Chat.create_conversation(%{
         user_id: user.id,
+        project_id: project.id,
         title: "Test conversation",
         model: "gpt-4o-mini",
         provider: "openai"
@@ -23,10 +28,11 @@ defmodule AgentEx.ChatTest do
   describe "create_conversation/1" do
     setup [:create_user]
 
-    test "creates a conversation with valid attrs", %{user: user} do
+    test "creates a conversation with valid attrs", %{user: user, project: project} do
       assert {:ok, %Conversation{} = convo} =
                Chat.create_conversation(%{
                  user_id: user.id,
+                 project_id: project.id,
                  title: "Hello world",
                  model: "gpt-4o-mini",
                  provider: "openai"
@@ -36,43 +42,54 @@ defmodule AgentEx.ChatTest do
       assert convo.model == "gpt-4o-mini"
       assert convo.provider == "openai"
       assert convo.user_id == user.id
+      assert convo.project_id == project.id
     end
 
     test "fails without required fields" do
       assert {:error, changeset} = Chat.create_conversation(%{})
-      assert %{user_id: _, model: _, provider: _} = errors_on(changeset)
+      assert %{user_id: _, project_id: _, model: _, provider: _} = errors_on(changeset)
     end
   end
 
-  describe "list_conversations/1" do
+  describe "list_conversations/2" do
     setup [:create_user, :create_conversation]
 
-    test "returns conversations for user ordered by updated_at desc", %{
+    test "returns conversations for user in project ordered by updated_at desc", %{
       user: user,
+      project: project,
       conversation: convo
     } do
-      conversations = Chat.list_conversations(user.id)
+      conversations = Chat.list_conversations(user.id, project.id)
       assert length(conversations) == 1
       assert hd(conversations).id == convo.id
     end
 
-    test "does not return other users' conversations", %{conversation: _convo} do
+    test "does not return other users' conversations", %{project: _project} do
       other_user = user_fixture()
-      assert Chat.list_conversations(other_user.id) == []
+      other_project = Projects.get_default_project(other_user.id)
+      assert Chat.list_conversations(other_user.id, other_project.id) == []
     end
   end
 
-  describe "get_user_conversation/2" do
+  describe "get_user_conversation/3" do
     setup [:create_user, :create_conversation]
 
-    test "returns conversation for correct user", %{user: user, conversation: convo} do
-      assert %Conversation{id: id} = Chat.get_user_conversation(user.id, convo.id)
+    test "returns conversation for correct user and project", %{
+      user: user,
+      project: project,
+      conversation: convo
+    } do
+      assert %Conversation{id: id} = Chat.get_user_conversation(user.id, project.id, convo.id)
       assert id == convo.id
     end
 
-    test "returns nil for wrong user", %{conversation: convo} do
+    test "returns nil for wrong user", %{project: project, conversation: convo} do
       other_user = user_fixture()
-      assert is_nil(Chat.get_user_conversation(other_user.id, convo.id))
+      assert is_nil(Chat.get_user_conversation(other_user.id, project.id, convo.id))
+    end
+
+    test "returns nil for wrong project", %{user: user, conversation: convo} do
+      assert is_nil(Chat.get_user_conversation(user.id, -1, convo.id))
     end
   end
 

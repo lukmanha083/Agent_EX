@@ -3,25 +3,28 @@ defmodule AgentExWeb.Features.ConversationHistoryTest do
 
   import AgentEx.AccountsFixtures
 
-  alias AgentEx.Chat
+  alias AgentEx.{Chat, Projects}
 
   @moduletag :feature
 
   setup %{session: session} do
     user = user_fixture()
+    project = Projects.get_default_project(user.id)
     session = feature_log_in_user(session, user)
-    {:ok, session: session, user: user}
+    {:ok, session: session, user: user, project: project}
   end
 
   describe "conversation creation and sidebar" do
     test "new conversation appears in sidebar after sending message", %{
       session: session,
-      user: user
+      user: user,
+      project: project
     } do
       # Pre-create a conversation via DB so sidebar has content
       {:ok, convo} =
         Chat.create_conversation(%{
           user_id: user.id,
+          project_id: project.id,
           title: "Test conversation",
           model: "gpt-4o-mini",
           provider: "openai"
@@ -45,11 +48,13 @@ defmodule AgentExWeb.Features.ConversationHistoryTest do
   describe "conversation resume" do
     test "navigating to existing conversation loads messages from DB", %{
       session: session,
-      user: user
+      user: user,
+      project: project
     } do
       {:ok, convo} =
         Chat.create_conversation(%{
           user_id: user.id,
+          project_id: project.id,
           title: "Resume test",
           model: "gpt-4o-mini",
           provider: "openai"
@@ -74,11 +79,13 @@ defmodule AgentExWeb.Features.ConversationHistoryTest do
   describe "conversation deletion" do
     test "deleting conversation removes it and shows empty state", %{
       session: session,
-      user: user
+      user: user,
+      project: project
     } do
       {:ok, convo} =
         Chat.create_conversation(%{
           user_id: user.id,
+          project_id: project.id,
           title: "Delete me",
           model: "gpt-4o-mini",
           provider: "openai"
@@ -129,10 +136,15 @@ defmodule AgentExWeb.Features.ConversationHistoryTest do
   end
 
   describe "clear conversation" do
-    test "clear button navigates to empty state", %{session: session, user: user} do
+    test "clear button navigates to empty state", %{
+      session: session,
+      user: user,
+      project: project
+    } do
       {:ok, convo} =
         Chat.create_conversation(%{
           user_id: user.id,
+          project_id: project.id,
           title: "Clear test",
           model: "gpt-4o-mini",
           provider: "openai"
