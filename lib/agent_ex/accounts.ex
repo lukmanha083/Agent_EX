@@ -84,9 +84,18 @@ defmodule AgentEx.Accounts do
     end)
     |> Repo.transaction()
     |> case do
-      {:ok, %{user: user}} -> {:ok, user}
-      {:error, :user, changeset, _} -> {:error, changeset}
-      {:error, :default_project, _changeset, _} -> {:error, :default_project_creation_failed}
+      {:ok, %{user: user}} ->
+        {:ok, user}
+
+      {:error, :user, changeset, _} ->
+        {:error, changeset}
+
+      {:error, :default_project, _changeset, %{user: user}} ->
+        changeset =
+          User.registration_changeset(user, %{})
+          |> Ecto.Changeset.add_error(:base, "failed to create default project")
+
+        {:error, changeset}
     end
   end
 

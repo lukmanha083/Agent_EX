@@ -13,6 +13,7 @@ defmodule AgentExWeb.AgentComponents do
 
   @doc "Renders a grid of agent cards with a 'New Agent' button."
   attr(:agents, :list, required: true)
+  attr(:project_root_path, :string, default: nil)
 
   def agent_grid(assigns) do
     ~H"""
@@ -28,13 +29,14 @@ defmodule AgentExWeb.AgentComponents do
         <span class="text-sm font-medium">New Agent</span>
       </button>
 
-      <.agent_card :for={agent <- @agents} agent={agent} />
+      <.agent_card :for={agent <- @agents} agent={agent} project_root_path={@project_root_path} />
     </div>
     """
   end
 
   @doc "Renders a single agent card."
   attr(:agent, :map, required: true)
+  attr(:project_root_path, :string, default: nil)
 
   def agent_card(assigns) do
     ~H"""
@@ -89,7 +91,7 @@ defmodule AgentExWeb.AgentComponents do
         <.badge :if={@agent.intervention_pipeline != []} variant="outline" class="text-[10px]">
           {length(@agent.intervention_pipeline)} handlers
         </.badge>
-        <.badge :if={sandbox_configured?(@agent)} variant="outline" class="text-[10px] text-amber-400 border-amber-500/30">
+        <.badge :if={sandbox_configured?(@agent, @project_root_path)} variant="outline" class="text-[10px] text-amber-400 border-amber-500/30">
           sandboxed
         </.badge>
       </div>
@@ -203,9 +205,11 @@ defmodule AgentExWeb.AgentComponents do
     """
   end
 
-  defp sandbox_configured?(%{sandbox: sandbox}) when is_map(sandbox) do
-    (sandbox["root_path"] || "") != "" or (sandbox["disallowed_commands"] || []) != []
+  defp sandbox_configured?(%{sandbox: sandbox}, project_root_path) when is_map(sandbox) do
+    (project_root_path || "") != "" or
+      (sandbox["root_path"] || "") != "" or
+      (sandbox["disallowed_commands"] || []) != []
   end
 
-  defp sandbox_configured?(_), do: false
+  defp sandbox_configured?(_, _), do: false
 end

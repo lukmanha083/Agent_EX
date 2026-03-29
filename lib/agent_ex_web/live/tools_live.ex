@@ -5,12 +5,16 @@ defmodule AgentExWeb.ToolsLive do
 
   @impl true
   def mount(_params, _session, socket) do
+    builtin = list_builtin_plugins()
+    attached = MapSet.new(builtin, & &1.name)
+
     {:ok,
      assign(socket,
-       builtin_plugins: list_builtin_plugins(),
+       builtin_plugins: builtin,
        available_plugins: [],
        mcp_servers: [],
        custom_tools: list_demo_tools(),
+       attached_sources: attached,
        show_mcp_form: false,
        mcp_form: %{name: "", transport: "stdio", command: ""}
      )}
@@ -57,12 +61,18 @@ defmodule AgentExWeb.ToolsLive do
     {:noreply, put_flash(socket, :info, "Custom tool editor coming in a future update")}
   end
 
-  def handle_event("detach_source", %{"name" => _name, "source" => _source}, socket) do
-    {:noreply, put_flash(socket, :info, "Detached")}
+  def handle_event("detach_source", %{"name" => name, "source" => _source}, socket) do
+    attached = MapSet.delete(socket.assigns.attached_sources, name)
+
+    {:noreply,
+     socket |> assign(attached_sources: attached) |> put_flash(:info, "Detached #{name}")}
   end
 
-  def handle_event("attach_source", %{"name" => _name, "source" => _source}, socket) do
-    {:noreply, put_flash(socket, :info, "Attached")}
+  def handle_event("attach_source", %{"name" => name, "source" => _source}, socket) do
+    attached = MapSet.put(socket.assigns.attached_sources, name)
+
+    {:noreply,
+     socket |> assign(attached_sources: attached) |> put_flash(:info, "Attached #{name}")}
   end
 
   # --- Private helpers ---

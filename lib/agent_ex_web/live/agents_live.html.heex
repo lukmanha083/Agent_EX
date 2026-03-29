@@ -58,7 +58,7 @@
           </button>
         </div>
       <% else %>
-        <.agent_grid agents={@agents} />
+        <.agent_grid agents={@agents} project_root_path={@project.root_path} />
       <% end %>
     <% end %>
   </div>

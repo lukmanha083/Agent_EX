@@ -127,30 +127,4 @@ defmodule AgentExWeb.ProjectComponents do
     </div>
     """
   end
-
-  @doc "Sidebar project switcher — only shown when user has multiple projects."
-  attr(:projects, :list, required: true)
-  attr(:current_project, :map, required: true)
-
-  def project_switcher(assigns) do
-    ~H"""
-    <div :if={length(@projects) > 1} class="px-3 py-2 border-b border-gray-800">
-      <label class="px-2 mb-1 block text-[10px] font-medium text-gray-500 uppercase tracking-wider">Project</label>
-      <form phx-change="switch_project">
-        <select
-          name="project_id"
-          class="w-full rounded-md border border-gray-700 bg-gray-800 px-2 py-1.5 text-xs text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
-        >
-          <option
-            :for={project <- @projects}
-            value={project.id}
-            selected={project.id == @current_project.id}
-          >
-            {project.name}
-          </option>
-        </select>
-      </form>
-    </div>
-    """
-  end
 end

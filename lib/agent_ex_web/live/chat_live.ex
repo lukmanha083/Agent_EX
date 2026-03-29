@@ -54,7 +54,7 @@ defmodule AgentExWeb.ChatLive do
     else
       user = socket.assigns.current_scope.user
 
-      case Chat.get_user_conversation(user.id, id) do
+      case Chat.get_user_conversation(user.id, socket.assigns.project.id, id) do
         nil ->
           {:noreply,
            socket
@@ -131,7 +131,8 @@ defmodule AgentExWeb.ChatLive do
     user = socket.assigns.current_scope.user
     project = socket.assigns.project
 
-    with conversation when not is_nil(conversation) <- Chat.get_user_conversation(user.id, id),
+    with conversation when not is_nil(conversation) <-
+           Chat.get_user_conversation(user.id, project.id, id),
          {:ok, _} <- Chat.delete_conversation(conversation) do
       conversations = Chat.list_conversations(user.id, project.id)
       socket = assign(socket, conversations: conversations)
@@ -469,7 +470,9 @@ defmodule AgentExWeb.ChatLive do
   end
 
   defp load_from_agent(agent, _user) do
-    {agent.provider, agent.model, default_tools(), agent.system_prompt}
+    system_prompt = AgentEx.AgentConfig.build_system_messages(agent)
+    prompt = if system_prompt == "", do: "You are a helpful AI assistant.", else: system_prompt
+    {agent.provider, agent.model, default_tools(), prompt}
   end
 
   defp default_tools do
@@ -480,8 +483,10 @@ defmodule AgentExWeb.ChatLive do
         parameters: %{"type" => "object", "properties" => %{}, "required" => []},
         kind: :read,
         function: fn _args ->
-          {os_output, 0} = System.cmd("uname", ["-srm"])
-          {:ok, String.trim(os_output)}
+          case System.cmd("uname", ["-srm"], stderr_to_stdout: true) do
+            {output, 0} -> {:ok, String.trim(output)}
+            {output, code} -> {:error, "uname failed (exit #{code}): #{String.trim(output)}"}
+          end
         end
       ),
       AgentEx.Tool.new(
@@ -490,8 +495,10 @@ defmodule AgentExWeb.ChatLive do
         parameters: %{"type" => "object", "properties" => %{}, "required" => []},
         kind: :read,
         function: fn _args ->
-          {df_output, 0} = System.cmd("df", ["-h"])
-          {:ok, df_output}
+          case System.cmd("df", ["-h"], stderr_to_stdout: true) do
+            {output, 0} -> {:ok, output}
+            {output, code} -> {:error, "df failed (exit #{code}): #{String.trim(output)}"}
+          end
         end
       ),
       AgentEx.Tool.new(

@@ -19,6 +19,7 @@ defmodule AgentEx.Projects.Project do
     |> cast(attrs, [:user_id, :name, :description, :root_path, :is_default])
     |> validate_required([:user_id, :name])
     |> unique_constraint([:user_id, :name])
+    |> unique_constraint(:is_default, name: :projects_one_default_per_user)
     |> foreign_key_constraint(:user_id)
   end
 end

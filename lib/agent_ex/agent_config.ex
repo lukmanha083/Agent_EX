@@ -265,6 +265,6 @@ defmodule AgentEx.AgentConfig do
   defp build_system_prompt(%{system_prompt: p}), do: p
 
   defp generate_id do
-    "agent-#{System.unique_integer([:positive, :monotonic])}"
+    "agent-#{Base.url_encode64(:crypto.strong_rand_bytes(12), padding: false)}"
   end
 end

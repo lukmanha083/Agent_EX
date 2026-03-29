@@ -47,7 +47,7 @@ Hooks.Sortable = Sortable
 Hooks.ClearOnEnter = {
   mounted() {
     this.el.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
+      if (e.key === "Enter" && !e.isComposing) {
         requestAnimationFrame(() => { this.el.value = "" })
       }
     })

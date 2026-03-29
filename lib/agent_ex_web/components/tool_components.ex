@@ -18,6 +18,7 @@ defmodule AgentExWeb.ToolComponents do
   attr(:available_plugins, :list, default: [])
   attr(:mcp_servers, :list, default: [])
   attr(:custom_tools, :list, default: [])
+  attr(:attached_sources, :any, default: nil)
 
   def tool_tabs(assigns) do
     ~H"""
@@ -38,11 +39,11 @@ defmodule AgentExWeb.ToolComponents do
       </.tabs_list>
 
       <.tabs_content value="builtin">
-        <.builtin_tools_panel plugins={@builtin_plugins} />
+        <.builtin_tools_panel plugins={@builtin_plugins} attached_sources={@attached_sources} />
       </.tabs_content>
 
       <.tabs_content value="plugins">
-        <.plugin_browser plugins={@available_plugins} />
+        <.plugin_browser plugins={@available_plugins} attached_sources={@attached_sources} />
       </.tabs_content>
 
       <.tabs_content value="mcp">
@@ -59,6 +60,7 @@ defmodule AgentExWeb.ToolComponents do
   # --- Built-in tools (FileSystem, ShellExec) ---
 
   attr(:plugins, :list, default: [])
+  attr(:attached_sources, :any, default: nil)
 
   defp builtin_tools_panel(assigns) do
     ~H"""
@@ -76,7 +78,7 @@ defmodule AgentExWeb.ToolComponents do
           version={plugin.version}
           tool_count={length(plugin.tool_names)}
           source="built-in"
-          attached={true}
+          attached={@attached_sources && MapSet.member?(@attached_sources, plugin.name)}
         />
       <% end %>
     </div>
@@ -86,6 +88,7 @@ defmodule AgentExWeb.ToolComponents do
   # --- Plugin browser ---
 
   attr(:plugins, :list, default: [])
+  attr(:attached_sources, :any, default: nil)
 
   defp plugin_browser(assigns) do
     ~H"""
@@ -110,7 +113,7 @@ defmodule AgentExWeb.ToolComponents do
           version={plugin.version}
           tool_count={length(plugin[:tool_names] || [])}
           source="plugin"
-          attached={plugin[:attached] || false}
+          attached={@attached_sources && MapSet.member?(@attached_sources, plugin.name)}
         />
       <% end %>
     </div>
