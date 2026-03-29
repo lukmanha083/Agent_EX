@@ -7,18 +7,6 @@ defmodule AgentEx.Memory.Promotion do
      into key facts, which are embedded and stored in Tier 3.
   2. **save_memory tool** — a tool factory that lets agents save facts to
      Tier 3 mid-conversation for retrieval in future sessions.
-
-  ## The cycle
-
-      Session N:
-        Agent works → saves facts (save_memory tool) → Tier 3
-        Session closes → LLM summarizes → summary stored in Tier 3
-
-      Session N+1:
-        Session starts → ContextBuilder queries Tier 3
-        → "## Relevant Past Context"
-        → LLM sees past facts + summaries
-        → makes better decisions informed by history
   """
 
   alias AgentEx.{Memory, Message, ModelClient, Tool}
@@ -50,15 +38,15 @@ defmodule AgentEx.Memory.Promotion do
   ## Options
   - `:max_messages` — max messages to include in summary (default: 50)
   """
-  @spec close_session_with_summary(String.t(), String.t(), ModelClient.t(), keyword()) ::
+  @spec close_session_with_summary(term(), term(), String.t(), String.t(), ModelClient.t(), keyword()) ::
           {:ok, String.t()} | {:error, term()}
-  def close_session_with_summary(agent_id, session_id, model_client, opts \\ []) do
+  def close_session_with_summary(user_id, project_id, agent_id, session_id, model_client, opts \\ []) do
     max_messages = Keyword.get(opts, :max_messages, 50)
 
-    messages = Memory.get_messages(agent_id, session_id)
+    messages = Memory.get_messages(user_id, project_id, agent_id, session_id)
 
     if messages == [] do
-      Memory.stop_session(agent_id, session_id)
+      Memory.stop_session(user_id, project_id, agent_id, session_id)
       {:ok, ""}
     else
       try do
@@ -78,6 +66,8 @@ defmodule AgentEx.Memory.Promotion do
                ModelClient.create(model_client, summary_messages),
              {:ok, _} <-
                Memory.store_memory(
+                 user_id,
+                 project_id,
                  agent_id,
                  "Session summary (#{session_id}):\n#{summary}",
                  "session_summary",
@@ -93,7 +83,7 @@ defmodule AgentEx.Memory.Promotion do
             {:error, {:summary_failed, reason}}
         end
       after
-        Memory.stop_session(agent_id, session_id)
+        Memory.stop_session(user_id, project_id, agent_id, session_id)
       end
     end
   end
@@ -105,10 +95,14 @@ defmodule AgentEx.Memory.Promotion do
   for retrieval in future sessions via ContextBuilder.
 
   ## Options
+  - `:user_id` — the user's ID (required)
+  - `:project_id` — the project's ID (required)
   - `:agent_id` — the agent's ID (required)
   """
   @spec save_memory_tool(keyword()) :: Tool.t()
   def save_memory_tool(opts) do
+    user_id = Keyword.fetch!(opts, :user_id)
+    project_id = Keyword.fetch!(opts, :project_id)
     agent_id = Keyword.fetch!(opts, :agent_id)
 
     Tool.new(
@@ -137,7 +131,7 @@ defmodule AgentEx.Memory.Promotion do
         fact = Map.fetch!(args, "fact")
         category = Map.get(args, "category", "fact")
 
-        case Memory.store_memory(agent_id, fact, category) do
+        case Memory.store_memory(user_id, project_id, agent_id, fact, category) do
           {:ok, _} ->
             Logger.debug(
               "Promotion: agent #{agent_id} saved memory [#{category}] (#{byte_size(fact)} bytes)"

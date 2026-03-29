@@ -1,7 +1,7 @@
 defmodule AgentEx.Memory.ContextBuilder do
   @moduledoc """
   Composes all memory tiers + knowledge graph into an LLM-ready message list.
-  All operations are scoped by `agent_id` — each agent gets its own context view.
+  All operations are scoped by `(user_id, project_id, agent_id)`.
   """
 
   alias AgentEx.Memory.{
@@ -19,15 +19,16 @@ defmodule AgentEx.Memory.ContextBuilder do
     total: 8000
   }
 
-  def build(agent_id, session_id, opts \\ []) do
+  def build(user_id, project_id, agent_id, session_id, opts \\ []) do
     semantic_query = opts[:semantic_query] || ""
     budgets = Map.merge(@default_budgets, opts[:budgets] || %{})
+    scope = {user_id, project_id, agent_id}
 
     tasks = [
-      Task.async(fn -> gather_persistent(agent_id) end),
-      Task.async(fn -> gather_knowledge_graph(agent_id, semantic_query) end),
-      Task.async(fn -> gather_semantic(agent_id, semantic_query) end),
-      Task.async(fn -> gather_conversation(agent_id, session_id) end)
+      Task.async(fn -> gather_persistent(scope) end),
+      Task.async(fn -> gather_knowledge_graph(scope, semantic_query) end),
+      Task.async(fn -> gather_semantic(scope, semantic_query) end),
+      Task.async(fn -> gather_conversation(scope, session_id) end)
     ]
 
     [persistent, kg, semantic, conversation] = Task.await_many(tasks, 30_000)
@@ -51,8 +52,8 @@ defmodule AgentEx.Memory.ContextBuilder do
     system_message ++ conversation_messages
   end
 
-  defp gather_persistent(agent_id) do
-    case PersistentMemory.Store.to_context_messages(agent_id) do
+  defp gather_persistent(scope) do
+    case PersistentMemory.Store.to_context_messages(scope) do
       [%{content: content} | _] -> content
       _ -> ""
     end
@@ -60,16 +61,14 @@ defmodule AgentEx.Memory.ContextBuilder do
     _ -> ""
   end
 
-  defp gather_knowledge_graph(_agent_id, ""), do: ""
+  defp gather_knowledge_graph(_scope, ""), do: ""
+  defp gather_knowledge_graph(scope, query), do: gather_tier(KnowledgeGraph.Store, scope, query)
 
-  defp gather_knowledge_graph(agent_id, query),
-    do: gather_tier(KnowledgeGraph.Store, agent_id, query)
+  defp gather_semantic(_scope, ""), do: ""
+  defp gather_semantic(scope, query), do: gather_tier(SemanticMemory.Store, scope, query)
 
-  defp gather_semantic(_agent_id, ""), do: ""
-  defp gather_semantic(agent_id, query), do: gather_tier(SemanticMemory.Store, agent_id, query)
-
-  defp gather_tier(module, agent_id, query) do
-    case module.to_context_messages(agent_id, query) do
+  defp gather_tier(module, scope, query) do
+    case module.to_context_messages(scope, query) do
       [%{content: content} | _] -> content
       _ -> ""
     end
@@ -77,8 +76,8 @@ defmodule AgentEx.Memory.ContextBuilder do
     _ -> ""
   end
 
-  defp gather_conversation(agent_id, session_id) do
-    WorkingMemory.Server.to_context_messages(agent_id, session_id)
+  defp gather_conversation(scope, session_id) do
+    WorkingMemory.Server.to_context_messages(scope, session_id)
   rescue
     _ -> []
   catch
