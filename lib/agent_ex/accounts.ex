@@ -86,7 +86,7 @@ defmodule AgentEx.Accounts do
     |> case do
       {:ok, %{user: user}} -> {:ok, user}
       {:error, :user, changeset, _} -> {:error, changeset}
-      {:error, :default_project, changeset, _} -> {:error, changeset}
+      {:error, :default_project, _changeset, _} -> {:error, :default_project_creation_failed}
     end
   end
 

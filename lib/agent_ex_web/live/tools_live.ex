@@ -26,19 +26,27 @@ defmodule AgentExWeb.ToolsLive do
   end
 
   def handle_event("connect_mcp", params, socket) do
-    server = %{
-      name: params["name"],
-      transport: params["transport"],
-      command: params["command"],
-      tool_count: 0
-    }
+    name = String.trim(params["name"] || "")
+    transport = String.trim(params["transport"] || "")
+    command = String.trim(params["command"] || "")
 
-    mcp_servers = socket.assigns.mcp_servers ++ [server]
+    if name == "" or command == "" do
+      {:noreply, put_flash(socket, :error, "Name and command are required")}
+    else
+      server = %{
+        name: name,
+        transport: transport,
+        command: command,
+        tool_count: 0
+      }
 
-    {:noreply,
-     socket
-     |> assign(mcp_servers: mcp_servers, show_mcp_form: false)
-     |> put_flash(:info, "MCP server '#{server.name}' added (connect on next agent run)")}
+      mcp_servers = socket.assigns.mcp_servers ++ [server]
+
+      {:noreply,
+       socket
+       |> assign(mcp_servers: mcp_servers, show_mcp_form: false)
+       |> put_flash(:info, "MCP server '#{server.name}' added (connect on next agent run)")}
+    end
   end
 
   def handle_event("refresh_plugins", _params, socket) do
@@ -78,9 +86,21 @@ defmodule AgentExWeb.ToolsLive do
 
   defp list_demo_tools do
     [
-      %{name: "get_system_info", description: "Get OS name, kernel version, and architecture", kind: :read},
-      %{name: "get_disk_usage", description: "Get disk space usage for all mounted filesystems", kind: :read},
-      %{name: "get_current_time", description: "Get the current date and time with timezone", kind: :read}
+      %{
+        name: "get_system_info",
+        description: "Get OS name, kernel version, and architecture",
+        kind: :read
+      },
+      %{
+        name: "get_disk_usage",
+        description: "Get disk space usage for all mounted filesystems",
+        kind: :read
+      },
+      %{
+        name: "get_current_time",
+        description: "Get the current date and time with timezone",
+        kind: :read
+      }
     ]
   end
 end

@@ -13,11 +13,19 @@ defmodule AgentExWeb.ProjectController do
         |> redirect(to: ~p"/chat")
 
       _project ->
-        redirect_to = safe_redirect_path(conn)
+        case Integer.parse(id) do
+          {project_id, ""} ->
+            redirect_to = safe_redirect_path(conn)
 
-        conn
-        |> put_session("current_project_id", String.to_integer(id))
-        |> redirect(to: redirect_to)
+            conn
+            |> put_session("current_project_id", project_id)
+            |> redirect(to: redirect_to)
+
+          _ ->
+            conn
+            |> put_flash(:error, "Invalid project ID")
+            |> redirect(to: ~p"/chat")
+        end
     end
   end
 
