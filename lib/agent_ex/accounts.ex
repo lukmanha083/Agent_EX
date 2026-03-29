@@ -86,7 +86,8 @@ defmodule AgentEx.Accounts do
     |> case do
       {:ok, %{user: user}} -> {:ok, user}
       {:error, :user, changeset, _} -> {:error, changeset}
-      {:error, :default_project, changeset, _} -> {:error, changeset}
+      {:error, :default_project, _changeset, %{user: user}} ->
+        {:error, Ecto.Changeset.add_error(User.registration_changeset(user, %{}), :base, "Failed to create default project")}
     end
   end
 

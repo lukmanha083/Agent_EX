@@ -123,9 +123,15 @@ defmodule AgentExWeb.AgentsLive do
   def handle_event("delete_agent", %{"id" => id}, socket) do
     user = socket.assigns.current_scope.user
     project = socket.assigns.project
-    AgentStore.delete(user.id, project.id, id)
-    agents = AgentStore.list(user.id, project.id)
-    {:noreply, assign(socket, agents: agents)}
+
+    case AgentStore.delete(user.id, project.id, id) do
+      :ok ->
+        agents = AgentStore.list(user.id, project.id)
+        {:noreply, assign(socket, agents: agents)}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to delete agent: #{inspect(reason)}")}
+    end
   end
 
   # -- Intervention pipeline events --
@@ -148,7 +154,7 @@ defmodule AgentExWeb.AgentsLive do
   def handle_event("reorder_pipeline", %{"ids" => ids}, socket) do
     old = socket.assigns.intervention_pipeline
     lookup = Map.new(old, &{&1["id"], &1})
-    reordered = Enum.map(ids, &(lookup[&1] || %{"id" => &1}))
+    reordered = ids |> Enum.map(&lookup[&1]) |> Enum.reject(&is_nil/1)
     {:noreply, assign(socket, intervention_pipeline: reordered)}
   end
 

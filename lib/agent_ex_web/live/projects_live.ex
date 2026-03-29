@@ -89,6 +89,9 @@ defmodule AgentExWeb.ProjectsLive do
 
           {:error, :cannot_delete_default} ->
             {:noreply, put_flash(socket, :error, "Cannot delete the default project")}
+
+          {:error, _reason} ->
+            {:noreply, put_flash(socket, :error, "Failed to delete project")}
         end
     end
   end

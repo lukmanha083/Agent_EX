@@ -17,8 +17,8 @@ defmodule AgentEx.Chat do
 
   def get_conversation(id), do: Repo.get(Conversation, id)
 
-  def get_user_conversation(user_id, conversation_id) do
-    Repo.get_by(Conversation, id: conversation_id, user_id: user_id)
+  def get_user_conversation(user_id, project_id, conversation_id) do
+    Repo.get_by(Conversation, id: conversation_id, user_id: user_id, project_id: project_id)
   end
 
   def list_conversations(user_id, project_id) do

@@ -1,7 +1,7 @@
 defmodule AgentExWeb.ChatLive do
   use AgentExWeb, :live_view
 
-  alias AgentEx.{AgentStore, Chat, EventLoop, Memory}
+  alias AgentEx.{AgentConfig, AgentStore, Chat, EventLoop, Memory}
   alias AgentEx.EventLoop.Event
 
   import AgentExWeb.ChatComponents
@@ -53,8 +53,9 @@ defmodule AgentExWeb.ChatLive do
       {:noreply, socket}
     else
       user = socket.assigns.current_scope.user
+      project = socket.assigns.project
 
-      case Chat.get_user_conversation(user.id, id) do
+      case Chat.get_user_conversation(user.id, project.id, id) do
         nil ->
           {:noreply,
            socket
@@ -131,7 +132,7 @@ defmodule AgentExWeb.ChatLive do
     user = socket.assigns.current_scope.user
     project = socket.assigns.project
 
-    with conversation when not is_nil(conversation) <- Chat.get_user_conversation(user.id, id),
+    with conversation when not is_nil(conversation) <- Chat.get_user_conversation(user.id, project.id, id),
          {:ok, _} <- Chat.delete_conversation(conversation) do
       conversations = Chat.list_conversations(user.id, project.id)
       socket = assign(socket, conversations: conversations)
@@ -313,7 +314,12 @@ defmodule AgentExWeb.ChatLive do
           AgentEx.Message.user(message)
         ]
 
-        memory_opts = %{agent_id: socket.assigns.agent_id, session_id: session_id}
+        memory_opts = %{
+          user_id: socket.assigns.current_scope.user.id,
+          project_id: socket.assigns.project.id,
+          agent_id: socket.assigns.agent_id,
+          session_id: session_id
+        }
 
         EventLoop.run(run_id, tool_agent, client, input_messages, tools,
           memory: memory_opts,
@@ -353,7 +359,7 @@ defmodule AgentExWeb.ChatLive do
              }) do
           {:ok, conversation} ->
             session_id = "conversation-#{conversation.id}"
-            Memory.start_session(socket.assigns.agent_id, session_id)
+            Memory.start_session(user.id, project.id, socket.assigns.agent_id, session_id)
 
             conversations = Chat.list_conversations(user.id, project.id)
 
@@ -383,11 +389,13 @@ defmodule AgentExWeb.ChatLive do
 
     # Hydrate Tier 1 working memory
     session_id = "conversation-#{conversation.id}"
+    user = socket.assigns.current_scope.user
+    project = socket.assigns.project
     agent_id = socket.assigns.agent_id
 
-    case Memory.start_session(agent_id, session_id) do
+    case Memory.start_session(user.id, project.id, agent_id, session_id) do
       {:ok, _} ->
-        hydrate_working_memory(agent_id, session_id, db_messages)
+        hydrate_working_memory(user.id, project.id, agent_id, session_id, db_messages)
 
       {:error, {:already_started, _}} ->
         :ok
@@ -416,9 +424,9 @@ defmodule AgentExWeb.ChatLive do
     end
   end
 
-  defp hydrate_working_memory(agent_id, session_id, messages) do
+  defp hydrate_working_memory(user_id, project_id, agent_id, session_id, messages) do
     Enum.each(messages, fn msg ->
-      Memory.add_message(agent_id, session_id, to_string(msg.role), msg.content)
+      Memory.add_message(user_id, project_id, agent_id, session_id, to_string(msg.role), msg.content)
     end)
   rescue
     e ->
@@ -467,7 +475,8 @@ defmodule AgentExWeb.ChatLive do
   end
 
   defp load_from_agent(agent, _user) do
-    {agent.provider, agent.model, default_tools(), agent.system_prompt}
+    system_prompt = agent.system_prompt || AgentConfig.build_system_messages(agent) || "You are a helpful AI assistant."
+    {agent.provider, agent.model, default_tools(), system_prompt}
   end
 
   defp default_tools do
