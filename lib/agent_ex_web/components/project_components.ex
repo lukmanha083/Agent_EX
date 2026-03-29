@@ -48,12 +48,12 @@ defmodule AgentExWeb.ProjectComponents do
             <p :if={@project.root_path && @project.root_path != ""} class="text-[10px] text-gray-500 font-mono truncate max-w-[180px]">{@project.root_path}</p>
           </div>
         </div>
-        <div :if={not @project.is_default} class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div :if={not @project.is_default} class="flex gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-within:opacity-100 transition-opacity">
           <button
             type="button"
             phx-click="edit_project"
             phx-value-id={@project.id}
-            class="p-1.5 rounded-md text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
+            class="p-1.5 rounded-md text-gray-400 hover:text-white hover:bg-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 transition-colors"
             aria-label="Edit project"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-3.5 h-3.5">
@@ -66,7 +66,7 @@ defmodule AgentExWeb.ProjectComponents do
             phx-click="delete_project"
             phx-value-id={@project.id}
             data-confirm="Delete this project and all its agents, conversations, and memory?"
-            class="p-1.5 rounded-md text-gray-400 hover:text-red-400 hover:bg-gray-800 transition-colors"
+            class="p-1.5 rounded-md text-gray-400 hover:text-red-400 hover:bg-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 transition-colors"
             aria-label="Delete project"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-3.5 h-3.5">
@@ -76,7 +76,7 @@ defmodule AgentExWeb.ProjectComponents do
         </div>
       </div>
 
-      <p :if={@project.description} class="text-xs text-gray-400 mb-3 line-clamp-2">{@project.description}</p>
+      <p :if={@project.description && String.trim(@project.description) != ""} class="text-xs text-gray-400 mb-3 line-clamp-2">{@project.description}</p>
 
       <div class="mt-auto flex items-center gap-2">
         <.badge :if={@project.is_default} variant="secondary" class="text-[10px]">

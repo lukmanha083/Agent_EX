@@ -81,6 +81,11 @@ defmodule AgentExWeb.ToolsLive do
      |> put_flash(:info, "Attached #{name}")}
   end
 
+  def handle_event(event, _params, socket)
+      when event in ["detach_source", "attach_source"] do
+    {:noreply, put_flash(socket, :error, "Invalid request")}
+  end
+
   defp update_mcp_attached(socket, "mcp", name, value) do
     servers =
       Enum.map(socket.assigns.mcp_servers, fn s ->
