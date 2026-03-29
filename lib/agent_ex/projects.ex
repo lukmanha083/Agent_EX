@@ -56,14 +56,25 @@ defmodule AgentEx.Projects do
     end
   end
 
-  @doc "Get or create the default project for a user."
+  @doc "Get or create the default project for a user. Safe under concurrent calls."
   def ensure_default_project(user_id) do
     case Repo.get_by(Project, user_id: user_id, is_default: true) do
-      %Project{} = project ->
+      %Project{} = project -> {:ok, project}
+      nil -> create_default_project(user_id)
+    end
+  end
+
+  defp create_default_project(user_id) do
+    case create_project(%{user_id: user_id, name: "Default", is_default: true}) do
+      {:ok, project} ->
         {:ok, project}
 
-      nil ->
-        create_project(%{user_id: user_id, name: "Default", is_default: true})
+      {:error, _changeset} ->
+        # Race: another process created the default project concurrently
+        case Repo.get_by(Project, user_id: user_id, is_default: true) do
+          %Project{} = project -> {:ok, project}
+          nil -> {:error, :default_project_creation_failed}
+        end
     end
   end
 

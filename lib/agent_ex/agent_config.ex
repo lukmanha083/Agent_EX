@@ -110,11 +110,27 @@ defmodule AgentEx.AgentConfig do
         }
 
   @updatable_fields [
-    :name, :description, :role, :expertise, :personality,
-    :goal, :success_criteria, :constraints, :scope,
-    :tool_ids, :tool_guidance, :tool_examples, :output_format,
-    :system_prompt, :provider, :model,
-    :intervention_pipeline, :sandbox, :execution_mode, :budget, :project_id
+    :name,
+    :description,
+    :role,
+    :expertise,
+    :personality,
+    :goal,
+    :success_criteria,
+    :constraints,
+    :scope,
+    :tool_ids,
+    :tool_guidance,
+    :tool_examples,
+    :output_format,
+    :system_prompt,
+    :provider,
+    :model,
+    :intervention_pipeline,
+    :sandbox,
+    :execution_mode,
+    :budget,
+    :project_id
   ]
 
   @defaults %{
@@ -177,15 +193,18 @@ defmodule AgentEx.AgentConfig do
     Enum.join(sections, "\n\n")
   end
 
-  defp build_identity(%{role: nil, personality: nil, expertise: []}), do: nil
+  defp build_identity(%{role: nil, personality: nil, expertise: expertise})
+       when expertise in [nil, []],
+       do: nil
 
   defp build_identity(config) do
+    expertise = config.expertise || []
     parts = []
     parts = if config.role, do: parts ++ ["You are #{config.role}."], else: parts
 
     parts =
-      if config.expertise != [] do
-        parts ++ ["Your expertise: #{Enum.join(config.expertise, ", ")}."]
+      if expertise != [] do
+        parts ++ ["Your expertise: #{Enum.join(expertise, ", ")}."]
       else
         parts
       end
@@ -215,14 +234,17 @@ defmodule AgentEx.AgentConfig do
     Enum.join(parts, "\n")
   end
 
-  defp build_constraints(%{constraints: [], scope: nil}), do: nil
+  defp build_constraints(%{constraints: constraints, scope: nil})
+       when constraints in [nil, []],
+       do: nil
 
   defp build_constraints(config) do
+    constraints = config.constraints || []
     parts = []
 
     parts =
-      if config.constraints != [] do
-        rules = Enum.map_join(config.constraints, "\n", &"- #{&1}")
+      if constraints != [] do
+        rules = Enum.map_join(constraints, "\n", &"- #{&1}")
         parts ++ ["## Constraints\n#{rules}"]
       else
         parts
@@ -249,6 +271,6 @@ defmodule AgentEx.AgentConfig do
   defp build_system_prompt(%{system_prompt: p}), do: p
 
   defp generate_id do
-    "agent-#{System.unique_integer([:positive, :monotonic])}"
+    "agent-#{Base.url_encode64(:crypto.strong_rand_bytes(12), padding: false)}"
   end
 end

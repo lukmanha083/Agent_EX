@@ -285,26 +285,25 @@ defmodule AgentExWeb.UserAuth do
 
     socket
     |> Phoenix.Component.assign_new(:current_project, fn ->
-      resolve_current_project(user, selected_id)
+      resolve_project(user.id, selected_id)
     end)
     |> Phoenix.Component.assign_new(:projects, fn ->
       AgentEx.Projects.list_projects(user.id)
     end)
   end
 
-  defp resolve_current_project(user, selected_id) do
-    project = if selected_id, do: AgentEx.Projects.get_user_project(user.id, selected_id)
+  defp resolve_project(user_id, selected_id) do
+    project = if selected_id, do: AgentEx.Projects.get_user_project(user_id, selected_id)
 
     case project do
-      %AgentEx.Projects.Project{} -> project
-      _ -> default_project_or_nil(user.id)
-    end
-  end
+      %AgentEx.Projects.Project{} ->
+        project
 
-  defp default_project_or_nil(user_id) do
-    case AgentEx.Projects.ensure_default_project(user_id) do
-      {:ok, default} -> default
-      {:error, _reason} -> nil
+      _ ->
+        case AgentEx.Projects.ensure_default_project(user_id) do
+          {:ok, default} -> default
+          {:error, _} -> nil
+        end
     end
   end
 

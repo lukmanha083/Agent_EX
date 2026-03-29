@@ -9,14 +9,15 @@ defmodule AgentExWeb.ProjectComponents do
   import SaladUI.Button
 
   @doc "Renders a grid of project cards with a 'New Project' button."
-  attr :projects, :list, required: true
+  attr(:projects, :list, required: true)
 
   def project_grid(assigns) do
     ~H"""
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+    <div data-testid="project-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
       <button
         type="button"
         phx-click="new_project"
+        data-testid="new-project-btn"
         class="flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-gray-700 p-6 text-gray-400 hover:border-indigo-500 hover:text-indigo-400 transition-colors min-h-[140px]"
       >
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-8 h-8">
@@ -31,11 +32,11 @@ defmodule AgentExWeb.ProjectComponents do
   end
 
   @doc "Renders a single project card."
-  attr :project, :map, required: true
+  attr(:project, :map, required: true)
 
   def project_card(assigns) do
     ~H"""
-    <div class="group relative flex flex-col rounded-lg border border-gray-800 bg-gray-900 p-4 hover:border-gray-700 transition-colors min-h-[140px]">
+    <div data-testid={"project-card-#{@project.id}"} class="group relative flex flex-col rounded-lg border border-gray-800 bg-gray-900 p-4 hover:border-gray-700 transition-colors min-h-[140px]">
       <div class="flex items-start justify-between mb-2">
         <div class="flex items-center gap-2">
           <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600/20 text-indigo-400">
@@ -48,12 +49,12 @@ defmodule AgentExWeb.ProjectComponents do
             <p :if={@project.root_path && @project.root_path != ""} class="text-[10px] text-gray-500 font-mono truncate max-w-[180px]">{@project.root_path}</p>
           </div>
         </div>
-        <div :if={not @project.is_default} class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div :if={not @project.is_default} class="flex gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-within:opacity-100 transition-opacity">
           <button
             type="button"
             phx-click="edit_project"
             phx-value-id={@project.id}
-            class="p-1.5 rounded-md text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
+            class="p-1.5 rounded-md text-gray-400 hover:text-white hover:bg-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 transition-colors"
             aria-label="Edit project"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-3.5 h-3.5">
@@ -66,7 +67,7 @@ defmodule AgentExWeb.ProjectComponents do
             phx-click="delete_project"
             phx-value-id={@project.id}
             data-confirm="Delete this project and all its agents, conversations, and memory?"
-            class="p-1.5 rounded-md text-gray-400 hover:text-red-400 hover:bg-gray-800 transition-colors"
+            class="p-1.5 rounded-md text-gray-400 hover:text-red-400 hover:bg-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 transition-colors"
             aria-label="Delete project"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-3.5 h-3.5">
@@ -76,7 +77,7 @@ defmodule AgentExWeb.ProjectComponents do
         </div>
       </div>
 
-      <p :if={@project.description} class="text-xs text-gray-400 mb-3 line-clamp-2">{@project.description}</p>
+      <p :if={@project.description && String.trim(@project.description) != ""} class="text-xs text-gray-400 mb-3 line-clamp-2">{@project.description}</p>
 
       <div class="mt-auto flex items-center gap-2">
         <.badge :if={@project.is_default} variant="secondary" class="text-[10px]">
@@ -88,15 +89,15 @@ defmodule AgentExWeb.ProjectComponents do
   end
 
   @doc "Renders the project editor dialog."
-  attr :project, :map, default: nil
-  attr :form, :map, required: true
-  attr :show, :boolean, default: false
+  attr(:project, :map, default: nil)
+  attr(:form, :map, required: true)
+  attr(:show, :boolean, default: false)
 
   def project_editor_dialog(assigns) do
     ~H"""
-    <div :if={@show} class="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true">
+    <div :if={@show} class="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true" phx-window-keydown="close_editor" phx-key="Escape">
       <div class="fixed inset-0 bg-black/60" phx-click="close_editor"></div>
-      <div class="relative z-10 w-full max-w-md mx-4 rounded-lg border border-gray-800 bg-gray-900 p-6 shadow-xl">
+      <div data-testid="project-editor" class="relative z-10 w-full max-w-md mx-4 rounded-lg border border-gray-800 bg-gray-900 p-6 shadow-xl">
         <div class="mb-4">
           <h2 class="text-lg font-semibold text-white">
             {if @project, do: "Edit Project", else: "New Project"}
@@ -124,32 +125,6 @@ defmodule AgentExWeb.ProjectComponents do
           </div>
         </.form>
       </div>
-    </div>
-    """
-  end
-
-  @doc "Sidebar project switcher — only shown when user has multiple projects."
-  attr :projects, :list, required: true
-  attr :current_project, :map, required: true
-
-  def project_switcher(assigns) do
-    ~H"""
-    <div :if={length(@projects) > 1} class="px-3 py-2 border-b border-gray-800">
-      <label class="px-2 mb-1 block text-[10px] font-medium text-gray-500 uppercase tracking-wider">Project</label>
-      <form phx-change="switch_project">
-        <select
-          name="project_id"
-          class="w-full rounded-md border border-gray-700 bg-gray-800 px-2 py-1.5 text-xs text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
-        >
-          <option
-            :for={project <- @projects}
-            value={project.id}
-            selected={project.id == @current_project.id}
-          >
-            {project.name}
-          </option>
-        </select>
-      </form>
     </div>
     """
   end

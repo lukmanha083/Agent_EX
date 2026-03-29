@@ -4,8 +4,8 @@
     <div>
       <h1 class="text-base font-semibold text-white">Agents</h1>
       <p class="text-xs text-gray-500">
-        <span :if={assigns[:current_project]} class="text-indigo-400">{@current_project.name}</span>
-        <span :if={assigns[:current_project]}> — </span>Create and manage AI agents
+        <span class="text-indigo-400">{@project.name}</span>
+        <span> — </span>Create and manage AI agents
       </p>
     </div>
   </header>
@@ -20,7 +20,7 @@
             <path d="M3.75 3A1.75 1.75 0 0 0 2 4.75v3.26a3.235 3.235 0 0 1 1.75-.51h12.5c.644 0 1.245.188 1.75.51V6.75A1.75 1.75 0 0 0 16.25 5h-4.836a.25.25 0 0 1-.177-.073L9.823 3.513A1.75 1.75 0 0 0 8.586 3H3.75ZM3.75 9A1.75 1.75 0 0 0 2 10.75v4.5c0 .966.784 1.75 1.75 1.75h12.5A1.75 1.75 0 0 0 18 15.25v-4.5A1.75 1.75 0 0 0 16.25 9H3.75Z" />
           </svg>
         </div>
-        <h2 class="text-lg font-medium text-white mb-1">Create a project first</h2>
+        <h2 data-testid="agents-gate" class="text-lg font-medium text-white mb-1">Create a project first</h2>
         <p class="text-sm text-gray-400 mb-6 max-w-sm">
           Agents belong to projects. Create a project with a name and sandbox path to get started.
         </p>
@@ -42,7 +42,7 @@
               <path d="M10 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM3.465 14.493a1.23 1.23 0 0 0 .41 1.412A9.957 9.957 0 0 0 10 18c2.31 0 4.438-.784 6.131-2.1.43-.333.604-.903.408-1.41a7.002 7.002 0 0 0-13.074.003Z" />
             </svg>
           </div>
-          <h2 class="text-lg font-medium text-white mb-1">No agents yet</h2>
+          <h2 data-testid="agents-empty" class="text-lg font-medium text-white mb-1">No agents yet</h2>
           <p class="text-sm text-gray-400 mb-6 max-w-sm">
             Agents are AI assistants with specific roles, tools, and memory configurations.
           </p>
@@ -58,7 +58,7 @@
           </button>
         </div>
       <% else %>
-        <.agent_grid agents={@agents} />
+        <.agent_grid agents={@agents} project_root_path={@project.root_path} />
       <% end %>
     <% end %>
   </div>

@@ -21,4 +21,10 @@ defmodule AgentEx.Chat.Conversation do
     |> foreign_key_constraint(:user_id)
     |> foreign_key_constraint(:project_id)
   end
+
+  @doc "Changeset for updates that don't require creation-only fields."
+  def update_changeset(conversation, attrs) do
+    conversation
+    |> cast(attrs, [:title, :model, :provider])
+  end
 end

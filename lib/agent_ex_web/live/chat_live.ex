@@ -15,35 +15,42 @@ defmodule AgentExWeb.ChatLive do
   @impl true
   def mount(_params, _session, socket) do
     user = socket.assigns.current_scope.user
-    project = socket.assigns.current_project
+    project = socket.assigns[:current_project]
 
-    agents = AgentStore.list(user.id, project.id)
-    active_agent = List.first(agents)
+    if is_nil(project) do
+      {:ok,
+       socket
+       |> put_flash(:error, "No project available. Please create one first.")
+       |> redirect(to: ~p"/projects")}
+    else
+      agents = AgentStore.list(user.id, project.id)
+      active_agent = List.first(agents)
 
-    {provider, model, tools, system_prompt} = load_from_agent(active_agent, user)
-    conversations = Chat.list_conversations(user.id, project.id)
+      {provider, model, tools, system_prompt} = load_from_agent(active_agent, user)
+      conversations = Chat.list_conversations(user.id, project.id)
 
-    {:ok,
-     assign(socket,
-       messages: [],
-       events: [],
-       stages: [],
-       thinking: false,
-       run_id: nil,
-       input: "",
-       provider: provider,
-       model: model,
-       tools: tools,
-       system_prompt: system_prompt,
-       active_agent: active_agent,
-       agents: agents,
-       agent_id: project_agent_id(user, project),
-       project: project,
-       user_initials: AgentExWeb.Layouts.initials(user.username || user.email),
-       timezone: user.timezone || "Etc/UTC",
-       conversation: nil,
-       conversations: conversations
-     )}
+      {:ok,
+       assign(socket,
+         messages: [],
+         events: [],
+         stages: [],
+         thinking: false,
+         run_id: nil,
+         input: "",
+         provider: provider,
+         model: model,
+         tools: tools,
+         system_prompt: system_prompt,
+         active_agent: active_agent,
+         agents: agents,
+         agent_id: project_agent_id(user, project),
+         project: project,
+         user_initials: AgentExWeb.Layouts.initials(user.username || user.email),
+         timezone: user.timezone || "Etc/UTC",
+         conversation: nil,
+         conversations: conversations
+       )}
+    end
   end
 
   @impl true
@@ -132,7 +139,8 @@ defmodule AgentExWeb.ChatLive do
     user = socket.assigns.current_scope.user
     project = socket.assigns.project
 
-    with conversation when not is_nil(conversation) <- Chat.get_user_conversation(user.id, project.id, id),
+    with conversation when not is_nil(conversation) <-
+           Chat.get_user_conversation(user.id, project.id, id),
          {:ok, _} <- Chat.delete_conversation(conversation) do
       conversations = Chat.list_conversations(user.id, project.id)
       socket = assign(socket, conversations: conversations)
@@ -159,7 +167,8 @@ defmodule AgentExWeb.ChatLive do
   end
 
   def handle_info({:title_updated, conversation_id, title}, socket) do
-    conversations = Chat.list_conversations(socket.assigns.current_scope.user.id, socket.assigns.project.id)
+    conversations =
+      Chat.list_conversations(socket.assigns.current_scope.user.id, socket.assigns.project.id)
 
     conversation =
       if socket.assigns.conversation && socket.assigns.conversation.id == conversation_id do
@@ -254,7 +263,8 @@ defmodule AgentExWeb.ChatLive do
        thinking: false,
        stages: [],
        run_id: nil,
-       conversations: Chat.list_conversations(socket.assigns.current_scope.user.id, socket.assigns.project.id)
+       conversations:
+         Chat.list_conversations(socket.assigns.current_scope.user.id, socket.assigns.project.id)
      )}
   end
 
@@ -475,8 +485,9 @@ defmodule AgentExWeb.ChatLive do
   end
 
   defp load_from_agent(agent, _user) do
-    system_prompt = agent.system_prompt || AgentConfig.build_system_messages(agent) || "You are a helpful AI assistant."
-    {agent.provider, agent.model, default_tools(), system_prompt}
+    system_prompt = AgentConfig.build_system_messages(agent)
+    prompt = if system_prompt in [nil, ""], do: "You are a helpful AI assistant.", else: system_prompt
+    {agent.provider, agent.model, default_tools(), prompt}
   end
 
   defp default_tools do
@@ -487,8 +498,10 @@ defmodule AgentExWeb.ChatLive do
         parameters: %{"type" => "object", "properties" => %{}, "required" => []},
         kind: :read,
         function: fn _args ->
-          {os_output, 0} = System.cmd("uname", ["-srm"])
-          {:ok, String.trim(os_output)}
+          case System.cmd("uname", ["-srm"], stderr_to_stdout: true) do
+            {output, 0} -> {:ok, String.trim(output)}
+            {output, code} -> {:error, "uname failed (exit #{code}): #{String.trim(output)}"}
+          end
         end
       ),
       AgentEx.Tool.new(
@@ -497,8 +510,10 @@ defmodule AgentExWeb.ChatLive do
         parameters: %{"type" => "object", "properties" => %{}, "required" => []},
         kind: :read,
         function: fn _args ->
-          {df_output, 0} = System.cmd("df", ["-h"])
-          {:ok, df_output}
+          case System.cmd("df", ["-h"], stderr_to_stdout: true) do
+            {output, 0} -> {:ok, output}
+            {output, code} -> {:error, "df failed (exit #{code}): #{String.trim(output)}"}
+          end
         end
       ),
       AgentEx.Tool.new(

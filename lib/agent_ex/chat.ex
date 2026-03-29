@@ -30,7 +30,7 @@ defmodule AgentEx.Chat do
 
   def update_conversation_title(%Conversation{} = conversation, title) do
     conversation
-    |> Conversation.changeset(%{title: title})
+    |> Conversation.update_changeset(%{title: title})
     |> Repo.update()
   end
 

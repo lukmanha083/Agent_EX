@@ -4,6 +4,7 @@ defmodule AgentExWeb.AgentsLive do
   alias AgentEx.{AgentConfig, AgentStore}
 
   import AgentExWeb.AgentComponents
+
   import AgentExWeb.ProviderHelpers,
     only: [default_model_for: 1, provider_options: 0, models_for_provider: 1]
 
@@ -113,7 +114,10 @@ defmodule AgentExWeb.AgentsLive do
         {:noreply,
          socket
          |> assign(agents: agents, show_editor: false, editing: nil)
-         |> put_flash(:info, if(socket.assigns.editing, do: "Agent updated", else: "Agent created"))}
+         |> put_flash(
+           :info,
+           if(socket.assigns.editing, do: "Agent updated", else: "Agent created")
+         )}
 
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, "Failed to save agent: #{inspect(reason)}")}
@@ -127,7 +131,11 @@ defmodule AgentExWeb.AgentsLive do
     case AgentStore.delete(user.id, project.id, id) do
       :ok ->
         agents = AgentStore.list(user.id, project.id)
-        {:noreply, assign(socket, agents: agents)}
+
+        {:noreply,
+         socket
+         |> assign(agents: agents)
+         |> put_flash(:info, "Agent deleted")}
 
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, "Failed to delete agent: #{inspect(reason)}")}
@@ -154,7 +162,12 @@ defmodule AgentExWeb.AgentsLive do
   def handle_event("reorder_pipeline", %{"ids" => ids}, socket) do
     old = socket.assigns.intervention_pipeline
     lookup = Map.new(old, &{&1["id"], &1})
-    reordered = ids |> Enum.map(&lookup[&1]) |> Enum.reject(&is_nil/1)
+
+    reordered =
+      ids
+      |> Enum.filter(&Map.has_key?(lookup, &1))
+      |> Enum.map(&lookup[&1])
+
     {:noreply, assign(socket, intervention_pipeline: reordered)}
   end
 
@@ -170,18 +183,20 @@ defmodule AgentExWeb.AgentsLive do
     if tools == [] do
       {:noreply, socket}
     else
-      pipeline = update_write_gate(socket.assigns.intervention_pipeline, fn current ->
-        Enum.uniq(current ++ tools)
-      end)
+      pipeline =
+        update_write_gate(socket.assigns.intervention_pipeline, fn current ->
+          Enum.uniq(current ++ tools)
+        end)
 
       {:noreply, assign(socket, intervention_pipeline: pipeline)}
     end
   end
 
   def handle_event("remove_allowed_write", %{"tool" => tool}, socket) do
-    pipeline = update_write_gate(socket.assigns.intervention_pipeline, fn current ->
-      Enum.reject(current, &(&1 == tool))
-    end)
+    pipeline =
+      update_write_gate(socket.assigns.intervention_pipeline, fn current ->
+        Enum.reject(current, &(&1 == tool))
+      end)
 
     {:noreply, assign(socket, intervention_pipeline: pipeline)}
   end
@@ -206,7 +221,10 @@ defmodule AgentExWeb.AgentsLive do
 
   def handle_event("remove_disallowed_command", %{"cmd" => cmd}, socket) do
     current = socket.assigns.sandbox["disallowed_commands"] || []
-    sandbox = Map.put(socket.assigns.sandbox, "disallowed_commands", Enum.reject(current, &(&1 == cmd)))
+
+    sandbox =
+      Map.put(socket.assigns.sandbox, "disallowed_commands", Enum.reject(current, &(&1 == cmd)))
+
     {:noreply, assign(socket, sandbox: sandbox)}
   end
 
@@ -231,9 +249,11 @@ defmodule AgentExWeb.AgentsLive do
   end
 
   defp agent_to_form(agent) do
-    string_fields = ~w(name description role personality goal success_criteria scope tool_guidance output_format system_prompt provider model)
+    string_fields =
+      ~w(name description role personality goal success_criteria scope tool_guidance output_format system_prompt provider model)
 
-    base = Map.new(string_fields, fn f -> {f, Map.get(agent, String.to_existing_atom(f)) || ""} end)
+    base =
+      Map.new(string_fields, fn f -> {f, Map.get(agent, String.to_existing_atom(f)) || ""} end)
 
     Map.merge(base, %{
       "expertise" => Enum.join(agent.expertise || [], ", "),

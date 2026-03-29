@@ -74,7 +74,11 @@ defmodule AgentEx.ChatTest do
   describe "get_user_conversation/3" do
     setup [:create_user, :create_conversation]
 
-    test "returns conversation for correct user and project", %{user: user, project: project, conversation: convo} do
+    test "returns conversation for correct user and project", %{
+      user: user,
+      project: project,
+      conversation: convo
+    } do
       assert %Conversation{id: id} = Chat.get_user_conversation(user.id, project.id, convo.id)
       assert id == convo.id
     end
@@ -85,9 +89,7 @@ defmodule AgentEx.ChatTest do
     end
 
     test "returns nil for wrong project", %{user: user, conversation: convo} do
-      other_user = user_fixture()
-      other_project = Projects.get_default_project(other_user.id)
-      assert is_nil(Chat.get_user_conversation(user.id, other_project.id, convo.id))
+      assert is_nil(Chat.get_user_conversation(user.id, -1, convo.id))
     end
   end
 

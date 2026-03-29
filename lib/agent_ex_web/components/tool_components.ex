@@ -13,15 +13,16 @@ defmodule AgentExWeb.ToolComponents do
   # --- Tool source tabs ---
 
   @doc "Renders the tabbed tool management panel."
-  attr :active_tab, :string, default: "builtin"
-  attr :builtin_plugins, :list, default: []
-  attr :available_plugins, :list, default: []
-  attr :mcp_servers, :list, default: []
-  attr :custom_tools, :list, default: []
+  attr(:active_tab, :string, default: "builtin")
+  attr(:builtin_plugins, :list, default: [])
+  attr(:available_plugins, :list, default: [])
+  attr(:mcp_servers, :list, default: [])
+  attr(:custom_tools, :list, default: [])
+  attr(:attached_sources, :any, default: nil)
 
   def tool_tabs(assigns) do
     ~H"""
-    <.tabs id="tool-tabs" default="builtin" class="w-full">
+    <.tabs id="tool-tabs" default={@active_tab} class="w-full">
       <.tabs_list class="bg-gray-800/50 border border-gray-700 mb-4">
         <.tabs_trigger value="builtin" class="data-[state=active]:bg-gray-700 text-gray-300 data-[state=active]:text-white">
           Built-in
@@ -38,11 +39,11 @@ defmodule AgentExWeb.ToolComponents do
       </.tabs_list>
 
       <.tabs_content value="builtin">
-        <.builtin_tools_panel plugins={@builtin_plugins} />
+        <.builtin_tools_panel plugins={@builtin_plugins} attached_sources={@attached_sources} />
       </.tabs_content>
 
       <.tabs_content value="plugins">
-        <.plugin_browser plugins={@available_plugins} />
+        <.plugin_browser plugins={@available_plugins} attached_sources={@attached_sources} />
       </.tabs_content>
 
       <.tabs_content value="mcp">
@@ -58,7 +59,8 @@ defmodule AgentExWeb.ToolComponents do
 
   # --- Built-in tools (FileSystem, ShellExec) ---
 
-  attr :plugins, :list, default: []
+  attr(:plugins, :list, default: [])
+  attr(:attached_sources, :any, default: nil)
 
   defp builtin_tools_panel(assigns) do
     ~H"""
@@ -76,7 +78,7 @@ defmodule AgentExWeb.ToolComponents do
           version={plugin.version}
           tool_count={length(plugin.tool_names)}
           source="built-in"
-          attached={true}
+          attached={@attached_sources && MapSet.member?(@attached_sources, {"built-in", plugin.name})}
         />
       <% end %>
     </div>
@@ -85,7 +87,8 @@ defmodule AgentExWeb.ToolComponents do
 
   # --- Plugin browser ---
 
-  attr :plugins, :list, default: []
+  attr(:plugins, :list, default: [])
+  attr(:attached_sources, :any, default: nil)
 
   defp plugin_browser(assigns) do
     ~H"""
@@ -110,7 +113,7 @@ defmodule AgentExWeb.ToolComponents do
           version={plugin.version}
           tool_count={length(plugin[:tool_names] || [])}
           source="plugin"
-          attached={plugin[:attached] || false}
+          attached={@attached_sources && MapSet.member?(@attached_sources, {"plugin", plugin.name})}
         />
       <% end %>
     </div>
@@ -119,7 +122,7 @@ defmodule AgentExWeb.ToolComponents do
 
   # --- MCP servers ---
 
-  attr :servers, :list, default: []
+  attr(:servers, :list, default: [])
 
   defp mcp_panel(assigns) do
     ~H"""
@@ -143,12 +146,13 @@ defmodule AgentExWeb.ToolComponents do
       <% else %>
         <.tool_source_card
           :for={server <- @servers}
-          name={server.name}
+          name={server[:id] || server.name}
+          display_name={server.name}
           description={"#{server.transport} transport"}
           version=""
           tool_count={server.tool_count}
           source="mcp"
-          attached={true}
+          attached={server[:attached] != false}
         />
       <% end %>
     </div>
@@ -157,7 +161,7 @@ defmodule AgentExWeb.ToolComponents do
 
   # --- Custom tools ---
 
-  attr :tools, :list, default: []
+  attr(:tools, :list, default: [])
 
   defp custom_tools_panel(assigns) do
     ~H"""
@@ -190,12 +194,13 @@ defmodule AgentExWeb.ToolComponents do
   # --- Shared components ---
 
   @doc "Renders a tool source card (plugin, MCP server, etc.)."
-  attr :name, :string, required: true
-  attr :description, :string, default: ""
-  attr :version, :string, default: ""
-  attr :tool_count, :integer, default: 0
-  attr :source, :string, default: "plugin"
-  attr :attached, :boolean, default: false
+  attr(:name, :string, required: true)
+  attr(:display_name, :string, default: nil)
+  attr(:description, :string, default: "")
+  attr(:version, :string, default: "")
+  attr(:tool_count, :integer, default: 0)
+  attr(:source, :string, default: "plugin")
+  attr(:attached, :boolean, default: false)
 
   def tool_source_card(assigns) do
     ~H"""
@@ -209,7 +214,7 @@ defmodule AgentExWeb.ToolComponents do
         </div>
         <div>
           <div class="flex items-center gap-2">
-            <span class="text-sm font-medium text-white">{@name}</span>
+            <span class="text-sm font-medium text-white">{@display_name || @name}</span>
             <span :if={@version != ""} class="text-[10px] text-gray-500">{@version}</span>
           </div>
           <p :if={@description != ""} class="text-xs text-gray-400">{@description}</p>
@@ -245,7 +250,7 @@ defmodule AgentExWeb.ToolComponents do
   end
 
   @doc "Renders a single tool card."
-  attr :tool, :map, required: true
+  attr(:tool, :map, required: true)
 
   def tool_card(assigns) do
     ~H"""
@@ -262,14 +267,14 @@ defmodule AgentExWeb.ToolComponents do
   end
 
   @doc "MCP connection dialog."
-  attr :show, :boolean, default: false
-  attr :form, :map, default: %{}
+  attr(:show, :boolean, default: false)
+  attr(:form, :map, default: %{})
 
   def mcp_connect_dialog(assigns) do
     ~H"""
     <div :if={@show} class="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true">
       <div class="fixed inset-0 bg-black/60" phx-click="close_mcp_form"></div>
-      <div class="relative z-10 w-full max-w-md mx-4 rounded-lg border border-gray-800 bg-gray-900 p-6 shadow-xl">
+      <div data-testid="mcp-dialog" class="relative z-10 w-full max-w-md mx-4 rounded-lg border border-gray-800 bg-gray-900 p-6 shadow-xl">
         <div class="mb-4">
           <h2 class="text-lg font-semibold text-white">Connect MCP Server</h2>
           <p class="text-sm text-gray-400 mt-1">Connect to an MCP-compatible tool server via stdio or HTTP.</p>

@@ -36,14 +36,10 @@ defmodule AgentEx.AgentStore do
 
   @doc "List all agent configs for a user within a project."
   def list(user_id, project_id) do
-    :ets.foldl(
-      fn
-        {{^user_id, ^project_id, _agent_id}, config}, acc -> [config | acc]
-        _, acc -> acc
-      end,
-      [],
-      :agent_configs
-    )
+    pattern = {{user_id, project_id, :_}, :"$1"}
+
+    :ets.match(:agent_configs, pattern)
+    |> List.flatten()
     |> Enum.sort_by(& &1.inserted_at, {:desc, DateTime})
   rescue
     ArgumentError -> []
@@ -90,17 +86,29 @@ defmodule AgentEx.AgentStore do
   @impl GenServer
   def handle_call({:save, %AgentConfig{} = config}, _from, state) do
     key = {config.user_id, config.project_id, config.id}
-    :ets.insert(state.ets_table, {key, config})
-    :dets.insert(state.dets_table, {key, config})
-    {:reply, {:ok, config}, state}
+
+    case :dets.insert(state.dets_table, {key, config}) do
+      :ok ->
+        :ets.insert(state.ets_table, {key, config})
+        {:reply, {:ok, config}, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
   end
 
   @impl GenServer
   def handle_call({:delete, user_id, project_id, agent_id}, _from, state) do
     key = {user_id, project_id, agent_id}
-    :ets.delete(state.ets_table, key)
-    :dets.delete(state.dets_table, key)
-    {:reply, :ok, state}
+
+    case :dets.delete(state.dets_table, key) do
+      :ok ->
+        :ets.delete(state.ets_table, key)
+        {:reply, :ok, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
   end
 
   @impl GenServer
@@ -155,10 +163,19 @@ defmodule AgentEx.AgentStore do
   defp sync(ets_table, dets_table) do
     :ets.foldl(
       fn {key, value}, acc ->
-        :dets.insert(dets_table, {key, value})
-        acc + 1
+        case :dets.insert(dets_table, {key, value}) do
+          :ok ->
+            acc
+
+          {:error, reason} ->
+            Logger.warning(
+              "AgentStore sync: DETS insert failed for #{inspect(key)}: #{inspect(reason)}"
+            )
+
+            acc
+        end
       end,
-      0,
+      :ok,
       ets_table
     )
 

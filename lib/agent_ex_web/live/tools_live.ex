@@ -5,12 +5,16 @@ defmodule AgentExWeb.ToolsLive do
 
   @impl true
   def mount(_params, _session, socket) do
+    builtin = list_builtin_plugins()
+    attached = MapSet.new(builtin, &{"built-in", &1.name})
+
     {:ok,
      assign(socket,
-       builtin_plugins: list_builtin_plugins(),
+       builtin_plugins: builtin,
        available_plugins: [],
        mcp_servers: [],
        custom_tools: list_demo_tools(),
+       attached_sources: attached,
        show_mcp_form: false,
        mcp_form: %{name: "", transport: "stdio", command: ""}
      )}
@@ -26,19 +30,28 @@ defmodule AgentExWeb.ToolsLive do
   end
 
   def handle_event("connect_mcp", params, socket) do
-    server = %{
-      name: params["name"],
-      transport: params["transport"],
-      command: params["command"],
-      tool_count: 0
-    }
+    name = String.trim(params["name"] || "")
+    transport = String.trim(params["transport"] || "")
+    command = String.trim(params["command"] || "")
 
-    mcp_servers = socket.assigns.mcp_servers ++ [server]
+    if name == "" or command == "" do
+      {:noreply, put_flash(socket, :error, "Name and command are required")}
+    else
+      server = %{
+        id: Base.url_encode64(:crypto.strong_rand_bytes(8), padding: false),
+        name: name,
+        transport: transport,
+        command: command,
+        tool_count: 0
+      }
 
-    {:noreply,
-     socket
-     |> assign(mcp_servers: mcp_servers, show_mcp_form: false)
-     |> put_flash(:info, "MCP server '#{server.name}' added (connect on next agent run)")}
+      mcp_servers = socket.assigns.mcp_servers ++ [server]
+
+      {:noreply,
+       socket
+       |> assign(mcp_servers: mcp_servers, show_mcp_form: false)
+       |> put_flash(:info, "MCP server '#{server.name}' added (connect on next agent run)")}
+    end
   end
 
   def handle_event("refresh_plugins", _params, socket) do
@@ -49,13 +62,41 @@ defmodule AgentExWeb.ToolsLive do
     {:noreply, put_flash(socket, :info, "Custom tool editor coming in a future update")}
   end
 
-  def handle_event("detach_source", %{"name" => _name, "source" => _source}, socket) do
-    {:noreply, put_flash(socket, :info, "Detached")}
+  def handle_event("detach_source", %{"name" => name, "source" => source}, socket) do
+    attached = MapSet.delete(socket.assigns.attached_sources, {source, name})
+
+    {:noreply,
+     socket
+     |> update_mcp_attached(source, name, false)
+     |> assign(attached_sources: attached)
+     |> put_flash(:info, "Detached #{name}")}
   end
 
-  def handle_event("attach_source", %{"name" => _name, "source" => _source}, socket) do
-    {:noreply, put_flash(socket, :info, "Attached")}
+  def handle_event("attach_source", %{"name" => name, "source" => source}, socket) do
+    attached = MapSet.put(socket.assigns.attached_sources, {source, name})
+
+    {:noreply,
+     socket
+     |> update_mcp_attached(source, name, true)
+     |> assign(attached_sources: attached)
+     |> put_flash(:info, "Attached #{name}")}
   end
+
+  def handle_event(event, _params, socket)
+      when event in ["detach_source", "attach_source"] do
+    {:noreply, put_flash(socket, :error, "Invalid request")}
+  end
+
+  defp update_mcp_attached(socket, "mcp", name, value) do
+    servers =
+      Enum.map(socket.assigns.mcp_servers, fn s ->
+        if s.id == name or s.name == name, do: Map.put(s, :attached, value), else: s
+      end)
+
+    assign(socket, mcp_servers: servers)
+  end
+
+  defp update_mcp_attached(socket, _source, _name, _value), do: socket
 
   # --- Private helpers ---
 
@@ -78,9 +119,21 @@ defmodule AgentExWeb.ToolsLive do
 
   defp list_demo_tools do
     [
-      %{name: "get_system_info", description: "Get OS name, kernel version, and architecture", kind: :read},
-      %{name: "get_disk_usage", description: "Get disk space usage for all mounted filesystems", kind: :read},
-      %{name: "get_current_time", description: "Get the current date and time with timezone", kind: :read}
+      %{
+        name: "get_system_info",
+        description: "Get OS name, kernel version, and architecture",
+        kind: :read
+      },
+      %{
+        name: "get_disk_usage",
+        description: "Get disk space usage for all mounted filesystems",
+        kind: :read
+      },
+      %{
+        name: "get_current_time",
+        description: "Get the current date and time with timezone",
+        kind: :read
+      }
     ]
   end
 end

@@ -67,7 +67,10 @@ defmodule AgentExWeb.ProjectsLive do
         {:noreply,
          socket
          |> assign(projects: projects, show_editor: false, editing: nil)
-         |> put_flash(:info, if(socket.assigns.editing, do: "Project updated", else: "Project created"))}
+         |> put_flash(
+           :info,
+           if(socket.assigns.editing, do: "Project updated", else: "Project created")
+         )}
 
       {:error, changeset} ->
         {:noreply, put_flash(socket, :error, "Failed: #{inspect(changeset.errors)}")}
@@ -85,7 +88,11 @@ defmodule AgentExWeb.ProjectsLive do
         case Projects.delete_project(project) do
           {:ok, _} ->
             projects = Projects.list_projects(user.id)
-            {:noreply, assign(socket, projects: projects)}
+
+            {:noreply,
+             socket
+             |> assign(projects: projects)
+             |> put_flash(:info, "Project deleted")}
 
           {:error, :cannot_delete_default} ->
             {:noreply, put_flash(socket, :error, "Cannot delete the default project")}

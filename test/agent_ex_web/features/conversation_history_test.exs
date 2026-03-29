@@ -136,7 +136,11 @@ defmodule AgentExWeb.Features.ConversationHistoryTest do
   end
 
   describe "clear conversation" do
-    test "clear button navigates to empty state", %{session: session, user: user, project: project} do
+    test "clear button navigates to empty state", %{
+      session: session,
+      user: user,
+      project: project
+    } do
       {:ok, convo} =
         Chat.create_conversation(%{
           user_id: user.id,
