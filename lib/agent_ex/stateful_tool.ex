@@ -54,6 +54,8 @@ defmodule AgentEx.StatefulTool do
   def wrap(%Tool{} = tool, opts) do
     state_key = Keyword.fetch!(opts, :state_key)
     agent_id = Keyword.fetch!(opts, :agent_id)
+    user_id = Keyword.get(opts, :user_id)
+    project_id = Keyword.get(opts, :project_id)
     initial_state = Keyword.get(opts, :initial_state, %{})
     store = Keyword.get(opts, :store)
 
@@ -61,12 +63,12 @@ defmodule AgentEx.StatefulTool do
     storage_key = @state_prefix <> state_key
 
     stateful_fn = fn args ->
-      current_state = load_state(store, agent_id, storage_key, initial_state)
+      current_state = load_state(store, user_id, project_id, agent_id, storage_key, initial_state)
       args_with_state = Map.put(args, "__state", current_state)
 
       case original_fn.(args_with_state) do
         {:ok, result, new_state} ->
-          save_state(store, agent_id, storage_key, new_state)
+          save_state(store, user_id, project_id, agent_id, storage_key, new_state)
           {:ok, result}
 
         {:ok, result} ->
@@ -80,25 +82,25 @@ defmodule AgentEx.StatefulTool do
     %Tool{tool | function: stateful_fn}
   end
 
-  defp load_state(nil, agent_id, key, initial) do
-    case PersistentMemory.Store.get(agent_id, key) do
+  defp load_state(nil, user_id, project_id, agent_id, key, initial) do
+    case PersistentMemory.Store.get(user_id, project_id, agent_id, key) do
       {:ok, entry} -> entry.value
       :not_found -> initial
     end
   end
 
-  defp load_state(store, agent_id, key, initial) do
+  defp load_state(store, _user_id, _project_id, agent_id, key, initial) do
     case store.get(agent_id, key) do
       {:ok, value} -> value
       :not_found -> initial
     end
   end
 
-  defp save_state(nil, agent_id, key, state) do
-    PersistentMemory.Store.put(agent_id, key, state, "tool_state")
+  defp save_state(nil, user_id, project_id, agent_id, key, state) do
+    PersistentMemory.Store.put(user_id, project_id, agent_id, key, state, "tool_state")
   end
 
-  defp save_state(store, agent_id, key, state) do
+  defp save_state(store, _user_id, _project_id, agent_id, key, state) do
     store.put(agent_id, key, state)
   end
 end
