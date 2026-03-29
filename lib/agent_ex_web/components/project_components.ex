@@ -13,10 +13,11 @@ defmodule AgentExWeb.ProjectComponents do
 
   def project_grid(assigns) do
     ~H"""
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+    <div data-testid="project-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
       <button
         type="button"
         phx-click="new_project"
+        data-testid="new-project-btn"
         class="flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-gray-700 p-6 text-gray-400 hover:border-indigo-500 hover:text-indigo-400 transition-colors min-h-[140px]"
       >
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-8 h-8">
@@ -35,7 +36,7 @@ defmodule AgentExWeb.ProjectComponents do
 
   def project_card(assigns) do
     ~H"""
-    <div class="group relative flex flex-col rounded-lg border border-gray-800 bg-gray-900 p-4 hover:border-gray-700 transition-colors min-h-[140px]">
+    <div data-testid={"project-card-#{@project.id}"} class="group relative flex flex-col rounded-lg border border-gray-800 bg-gray-900 p-4 hover:border-gray-700 transition-colors min-h-[140px]">
       <div class="flex items-start justify-between mb-2">
         <div class="flex items-center gap-2">
           <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600/20 text-indigo-400">
@@ -96,7 +97,7 @@ defmodule AgentExWeb.ProjectComponents do
     ~H"""
     <div :if={@show} class="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true" phx-window-keydown="close_editor" phx-key="Escape">
       <div class="fixed inset-0 bg-black/60" phx-click="close_editor"></div>
-      <div class="relative z-10 w-full max-w-md mx-4 rounded-lg border border-gray-800 bg-gray-900 p-6 shadow-xl">
+      <div data-testid="project-editor" class="relative z-10 w-full max-w-md mx-4 rounded-lg border border-gray-800 bg-gray-900 p-6 shadow-xl">
         <div class="mb-4">
           <h2 class="text-lg font-semibold text-white">
             {if @project, do: "Edit Project", else: "New Project"}

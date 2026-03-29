@@ -108,6 +108,7 @@
           <input type="hidden" name="_csrf_token" value={Phoenix.Controller.get_csrf_token()} />
           <select
             name="id"
+            data-testid="project-switcher"
             onchange="this.form.action = '/projects/switch/' + this.value; this.form.submit();"
             class="block w-full rounded-lg bg-gray-800 border border-gray-700 text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm px-3 py-2"
           >

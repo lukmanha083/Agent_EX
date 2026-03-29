@@ -274,7 +274,7 @@ defmodule AgentExWeb.ToolComponents do
     ~H"""
     <div :if={@show} class="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true">
       <div class="fixed inset-0 bg-black/60" phx-click="close_mcp_form"></div>
-      <div class="relative z-10 w-full max-w-md mx-4 rounded-lg border border-gray-800 bg-gray-900 p-6 shadow-xl">
+      <div data-testid="mcp-dialog" class="relative z-10 w-full max-w-md mx-4 rounded-lg border border-gray-800 bg-gray-900 p-6 shadow-xl">
         <div class="mb-4">
           <h2 class="text-lg font-semibold text-white">Connect MCP Server</h2>
           <p class="text-sm text-gray-400 mt-1">Connect to an MCP-compatible tool server via stdio or HTTP.</p>
