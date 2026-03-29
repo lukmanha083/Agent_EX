@@ -3,8 +3,8 @@ QUERY SearchMemory(vector: [F64], limit: I64) =>
     results <- SearchV<Memory>(vector, limit)
     RETURN results
 
-QUERY AddMemory(vector: [F64], content: String, memory_type: String, agent_id: String, session_id: String) =>
-    mem <- AddV<Memory>(vector, { content: content, memory_type: memory_type, agent_id: agent_id, session_id: session_id })
+QUERY AddMemory(vector: [F64], content: String, memory_type: String, agent_id: String, user_id: String, project_id: String, session_id: String) =>
+    mem <- AddV<Memory>(vector, { content: content, memory_type: memory_type, agent_id: agent_id, user_id: user_id, project_id: project_id, session_id: session_id })
     RETURN mem
 
 QUERY DeleteMemory(id: ID) =>
@@ -20,9 +20,9 @@ QUERY CreateEntity(name: String, entity_type: String, description: String, summa
     })
     RETURN entity
 
-QUERY CreateEpisode(content: String, role: String, source: String, agent_id: String, now: String) =>
+QUERY CreateEpisode(content: String, role: String, source: String, agent_id: String, user_id: String, project_id: String, now: String) =>
     episode <- AddN<Episode>({
-        content: content, role: role, source: source, agent_id: agent_id, occurred_at: now
+        content: content, role: role, source: source, agent_id: agent_id, user_id: user_id, project_id: project_id, occurred_at: now
     })
     RETURN episode
 
@@ -43,8 +43,8 @@ QUERY StoreEntityEmbedding(entity_id: ID, entity_name: String, entity_descriptio
     link <- AddE<HasEmbedding>({ linked_at: now })::From(entity_id)::To(emb)
     RETURN emb
 
-QUERY StoreEpisodeEmbedding(episode_id: ID, content_summary: String, agent_id: String, vector: [F64], now: String) =>
-    emb <- AddV<EpisodeEmbedding>(vector, { content_summary: content_summary, agent_id: agent_id })
+QUERY StoreEpisodeEmbedding(episode_id: ID, content_summary: String, agent_id: String, user_id: String, project_id: String, vector: [F64], now: String) =>
+    emb <- AddV<EpisodeEmbedding>(vector, { content_summary: content_summary, agent_id: agent_id, user_id: user_id, project_id: project_id })
     link <- AddE<HasEpisodeEmbedding>({ linked_at: now })::From(episode_id)::To(emb)
     RETURN emb
 

@@ -3,6 +3,8 @@ V::Memory {
     content: String,
     memory_type: String,
     agent_id: String,
+    user_id: String,
+    project_id: String,
     session_id: String,
     created_at: String
 }
@@ -14,7 +16,9 @@ V::EntityEmbedding {
 
 V::EpisodeEmbedding {
     content_summary: String,
-    agent_id: String
+    agent_id: String,
+    user_id: String,
+    project_id: String
 }
 
 V::FactEmbedding {
@@ -38,6 +42,8 @@ N::Episode {
     role: String,
     source: String,
     agent_id: String,
+    user_id: String,
+    project_id: String,
     occurred_at: String
 }
 

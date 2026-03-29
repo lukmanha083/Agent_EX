@@ -1,7 +1,10 @@
 defmodule AgentEx.Memory.PersistentMemory.Store do
   @moduledoc """
   Tier 2: Persistent memory using ETS (fast reads) backed by DETS (disk persistence).
-  Keys are namespaced by `{agent_id, key}` so each agent has its own memory space.
+  Keys are `{user_id, project_id, agent_id, key}` for per-user, per-project, per-agent isolation.
+
+  All public functions take `(user_id, project_id, agent_id, ...)` as the first three params
+  to enforce proper multi-tenant scoping. There are no fallback fold paths.
   """
 
   use GenServer
@@ -21,21 +24,31 @@ defmodule AgentEx.Memory.PersistentMemory.Store do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
 
-  def put(agent_id, key, value, type, opts \\ []) do
-    GenServer.call(__MODULE__, {:put, agent_id, key, value, type, opts})
+  @doc """
+  Store a persistent memory entry scoped by `(user_id, project_id, agent_id)`.
+
+  ## Options
+  - `:metadata` — additional metadata map
+  """
+  def put(user_id, project_id, agent_id, key, value, type, opts \\ []) do
+    GenServer.call(__MODULE__, {:put, user_id, project_id, agent_id, key, value, type, opts})
   end
 
-  def get(agent_id, key) do
-    case :ets.lookup(:persistent_memory, {agent_id, key}) do
-      [{{^agent_id, ^key}, entry}] -> {:ok, entry}
+  @doc "Direct ETS lookup by `(user_id, project_id, agent_id, key)`."
+  def get(user_id, project_id, agent_id, key) do
+    case :ets.lookup(:persistent_memory, {user_id, project_id, agent_id, key}) do
+      [{_key, entry}] -> {:ok, entry}
       [] -> :not_found
     end
+  rescue
+    ArgumentError -> :not_found
   end
 
-  def get_by_type(agent_id, type) do
+  @doc "Return all entries matching `(user_id, project_id, agent_id)` with the given type."
+  def get_by_type(user_id, project_id, agent_id, type) do
     :ets.foldl(
       fn
-        {{^agent_id, _key}, entry}, acc ->
+        {{^user_id, ^project_id, ^agent_id, _key}, entry}, acc ->
           if entry.type == type, do: [entry | acc], else: acc
 
         _, acc ->
@@ -44,28 +57,44 @@ defmodule AgentEx.Memory.PersistentMemory.Store do
       [],
       :persistent_memory
     )
+  rescue
+    ArgumentError -> []
   end
 
-  def delete(agent_id, key) do
-    GenServer.call(__MODULE__, {:delete, agent_id, key})
+  @doc "Delete a single entry by `(user_id, project_id, agent_id, key)`."
+  def delete(user_id, project_id, agent_id, key) do
+    GenServer.call(__MODULE__, {:delete, user_id, project_id, agent_id, key})
   end
 
-  def all(agent_id) do
+  @doc "Delete all entries for an agent scoped by `(user_id, project_id, agent_id)`."
+  def delete_all(user_id, project_id, agent_id) do
+    GenServer.call(__MODULE__, {:delete_all, user_id, project_id, agent_id})
+  end
+
+  @doc "Delete all entries for a user's project (cascade delete)."
+  def delete_by_project(user_id, project_id) do
+    GenServer.call(__MODULE__, {:delete_by_project, user_id, project_id})
+  end
+
+  @doc "Return all entries for `(user_id, project_id, agent_id)`. Reads directly from ETS."
+  def all(user_id, project_id, agent_id) do
     :ets.foldl(
       fn
-        {{^agent_id, _key}, entry}, acc -> [entry | acc]
+        {{^user_id, ^project_id, ^agent_id, _key}, entry}, acc -> [entry | acc]
         _, acc -> acc
       end,
       [],
       :persistent_memory
     )
+  rescue
+    ArgumentError -> []
   end
 
   # --- Tier callbacks ---
 
   @impl AgentEx.Memory.Tier
-  def to_context_messages(agent_id, _identifier \\ nil) do
-    entries = all(agent_id)
+  def to_context_messages({user_id, project_id, agent_id}, _identifier \\ nil) do
+    entries = all(user_id, project_id, agent_id)
 
     if entries == [] do
       []
@@ -84,8 +113,8 @@ defmodule AgentEx.Memory.PersistentMemory.Store do
   end
 
   @impl AgentEx.Memory.Tier
-  def token_estimate(agent_id, _identifier \\ nil) do
-    entries = all(agent_id)
+  def token_estimate({user_id, project_id, agent_id}, _identifier \\ nil) do
+    entries = all(user_id, project_id, agent_id)
     Enum.reduce(entries, 0, fn e, acc -> acc + div(String.length("#{e.key}: #{e.value}"), 4) end)
   end
 
@@ -118,18 +147,53 @@ defmodule AgentEx.Memory.PersistentMemory.Store do
   end
 
   @impl GenServer
-  def handle_call({:put, agent_id, key, value, type, opts}, _from, state) do
+  def handle_call({:put, user_id, project_id, agent_id, key, value, type, opts}, _from, state) do
     entry = Entry.new(key, value, type, opts)
-    :ets.insert(state.ets_table, {{agent_id, key}, entry})
-    :dets.insert(state.dets_table, {{agent_id, key}, entry})
+    ets_key = {user_id, project_id, agent_id, key}
+
+    :ets.insert(state.ets_table, {ets_key, entry})
+    :dets.insert(state.dets_table, {ets_key, entry})
     {:reply, :ok, state}
   end
 
   @impl GenServer
-  def handle_call({:delete, agent_id, key}, _from, state) do
-    :ets.delete(state.ets_table, {agent_id, key})
-    :dets.delete(state.dets_table, {agent_id, key})
+  def handle_call({:delete, user_id, project_id, agent_id, key}, _from, state) do
+    ets_key = {user_id, project_id, agent_id, key}
+    :ets.delete(state.ets_table, ets_key)
+    :dets.delete(state.dets_table, ets_key)
     {:reply, :ok, state}
+  end
+
+  @impl GenServer
+  def handle_call({:delete_all, user_id, project_id, agent_id}, _from, state) do
+    keys =
+      :ets.foldl(
+        fn
+          {{^user_id, ^project_id, ^agent_id, _} = k, _}, acc -> [k | acc]
+          _, acc -> acc
+        end,
+        [],
+        state.ets_table
+      )
+
+    delete_keys(state, keys)
+    {:reply, {:ok, length(keys)}, state}
+  end
+
+  @impl GenServer
+  def handle_call({:delete_by_project, user_id, project_id}, _from, state) do
+    keys =
+      :ets.foldl(
+        fn
+          {{^user_id, ^project_id, _, _} = k, _}, acc -> [k | acc]
+          _, acc -> acc
+        end,
+        [],
+        state.ets_table
+      )
+
+    delete_keys(state, keys)
+    {:reply, {:ok, length(keys)}, state}
   end
 
   @impl GenServer
@@ -144,6 +208,15 @@ defmodule AgentEx.Memory.PersistentMemory.Store do
     Loader.sync(state.ets_table, state.dets_table)
     :dets.close(state.dets_table)
     :ok
+  end
+
+  # --- Private helpers ---
+
+  defp delete_keys(state, keys) do
+    Enum.each(keys, fn key ->
+      :ets.delete(state.ets_table, key)
+      :dets.delete(state.dets_table, key)
+    end)
   end
 
   defp schedule_sync(interval) do

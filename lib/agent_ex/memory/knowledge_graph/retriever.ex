@@ -11,7 +11,7 @@ defmodule AgentEx.Memory.KnowledgeGraph.Retriever do
 
   require Logger
 
-  def hybrid_search(agent_id, query, limit \\ 5) do
+  def hybrid_search(_user_id, _project_id, agent_id, query, limit \\ 5) do
     with {:ok, vector} <- Embeddings.embed(query) do
       tasks = [
         Task.async(fn -> search_episodes(agent_id, vector, limit) end),
