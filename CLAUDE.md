@@ -44,7 +44,7 @@ Companion to the Python learning project at `../agent/`.
 - `docs/overview.md` — Project overview, motivation, and quick start
 - `docs/architecture.md` — OTP process architecture and AutoGen mapping
 - `docs/features.md` — Feature breakdown with AutoGen comparisons
-- `docs/memory.md` — 3-tier memory system, knowledge graph, per-agent isolation
+- `docs/memory.md` — 4-tier memory system, knowledge graph, per-agent isolation
 - `docs/modules.md` — Module reference (structs, functions, types)
 
 ## Module Layout
@@ -77,7 +77,7 @@ Companion to the Python learning project at `../agent/`.
 - `lib/agent_ex/agent_store.ex` — ETS/DETS persistence for agent configs
 - `lib/agent_ex/example.ex` — Usage example
 
-### 3-Tier Memory System + Knowledge Graph (`AgentEx.Memory`)
+### 4-Tier Memory System + Knowledge Graph (`AgentEx.Memory`)
 - `lib/agent_ex/memory.ex` — Public API facade
 - `lib/agent_ex/memory/tier.ex` — `@behaviour` for all memory tiers (`to_context_messages/1`, `token_estimate/1`)
 - `lib/agent_ex/memory/message.ex` — Timestamped conversation message (working memory)
@@ -93,24 +93,32 @@ Companion to the Python learning project at `../agent/`.
 - `lib/agent_ex/memory/knowledge_graph/extractor.ex` — LLM entity/relationship extraction (reuses `ModelClient`)
 - `lib/agent_ex/memory/knowledge_graph/retriever.ex` — Hybrid graph+vector retrieval (3 parallel strategies)
 - `lib/agent_ex/memory/embeddings.ex` — OpenAI embedding API client
+- `lib/agent_ex/memory/procedural_memory/store.ex` — ETS + DETS skill storage (Tier 4)
+- `lib/agent_ex/memory/procedural_memory/skill.ex` — Skill struct with EMA confidence tracking
+- `lib/agent_ex/memory/procedural_memory/observer.ex` — Records tool observations for skill extraction
+- `lib/agent_ex/memory/procedural_memory/reflector.ex` — LLM-based skill extraction on session close
+- `lib/agent_ex/memory/procedural_memory/loader.ex` — DETS ↔ ETS hydration/sync for skills
 - `lib/agent_ex/memory/context_builder.ex` — Compose all tiers + KG into LLM prompt
-- `lib/agent_ex/memory/promotion.ex` — Memory promotion: session summaries + save_memory tool
+- `lib/agent_ex/memory/promotion.ex` — Memory promotion: session summaries + save_memory tool + Reflector hook
 - `helix/schema.hx` — HelixDB vector/node/edge type definitions
 - `helix/queries.hx` — HelixQL queries for CRUD + search
 
 ### Memory Architecture
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                       ContextBuilder                          │
-│  Gathers all tiers + knowledge graph → LLM-ready messages     │
-└───┬────────────┬─────────────────┬────────────────┬──────────┘
-    │            │                 │                │
-┌───▼───┐  ┌────▼─────┐  ┌───────▼───────┐  ┌─────▼──────────┐
-│ Tier 1 │  │  Tier 2   │  │    Tier 3      │  │ Knowledge Graph│
-│Working │  │Persistent │  │   Semantic     │  │  (HelixDB      │
-│Memory  │  │ Memory    │  │   Memory       │  │   Graph+Vector)│
-│(GenSrv)│  │(ETS+DETS) │  │(HelixDB Vector)│  │                │
-└────────┘  └──────────┘  └───────────────┘  └────────────────┘
+┌───────────────────────────────────────────────────────────────────────┐
+│                           ContextBuilder                               │
+│  Gathers all tiers + knowledge graph → LLM-ready messages              │
+└──┬────────────┬──────────────┬──────────────┬──────────────┬──────────┘
+   │            │              │              │              │
+┌──▼───┐  ┌────▼─────┐  ┌────▼────────┐  ┌──▼──────────┐  ┌▼─────────────┐
+│Tier 1│  │  Tier 2   │  │   Tier 3     │  │   Tier 4    │  │Knowledge Graph│
+│Work- │  │Persistent │  │  Semantic    │  │ Procedural  │  │  (HelixDB     │
+│ing   │  │ Memory    │  │  Memory     │  │  Memory     │  │  Graph+Vector)│
+│Memory│  │(ETS+DETS) │  │(HelixDB Vec)│  │ (ETS+DETS)  │  │               │
+│(Gen- │  └──────────┘  └────────────┘  │  Skills +    │  └───────────────┘
+│Serv) │                                 │  Observer +  │
+└──────┘                                 │  Reflector   │
+                                         └─────────────┘
 ```
 
 ## Development

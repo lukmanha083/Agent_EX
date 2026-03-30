@@ -171,6 +171,9 @@ Phase 4 (Phoenix + EventLoop) ──▶ Phase 4b (Timezone + Scoping) ──▶ 
                                                                               │
                                                                               ▼
                                                                     Phase 8 (Hybrid Bridge — Remote Computer Use)
+                                                                              │
+                                                                              ▼
+                                                                    Phase 8b (Procedural Memory: Skill → AgentConfig Promotion)
 ```
 
 - Phases 1, 2, and 4 can start in **parallel**.
@@ -187,8 +190,23 @@ Phase 4 (Phoenix + EventLoop) ──▶ Phase 4b (Timezone + Scoping) ──▶ 
 - Phase 8 depends on Phase 7 (full platform) + Phase 5 (AgentStore, sandbox config).
   - Phase 8 uses the MCP transport layer (Phase 1 MCP.Client) as the bridge protocol.
   - Phase 8 WebSocket transport leverages Phoenix Channels (Phase 4).
+- Phase 8b depends on Phase 8 (AgentConfig with `build_system_messages`, reward system)
+  + Tier 4 Procedural Memory (already implemented: Store, Observer, Reflector).
+  - Phase 8b promotes high-confidence Tier 4 skills into AgentConfig.learned_skills.
 
-**Recommended order:** 1+2 (parallel) → 3 → 4 → 4b → 4d → 4c → 5 → **5a** → 5b → 5c → 6 → 7 → 8.
+**Recommended order:** 1+2 (parallel) → 3 → 4 → 4b → 4d → 4c → 5 → **5a** → 5b → 5c → 6 → 7 → 8 → 8b.
+
+**Note — Tier 4 Procedural Memory (already implemented):**
+The following modules are already implemented and integrated, providing the
+foundation that phases 5+ and 8b build on:
+- `ProceduralMemory.Store` — ETS+DETS GenServer storing `Skill` structs (Tier behaviour)
+- `ProceduralMemory.Skill` — Skill struct with EMA confidence tracking
+- `ProceduralMemory.Observer` — Records tool observations to Tier 2 for later reflection
+- `ProceduralMemory.Reflector` — LLM-based skill extraction on session close
+- `ProceduralMemory.Loader` — DETS↔ETS hydration/sync
+- `ContextBuilder` — Gathers procedural skills alongside Tiers 1-3 + KG
+- `Memory` facade — Exposes Tier 4 API (store_skill, list_skills, top_skills, etc.)
+- `Promotion` — Calls `Reflector.reflect/6` after session summary (fire-and-forget via TaskSupervisor)
 
 ---
 
@@ -1202,7 +1220,7 @@ live permission decision matrix.
 │ │ Researcher │ │  Analyst   │ │   Writer   │               │
 │ │ gpt-5.4    │ │ claude-h   │ │ claude-h   │               │
 │ │ 3 tools    │ │ 2 tools    │ │ 0 tools    │               │
-│ │ Tier 2 mem │ │ Tier 3 mem │ │ Tier 1     │               │
+│ │ T2+T4 mem  │ │ T3+T4 mem  │ │ Tier 1     │               │
 │ └────────────┘ └────────────┘ └────────────┘               │
 │                                                              │
 │ Agent editor: name, system prompt, model, tools,             │
@@ -1427,9 +1445,11 @@ agent_id = "u#{user.id}_p#{project.id}_chat"
 agent_id = "u#{user.id}_p#{project.id}_#{agent_config.id}"
 ```
 
-This means **all memory tiers** (Tier 1/2/3 + KG) get project isolation for
-free without changing their key structures. The convention is enforced at the
-UI/context layer, not the storage layer.
+This means **all memory tiers** (Tier 1/2/3/4 + KG) get project isolation for
+free without changing their key structures. Tier 4 (Procedural Memory) already
+uses `{user_id, project_id, agent_id, skill_name}` composite keys, so it gets
+project isolation natively. The convention is enforced at the UI/context layer,
+not the storage layer.
 
 ### Chat Query Changes
 
@@ -1580,23 +1600,29 @@ and output format as separate fields (not crammed into a single system_prompt).
 [System Message 5: Memory] (existing ContextBuilder)
   Tier 2 key-value facts + Tier 3 past outcomes + KG entities
 
-[System Message 6: Few-Shot Examples] (from tool_examples)
+[System Message 6: Learned Skills] (from Tier 4 Procedural Memory)
+  Top skills by confidence from ProceduralMemory.Store
+  "## Learned Skills & Strategies\n{formatted_skills}"
+  Injected by ContextBuilder.gather_procedural/1
+
+[System Message 7: Few-Shot Examples] (from tool_examples)
   Formatted as user/assistant message pairs with tool calls
 
-[System Message 7: Output Format]
+[System Message 8: Output Format]
   Built from: output_format
   "Respond using this structure:\n{output_format}"
 
-[System Message 8: Additional Instructions]
+[System Message 9: Additional Instructions]
   Built from: system_prompt (free-form, appended last)
 
 [User Message: actual task]
 [... conversation history ...]
 ```
 
-`AgentConfig.build_system_messages/1` composes messages 1-3, 7-8 from the struct
-fields. `ContextBuilder.build/3` adds messages 4-6 from the memory system.
-The chat orchestrator calls both and concatenates before the first LLM call.
+`AgentConfig.build_system_messages/1` composes messages 1-3, 8-9 from the struct
+fields. `ContextBuilder.build/3` adds messages 4-7 from the memory system
+(including Tier 4 learned skills). The chat orchestrator calls both and
+concatenates before the first LLM call.
 
 **Research backing:**
 - Few-shot tool examples improve Claude accuracy from 16% → 52% (LangChain 2024)
@@ -2628,10 +2654,10 @@ graph visualization.
 ```text
 ┌─────────────────────────────────────────────────────────────┐
 │  Memory Tab                  Agent: [Researcher ▼]           │
-├──────────┬──────────┬──────────┬────────────────────────────┤
-│ Tier 1   │ Tier 2   │ Tier 3   │ Knowledge Graph            │
-│ Working  │ Persist  │ Semantic │ Entities                   │
-├──────────┴──────────┴──────────┴────────────────────────────┤
+├──────────┬──────────┬──────────┬──────────┬─────────────────┤
+│ Tier 1   │ Tier 2   │ Tier 3   │ Tier 4   │ Knowledge Graph │
+│ Working  │ Persist  │ Semantic │ Skills   │ Entities        │
+├──────────┴──────────┴──────────┴──────────┴─────────────────┤
 │ Tier 1: Recent conversations                                │
 │   session-4559: 12 messages, 2.1k tokens                   │
 │   session-4558: 8 messages, 1.4k tokens                    │
@@ -2644,6 +2670,16 @@ graph visualization.
 │ Tier 3: Semantic search                                     │
 │   [Search memories...                    ] [Search]         │
 │   "AAPL analysis" → 3 results (0.92, 0.87, 0.71 relevance)│
+│                                                              │
+│ Tier 4: Learned Skills (Procedural Memory)                  │
+│   web_research_with_fallback  (92% confidence, 15 uses)     │
+│     Domain: research                                        │
+│     Tools: web_search → web_fetch                           │
+│     Strategy: Search → extract → retry with alt query on 404│
+│   data_analysis_pipeline      (78% confidence, 8 uses)      │
+│     Domain: data_analysis                                   │
+│     Tools: read_file → code_exec                            │
+│   [Filter by domain ▼]  [Sort by: confidence ▼]            │
 │                                                              │
 │ Knowledge Graph:                                             │
 │   [Search entities...                    ] [Search]         │
@@ -2665,8 +2701,9 @@ graph visualization.
 | Create | `lib/agent_ex_web/live/memory/working_memory_component.ex` | Tier 1 session browser |
 | Create | `lib/agent_ex_web/live/memory/persistent_memory_component.ex` | Tier 2 key-value editor |
 | Create | `lib/agent_ex_web/live/memory/semantic_memory_component.ex` | Tier 3 search + results |
+| Create | `lib/agent_ex_web/live/memory/procedural_memory_component.ex` | Tier 4 skills browser (filter, sort, confidence bars) |
 | Create | `lib/agent_ex_web/live/memory/knowledge_graph_component.ex` | d3-force graph visualization |
-| Create | `lib/agent_ex_web/components/memory_components.ex` | Cards, search bar, tier badges |
+| Create | `lib/agent_ex_web/components/memory_components.ex` | Cards, search bar, tier badges, skill cards |
 | Create | `assets/js/hooks/graph_viewer.js` | d3-force graph hook |
 | Modify | `lib/agent_ex_web/router.ex` | Add `/runs`, `/memory` |
 | Modify | `lib/agent_ex_web/components/layouts/app.html.heex` | Tabbed workspace nav |
@@ -2943,6 +2980,7 @@ pattern used by auto-research systems:
 │                 │ - Tier 2: best_score=0.92│   Next iteration   │
 │                 │ - Tier 3: "approach X    │   gets this context│
 │                 │   worked, Y didn't"      │                    │
+│                 │ - Tier 4: learned skills │                    │
 │                 │ - KG: entity relations   │                    │
 │                 └──────────────────────────┘                    │
 │                                                                   │
@@ -2957,7 +2995,15 @@ pattern used by auto-research systems:
 | **Tier 1 (Working)** | Current iteration's conversation | Tool calls, observations, reasoning |
 | **Tier 2 (Persistent)** | Iteration-level state registers | `best_score=0.92`, `iterations_completed=15`, `last_strategy=approach_X` |
 | **Tier 3 (Semantic)** | Searchable outcome history | "Iteration 7: dropout 0.3 gave 84.1% val acc — best so far" |
+| **Tier 4 (Procedural)** | Learned skills & strategies | "web_research_with_fallback: search → extract → retry on 404 (92% confidence)" |
 | **Knowledge Graph** | Shared entity knowledge | "AAPL → traded_on → NASDAQ", "ResNet → uses → skip connections" |
+
+**Tier 4 in the RL loop:** After each session, `Reflector.reflect/6` analyzes
+tool observations (recorded by `Observer`) and extracts/updates `Skill` structs
+in `ProceduralMemory.Store`. On the next session, `ContextBuilder` injects top
+skills as a `## Learned Skills & Strategies` system section. The agent sees
+"here are strategies that worked before" — and reuses or adapts them. Skill
+confidence updates via EMA (0.9 decay) so unreliable skills decay naturally.
 
 **The feedback loop:** Iteration N stores outcomes in Tier 3 via `save_memory`
 tool → Iteration N+1 starts → `ContextBuilder.build` queries Tier 3 with the
@@ -2985,7 +3031,13 @@ Autonomous agents need reward signals at two granularities:
 The problem with relying solely on the LLM calling `save_memory` is that it
 might forget. For autonomous agents, every tool result is automatically logged
 as a structured observation. This hooks into `Sensing.sense/3` which already
-processes every tool result:
+processes every tool result.
+
+**Note:** `ProceduralMemory.Observer` (already implemented) provides the
+foundation for this — it records tool execution observations to Tier 2 keyed
+by `"proc_obs:<session_id>:<tool_name>:<usec_timestamp>"`. The
+`ObservationLogger` below extends this for autonomous-mode step rewards with
+delta tracking and metrics comparison:
 
 ```elixir
 defmodule AgentEx.Bridge.ObservationLogger do
@@ -3061,8 +3113,11 @@ Trend: val_acc improving +0.015/step, loss decreasing
 
 ##### Episode-Level Session Summary
 
-Already implemented via `Memory.Promotion.close_session_with_summary/3`. For
-autonomous agents, this fires automatically on budget exhaustion:
+Already implemented via `Memory.Promotion.close_session_with_summary/6`. For
+autonomous agents, this fires automatically on budget exhaustion. The existing
+implementation already chains into Tier 4 skill extraction — after summarizing
+the session to Tier 3, it fires `Reflector.reflect/6` (via TaskSupervisor) to
+extract/update procedural skills from the session's observations:
 
 ```text
 Budget exhausted (50/50 iterations) → auto-triggers:
@@ -3096,9 +3151,13 @@ Session 2 (new experiment, 50 more iterations):
   ContextBuilder.build() injects:
     Tier 2: best_score=0.91, best_lr=0.001       ← step-level state
     Tier 3: "Session 1: lr=0.001 optimal..."     ← episode-level insight
+    Tier 4: "ml_hyperparameter_tuning (82%):     ← learned skill
+             reduce lr on plateau, add dropout    from Reflector
+             for regularization"
   Step 1:  THINK → "I know lr=0.001 works and dropout=0.3 is best.
+                     My learned strategy says reduce lr on plateau.
                      Session 1 didn't try weight decay. Let me try that."
-           ← informed by BOTH step state AND episode summary
+           ← informed by step state + episode summary + learned skills
 ```
 
 #### Anomaly Observer (Background Safety Net)
@@ -3347,6 +3406,7 @@ Session start:                      Session start:
 
 During session:                     During session:
   LLM can call save_memory             ObservationLogger auto-logs steps
+  Observer records tool outcomes        Observer records tool outcomes
   (optional, LLM-initiated)            LLM can call save_memory
                                         BudgetEnforcer tracks limits
 
@@ -3360,9 +3420,13 @@ Session end:                        Session end:
 Episode promotion:                  Episode promotion:
   Promotion.close_session_with_        Promotion.close_session_with_
     summary() → Tier 3                   summary() → Tier 3
+  Reflector.reflect() → Tier 4         Reflector.reflect() → Tier 4
+    (extract/update learned skills)      (extract/update learned skills)
   Stop working memory server           Stop working memory server
 
-Both produce Tier 3 episode summaries that inform future sessions.
+Both produce Tier 3 episode summaries AND Tier 4 skill updates that
+inform future sessions. Skills with confidence ≥ 0.7 appear in the
+agent's context via ContextBuilder.
 ```
 
 #### Design Decisions
@@ -3446,10 +3510,11 @@ Three GenServer layers that coordinate through the existing memory system:
 └─────────────────────────────────────────────────────────────────┘
          │                  │                    │
     ┌────▼──────────────────▼────────────────────▼────┐
-    │          Shared Memory (3-Tier + KG)             │
+    │          Shared Memory (4-Tier + KG)             │
     │  Tier 2: action records, pending outcomes,       │
     │          proxy calibrations, strategy prefs       │
     │  Tier 3: evaluated outcomes (searchable)          │
+    │  Tier 4: learned skills from prior sessions       │
     │  KG: action → outcome entity relationships        │
     └──────────────────────────────────────────────────┘
 ```
@@ -4098,7 +4163,7 @@ end
 | D22 | Budget as Gate 4 replacement | `max_iterations`, `max_wall_time_s`, `max_cost_usd` enforce autonomy boundaries. Agent stops gracefully when any limit is reached. |
 | D23 | Memory as reward signal | Tier 3 stores experiment outcomes, ContextBuilder injects them into next iteration. In-context RL — LLM improves via richer memory, not weight updates. |
 | D24 | Anomaly observer (background) | Monitors tool calls via PubSub. Pauses agent on: repeated failures, resource spikes, out-of-sandbox attempts, budget warnings. Non-blocking. |
-| D25 | Two-level reward: step + episode | Step rewards (every SENSE cycle → Tier 2) give fine-grained feedback within a session. Episode rewards (session summary → Tier 3) give strategic guidance across sessions. Both are automatic for autonomous agents. |
+| D25 | Three-level reward: step + episode + skill | Step rewards (every SENSE cycle → Tier 2) give fine-grained feedback within a session. Episode rewards (session summary → Tier 3) give strategic guidance across sessions. Skill extraction (Reflector → Tier 4) captures reusable tool strategies. All three are automatic for autonomous agents. |
 | D26 | ObservationLogger hooks into Sensing | Auto-logs structured observations (tool, args, result, delta) after every tool result. Only active for `:autonomous` agents. LLM still has `save_memory` for subjective insights — logger captures objective data. |
 | D27 | 5-layer session lifecycle | Explicit close → conversation switch → idle timeout → logout → daily GC. Each layer catches what the one above misses. |
 | D28 | GenServer idle timeout (30 min) | Zero-overhead timer built into BEAM. Every message resets it. No polling, no cron. Catches the majority of forgotten sessions. |
@@ -4170,7 +4235,7 @@ Why BEAM/Elixir is uniquely suited for the bridge pattern:
 | Modify | `lib/agent_ex_web/components/agent_components.ex` | Show bridge-required badge on tools |
 | Create | `lib/agent_ex/bridge/budget_enforcer.ex` | Tracks iteration count, wall time, token cost per autonomous run |
 | Create | `lib/agent_ex/bridge/anomaly_observer.ex` | PubSub-based background monitor, pauses agent on suspicious patterns |
-| Create | `lib/agent_ex/bridge/observation_logger.ex` | Auto-logs every tool result as structured step observation for autonomous agents |
+| Create | `lib/agent_ex/bridge/observation_logger.ex` | Auto-logs every tool result as structured step observation for autonomous agents (extends existing ProceduralMemory.Observer with delta tracking) |
 | Modify | `lib/agent_ex/agent_config.ex` | Add `execution_mode` (`:interactive` / `:autonomous`) and `budget` fields |
 | Modify | `assets/js/app.js` | Bridge presence hook |
 | Modify | `mix.exs` | Add `slipstream`, `burrito` |
@@ -4258,9 +4323,15 @@ Why BEAM/Elixir is uniquely suited for the bridge pattern:
 | 5b — Chat Orchestrator + REST | 8 | 3 | 11 |
 | 5c — Workflow Engine | 10 | 5 | 15 |
 | 6 — Flow Builder + Triggers | 17 | 4 | 21 |
-| 7 — Run View + Memory | 11 | 4 | 15 |
+| 7 — Run View + Memory | 12 | 4 | 16 |
 | 8 — Hybrid Bridge | 25 | 14 | 39 |
-| **Total** | **119** | **67** | **186** |
+| 8b — Procedural Memory Promotion | 1 | 6 | 7 |
+| **Total** | **121** | **73** | **194** |
+
+**Already implemented (Tier 4 foundation):** `ProceduralMemory.Store`,
+`Skill`, `Observer`, `Reflector`, `Loader` + `ContextBuilder` integration +
+`Memory` facade + `Promotion` → Reflector hook. These are not counted in the
+manifest as they are already in the codebase.
 
 ### Dependencies
 
@@ -4281,7 +4352,9 @@ lib/agent_ex/
 │   └── shell_exec.ex                       # Phase 1
 ├── memory/
 │   ├── promotion.ex                        # Phase 2
-│   └── session_gc.ex                      # Phase 8
+│   ├── session_gc.ex                      # Phase 8
+│   └── procedural_memory/
+│       └── promoter.ex                    # Phase 8b
 ├── pipe.ex                                 # Phase 3
 ├── timezone.ex                             # Phase 4b
 ├── chat.ex                                 # Phase 4c
