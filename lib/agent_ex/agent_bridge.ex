@@ -8,6 +8,8 @@ defmodule AgentEx.AgentBridge do
 
   alias AgentEx.{AgentConfig, AgentStore, HttpTool, HttpToolStore, Pipe, ProviderTools, Tool}
 
+  require Logger
+
   @doc """
   Build delegate tools for all agents in a project.
   Each agent becomes: delegate_to_<name>(task) -> runs agent's full loop -> returns result.
@@ -96,7 +98,10 @@ defmodule AgentEx.AgentBridge do
   defp resolve_handler("log_handler", _entry),
     do: [AgentEx.Intervention.LogHandler]
 
-  defp resolve_handler(_, _), do: []
+  defp resolve_handler(unknown_id, _entry) do
+    Logger.warning("AgentBridge: unknown intervention handler '#{unknown_id}', skipping")
+    []
+  end
 
   @doc """
   Build the list of non-delegate tools available to agents in a project.

@@ -107,13 +107,16 @@ defmodule AgentEx.HttpTool do
     fn args ->
       url = interpolate(config.url_template, args)
       headers = interpolate_headers(config.headers, args)
-      method = String.downcase(config.method) |> String.to_existing_atom()
+      method = parse_method(config.method)
 
-      req_opts = [method: method, url: url, headers: headers]
+      url_params = extract_template_params(config.url_template)
+      body_args = Map.drop(args, url_params)
+
+      req_opts = [method: method, url: url, headers: headers, receive_timeout: 10_000]
 
       req_opts =
         if method in [:post, :put, :patch] do
-          Keyword.put(req_opts, :json, args)
+          Keyword.put(req_opts, :json, body_args)
         else
           req_opts
         end
@@ -172,6 +175,28 @@ defmodule AgentEx.HttpTool do
   end
 
   defp interpolate_headers(_, _args), do: %{}
+
+  @method_map %{
+    "get" => :get,
+    "post" => :post,
+    "put" => :put,
+    "patch" => :patch,
+    "delete" => :delete,
+    "head" => :head,
+    "options" => :options
+  }
+
+  defp parse_method(method) when is_binary(method) do
+    Map.get(@method_map, String.downcase(method), :get)
+  end
+
+  defp parse_method(_), do: :get
+
+  defp extract_template_params(template) when is_binary(template) do
+    Regex.scan(~r/\{\{(\w+)\}\}/, template) |> Enum.map(fn [_, key] -> key end)
+  end
+
+  defp extract_template_params(_), do: []
 
   defp extract_response(body, nil), do: format_body(body)
   defp extract_response(body, ""), do: format_body(body)

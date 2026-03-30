@@ -11,24 +11,32 @@ defmodule AgentExWeb.AgentsLive do
   @impl true
   def mount(_params, _session, socket) do
     user = socket.assigns.current_scope.user
-    project = socket.assigns.current_project
-    agents = AgentStore.list(user.id, project.id)
-    default_provider = "openai"
+    project = socket.assigns[:current_project]
 
-    {:ok,
-     assign(socket,
-       project: project,
-       agents: agents,
-       editing: nil,
-       show_editor: false,
-       form: empty_form(),
-       intervention_pipeline: [],
-       sandbox: %{},
-       disabled_builtins: [],
-       selected_provider: default_provider,
-       provider_options: provider_options(),
-       model_options: model_select_options(default_provider)
-     )}
+    if is_nil(project) do
+      {:ok,
+       socket
+       |> put_flash(:error, "No project available. Please create one first.")
+       |> redirect(to: ~p"/projects")}
+    else
+      agents = AgentStore.list(user.id, project.id)
+      default_provider = "openai"
+
+      {:ok,
+       assign(socket,
+         project: project,
+         agents: agents,
+         editing: nil,
+         show_editor: false,
+         form: empty_form(),
+         intervention_pipeline: [],
+         sandbox: %{},
+         disabled_builtins: [],
+         selected_provider: default_provider,
+         provider_options: provider_options(),
+         model_options: model_select_options(default_provider)
+       )}
+    end
   end
 
   # -- Agent CRUD events --
