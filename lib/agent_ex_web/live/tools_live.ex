@@ -34,7 +34,8 @@ defmodule AgentExWeb.ToolsLive do
        http_form: empty_http_form(),
        editing_http_tool: false,
        http_test_result: nil,
-       http_test_loading: false
+       http_test_loading: false,
+       http_test_ref: nil
      )}
   end
 
@@ -126,16 +127,16 @@ defmodule AgentExWeb.ToolsLive do
     case HttpToolStore.get(user.id, project.id, id) do
       {:ok, tool} ->
         form = %{
-          id: tool.id,
-          name: tool.name,
-          description: tool.description,
-          method: tool.method,
-          kind: tool.kind,
-          url_template: tool.url_template,
-          headers: tool.headers,
-          parameters: tool.parameters,
-          response_type: tool.response_type,
-          response_path: tool.response_path
+          "id" => tool.id,
+          "name" => tool.name,
+          "description" => tool.description,
+          "method" => tool.method,
+          "kind" => tool.kind,
+          "url_template" => tool.url_template,
+          "headers" => tool.headers,
+          "parameters" => tool.parameters,
+          "response_type" => tool.response_type,
+          "response_path" => tool.response_path
         }
 
         {:noreply,
@@ -162,8 +163,8 @@ defmodule AgentExWeb.ToolsLive do
 
   def handle_event("save_http_tool", params, socket) do
     form = parse_http_form(params, socket.assigns.http_form)
-    name = String.trim(form[:name] || "")
-    url_template = String.trim(form[:url_template] || "")
+    name = String.trim(form["name"] || "")
+    url_template = String.trim(form["url_template"] || "")
 
     if name == "" or url_template == "" do
       {:noreply, put_flash(socket, :error, "Name and URL template are required")}
@@ -180,7 +181,9 @@ defmodule AgentExWeb.ToolsLive do
     case HttpToolStore.delete(user.id, project.id, id) do
       :ok ->
         http_tools = HttpToolStore.list(user.id, project.id)
-        {:noreply, socket |> assign(http_tools: http_tools) |> put_flash(:info, "HTTP tool deleted")}
+
+        {:noreply,
+         socket |> assign(http_tools: http_tools) |> put_flash(:info, "HTTP tool deleted")}
 
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, "Delete failed: #{inspect(reason)}")}
@@ -188,48 +191,83 @@ defmodule AgentExWeb.ToolsLive do
   end
 
   def handle_event("add_http_param", _params, socket) do
-    params = (socket.assigns.http_form[:parameters] || []) ++ [%{name: "", type: "string", description: "", required: false}]
-    form = Map.put(socket.assigns.http_form, :parameters, params)
+    params =
+      (socket.assigns.http_form["parameters"] || []) ++
+        [%{name: "", type: "string", description: "", required: false}]
+
+    form = Map.put(socket.assigns.http_form, "parameters", params)
     {:noreply, assign(socket, http_form: form)}
   end
 
   def handle_event("remove_http_param", %{"index" => idx_str}, socket) do
     idx = String.to_integer(idx_str)
-    params = List.delete_at(socket.assigns.http_form[:parameters] || [], idx)
-    form = Map.put(socket.assigns.http_form, :parameters, params)
+    params = List.delete_at(socket.assigns.http_form["parameters"] || [], idx)
+    form = Map.put(socket.assigns.http_form, "parameters", params)
     {:noreply, assign(socket, http_form: form)}
   end
 
   def handle_event("test_http_tool", _params, socket) do
     form = socket.assigns.http_form
-    url_template = String.trim(form[:url_template] || "")
+    url_template = String.trim(form["url_template"] || "")
 
     if url_template == "" do
       {:noreply, put_flash(socket, :error, "URL template is required for testing")}
     else
-      socket = assign(socket, http_test_loading: true, http_test_result: nil)
-      send(self(), {:run_http_test, form})
-      {:noreply, socket}
+      task = Task.async(fn -> run_http_test(form) end)
+
+      {:noreply,
+       assign(socket, http_test_loading: true, http_test_result: nil, http_test_ref: task.ref)}
     end
   end
 
   @impl true
-  def handle_info({:run_http_test, form}, socket) do
-    headers = form[:headers] || %{}
-    method = String.downcase(form[:method] || "GET") |> String.to_existing_atom()
-    url = form[:url_template] || ""
+  def handle_info({ref, result}, socket) when is_reference(ref) do
+    if ref == socket.assigns[:http_test_ref] do
+      Process.demonitor(ref, [:flush])
 
-    result =
-      case Req.request(method: method, url: url, headers: headers) do
-        {:ok, %{status: status, body: body}} ->
-          body_str = if is_binary(body), do: body, else: Jason.encode!(body, pretty: true)
-          "HTTP #{status}\n#{String.slice(body_str, 0, 500)}"
+      {:noreply,
+       assign(socket, http_test_result: result, http_test_loading: false, http_test_ref: nil)}
+    else
+      {:noreply, socket}
+    end
+  end
 
-        {:error, exception} ->
-          "Error: #{inspect(exception)}"
-      end
+  def handle_info({:DOWN, ref, :process, _pid, reason}, socket) do
+    if ref == socket.assigns[:http_test_ref] do
+      {:noreply,
+       assign(socket,
+         http_test_result: "Test failed: #{inspect(reason)}",
+         http_test_loading: false,
+         http_test_ref: nil
+       )}
+    else
+      {:noreply, socket}
+    end
+  end
 
-    {:noreply, assign(socket, http_test_result: result, http_test_loading: false)}
+  # --- HTTP test helper ---
+
+  @method_map %{
+    "get" => :get,
+    "post" => :post,
+    "put" => :put,
+    "patch" => :patch,
+    "delete" => :delete
+  }
+
+  defp run_http_test(form) do
+    headers = form["headers"] || %{}
+    method = Map.get(@method_map, String.downcase(form["method"] || "get"), :get)
+    url = form["url_template"] || ""
+
+    case Req.request(method: method, url: url, headers: headers, receive_timeout: 10_000) do
+      {:ok, %{status: status, body: body}} ->
+        body_str = if is_binary(body), do: body, else: Jason.encode!(body, pretty: true)
+        "HTTP #{status}\n#{String.slice(body_str, 0, 500)}"
+
+      {:error, exception} ->
+        "Error: #{inspect(exception)}"
+    end
   end
 
   # --- Private helpers ---
@@ -238,35 +276,40 @@ defmodule AgentExWeb.ToolsLive do
     user = socket.assigns.current_scope.user
     project = socket.assigns.current_project
 
-    if socket.assigns.editing_http_tool && form[:id] do
-      update_existing_http_tool(socket, user, project, form[:id], attrs)
+    if socket.assigns.editing_http_tool && form["id"] do
+      update_existing_http_tool(socket, user, project, form["id"], attrs)
     else
-      config = HttpTool.new(Map.merge(attrs, %{user_id: user.id, project_id: project.id, name: name}))
+      config =
+        HttpTool.new(Map.merge(attrs, %{user_id: user.id, project_id: project.id, name: name}))
+
       save_and_refresh(socket, config, "HTTP tool created")
     end
   end
 
   defp update_existing_http_tool(socket, user, project, tool_id, attrs) do
     case HttpToolStore.get(user.id, project.id, tool_id) do
-      {:ok, existing} -> save_and_refresh(socket, HttpTool.update(existing, attrs), "HTTP tool updated")
-      :not_found -> {:noreply, put_flash(socket, :error, "HTTP tool not found")}
+      {:ok, existing} ->
+        save_and_refresh(socket, HttpTool.update(existing, attrs), "HTTP tool updated")
+
+      :not_found ->
+        {:noreply, put_flash(socket, :error, "HTTP tool not found")}
     end
   end
 
   defp build_http_attrs(form, params) do
-    kind = if to_string(form[:kind]) == "write", do: :write, else: :read
+    kind = if to_string(form["kind"]) == "write", do: :write, else: :read
     headers = parse_headers(params["headers_json"])
 
     %{
-      name: String.trim(form[:name] || ""),
-      description: form[:description],
-      method: form[:method] || "GET",
+      name: String.trim(form["name"] || ""),
+      description: form["description"],
+      method: form["method"] || "GET",
       kind: kind,
-      url_template: String.trim(form[:url_template] || ""),
+      url_template: String.trim(form["url_template"] || ""),
       headers: headers,
-      parameters: form[:parameters] || [],
-      response_type: form[:response_type],
-      response_path: form[:response_path]
+      parameters: (form["parameters"] || []) |> Enum.reject(fn p -> p.name == "" end),
+      response_type: form["response_type"],
+      response_path: form["response_path"]
     }
   end
 
@@ -292,16 +335,16 @@ defmodule AgentExWeb.ToolsLive do
     parameters = parse_params(params["params"])
 
     fields = %{
-      id: params["tool_id"],
-      name: params["name"],
-      description: params["description"],
-      method: params["method"],
-      kind: params["kind"],
-      url_template: params["url_template"],
-      headers: parse_headers(params["headers_json"]),
-      parameters: parameters,
-      response_type: params["response_type"],
-      response_path: params["response_path"]
+      "id" => params["tool_id"],
+      "name" => params["name"],
+      "description" => params["description"],
+      "method" => params["method"],
+      "kind" => params["kind"],
+      "url_template" => params["url_template"],
+      "headers" => parse_headers(params["headers_json"]),
+      "parameters" => parameters,
+      "response_type" => params["response_type"],
+      "response_path" => params["response_path"]
     }
 
     Map.merge(current, fields, fn _k, old, new -> new || old end)
@@ -320,7 +363,6 @@ defmodule AgentExWeb.ToolsLive do
         required: p["required"] == "true"
       }
     end)
-    |> Enum.reject(fn p -> p.name == "" end)
   end
 
   defp parse_params(_), do: nil
@@ -339,16 +381,16 @@ defmodule AgentExWeb.ToolsLive do
 
   defp empty_http_form do
     %{
-      id: nil,
-      name: "",
-      description: "",
-      method: "GET",
-      kind: "read",
-      url_template: "",
-      headers: %{},
-      parameters: [],
-      response_type: "json_body",
-      response_path: ""
+      "id" => nil,
+      "name" => "",
+      "description" => "",
+      "method" => "GET",
+      "kind" => "read",
+      "url_template" => "",
+      "headers" => %{},
+      "parameters" => [],
+      "response_type" => "json_body",
+      "response_path" => ""
     }
   end
 

@@ -112,23 +112,23 @@ defmodule AgentExWeb.HttpToolComponents do
         </div>
 
         <.form for={@form} phx-submit="save_http_tool" phx-change="validate_http_tool" class="space-y-4">
-          <input type="hidden" name="tool_id" value={@form[:id]} />
+          <input type="hidden" name="tool_id" value={@form["id"]} />
 
-          <.input type="text" name="name" value={@form[:name]} label="Tool Name" placeholder="e.g. stock_api.get_quote" required />
-          <.input type="text" name="description" value={@form[:description]} label="Description" placeholder="What does this tool do?" />
+          <.input type="text" name="name" value={@form["name"]} label="Tool Name" placeholder="e.g. stock_api.get_quote" required />
+          <.input type="text" name="description" value={@form["description"]} label="Description" placeholder="What does this tool do?" />
 
           <div class="grid grid-cols-2 gap-3">
             <.input
               type="select"
               name="method"
-              value={@form[:method] || "GET"}
+              value={@form["method"] || "GET"}
               label="Method"
               options={[{"GET", "GET"}, {"POST", "POST"}, {"PUT", "PUT"}, {"PATCH", "PATCH"}, {"DELETE", "DELETE"}]}
             />
             <.input
               type="select"
               name="kind"
-              value={to_string(@form[:kind] || "read")}
+              value={to_string(@form["kind"] || "read")}
               label="Kind"
               options={[{"Read (sensing)", "read"}, {"Write (acting)", "write"}]}
             />
@@ -137,7 +137,7 @@ defmodule AgentExWeb.HttpToolComponents do
           <.input
             type="text"
             name="url_template"
-            value={@form[:url_template]}
+            value={@form["url_template"]}
             label="URL Template"
             placeholder="https://api.example.com/quote/{{ticker}}"
             required
@@ -150,7 +150,7 @@ defmodule AgentExWeb.HttpToolComponents do
               rows="2"
               class="w-full rounded-md border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 font-mono"
               placeholder={~s|{"Authorization": "Bearer {{api_key}}"}|}
-            >{format_headers(@form[:headers])}</textarea>
+            >{format_headers(@form["headers"])}</textarea>
           </div>
 
           <%!-- Parameters --%>
@@ -165,8 +165,8 @@ defmodule AgentExWeb.HttpToolComponents do
                 + Add Parameter
               </button>
             </div>
-            <div :if={@form[:parameters] != [] and @form[:parameters] != nil} class="space-y-2">
-              <div :for={{param, idx} <- Enum.with_index(@form[:parameters] || [])} class="flex gap-2 items-start">
+            <div :if={@form["parameters"] != [] and @form["parameters"] != nil} class="space-y-2">
+              <div :for={{param, idx} <- Enum.with_index(@form["parameters"] || [])} class="flex gap-2 items-start">
                 <input type="text" name={"params[#{idx}][name]"} value={param[:name] || param["name"]} placeholder="name" class="flex-1 rounded-md border border-gray-700 bg-gray-800 px-2 py-1.5 text-xs text-gray-200 placeholder-gray-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" />
                 <select name={"params[#{idx}][type]"} class="w-20 rounded-md border border-gray-700 bg-gray-800 px-2 py-1.5 text-xs text-gray-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
                   <option value="string" selected={param_type(param) == "string"}>string</option>
@@ -191,18 +191,18 @@ defmodule AgentExWeb.HttpToolComponents do
                 </button>
               </div>
             </div>
-            <p :if={@form[:parameters] == [] or @form[:parameters] == nil} class="text-xs text-gray-500 italic">No parameters defined</p>
+            <p :if={@form["parameters"] == [] or @form["parameters"] == nil} class="text-xs text-gray-500 italic">No parameters defined</p>
           </div>
 
           <div class="grid grid-cols-2 gap-3">
             <.input
               type="select"
               name="response_type"
-              value={@form[:response_type] || "json_body"}
+              value={@form["response_type"] || "json_body"}
               label="Response"
               options={[{"JSON body", "json_body"}, {"Raw text", "raw_text"}]}
             />
-            <.input type="text" name="response_path" value={@form[:response_path]} label="JSON Path" placeholder="e.g. data.results" />
+            <.input type="text" name="response_path" value={@form["response_path"]} label="JSON Path" placeholder="e.g. data.results" />
           </div>
 
           <%!-- Test result --%>
