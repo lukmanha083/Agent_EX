@@ -436,7 +436,14 @@ defmodule AgentExWeb.ChatLive do
 
   defp hydrate_working_memory(user_id, project_id, agent_id, session_id, messages) do
     Enum.each(messages, fn msg ->
-      Memory.add_message(user_id, project_id, agent_id, session_id, to_string(msg.role), msg.content)
+      Memory.add_message(
+        user_id,
+        project_id,
+        agent_id,
+        session_id,
+        to_string(msg.role),
+        msg.content
+      )
     end)
   rescue
     e ->
@@ -486,7 +493,10 @@ defmodule AgentExWeb.ChatLive do
 
   defp load_from_agent(agent, _user) do
     system_prompt = AgentConfig.build_system_messages(agent)
-    prompt = if system_prompt in [nil, ""], do: "You are a helpful AI assistant.", else: system_prompt
+
+    prompt =
+      if system_prompt in [nil, ""], do: "You are a helpful AI assistant.", else: system_prompt
+
     {agent.provider, agent.model, default_tools(), prompt}
   end
 

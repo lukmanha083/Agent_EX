@@ -88,9 +88,12 @@ defmodule AgentEx.Pipe do
       case opts[:memory] do
         %{user_id: uid, project_id: pid, agent_id: aid, session_id: sid} ->
           %{user_id: uid, project_id: pid, agent_id: aid, session_id: sid}
+
         %{user_id: uid, project_id: pid, session_id: sid} ->
           %{user_id: uid, project_id: pid, agent_id: agent.name, session_id: sid}
-        _ -> nil
+
+        _ ->
+          nil
       end
 
     ctx = %{
@@ -269,7 +272,12 @@ defmodule AgentEx.Pipe do
 
   defp maybe_inject_memory(messages, nil), do: messages
 
-  defp maybe_inject_memory(messages, %{user_id: user_id, project_id: project_id, agent_id: agent_id, session_id: session_id}) do
+  defp maybe_inject_memory(messages, %{
+         user_id: user_id,
+         project_id: project_id,
+         agent_id: agent_id,
+         session_id: session_id
+       }) do
     AgentEx.Memory.inject_memory_context(messages, user_id, project_id, agent_id, session_id)
   end
 end

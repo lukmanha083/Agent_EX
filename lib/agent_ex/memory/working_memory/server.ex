@@ -45,7 +45,10 @@ defmodule AgentEx.Memory.WorkingMemory.Server do
   end
 
   def whereis(user_id, project_id, agent_id, session_id) do
-    case Registry.lookup(AgentEx.Memory.SessionRegistry, {user_id, project_id, agent_id, session_id}) do
+    case Registry.lookup(
+           AgentEx.Memory.SessionRegistry,
+           {user_id, project_id, agent_id, session_id}
+         ) do
       [{pid, _}] -> pid
       [] -> nil
     end
@@ -115,7 +118,8 @@ defmodule AgentEx.Memory.WorkingMemory.Server do
   end
 
   defp via(user_id, project_id, agent_id, session_id) do
-    {:via, Registry, {AgentEx.Memory.SessionRegistry, {user_id, project_id, agent_id, session_id}}}
+    {:via, Registry,
+     {AgentEx.Memory.SessionRegistry, {user_id, project_id, agent_id, session_id}}}
   end
 
   defp default_max_messages do

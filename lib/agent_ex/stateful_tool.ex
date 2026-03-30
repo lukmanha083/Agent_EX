@@ -54,8 +54,8 @@ defmodule AgentEx.StatefulTool do
   def wrap(%Tool{} = tool, opts) do
     state_key = Keyword.fetch!(opts, :state_key)
     agent_id = Keyword.fetch!(opts, :agent_id)
-    user_id = Keyword.get(opts, :user_id)
-    project_id = Keyword.get(opts, :project_id)
+    user_id = Keyword.fetch!(opts, :user_id)
+    project_id = Keyword.fetch!(opts, :project_id)
     initial_state = Keyword.get(opts, :initial_state, %{})
     store = Keyword.get(opts, :store)
 

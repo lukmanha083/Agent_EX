@@ -113,14 +113,25 @@ defmodule AgentEx.Memory.KnowledgeGraph.Store do
   end
 
   @impl GenServer
-  def handle_call({:delete_by_agent, _user_id, _project_id, agent_id}, _from, state) do
-    result = do_delete_by_field("agent_id", agent_id)
+  def handle_call({:delete_by_agent, user_id, project_id, agent_id}, _from, state) do
+    filter = %{
+      "agent_id" => to_string(agent_id),
+      "user_id" => to_string(user_id),
+      "project_id" => to_string(project_id)
+    }
+
+    result = do_delete_by_filter(filter)
     {:reply, result, state}
   end
 
   @impl GenServer
-  def handle_call({:delete_by_project, _user_id, project_id}, _from, state) do
-    result = do_delete_by_field("project_id", to_string(project_id))
+  def handle_call({:delete_by_project, user_id, project_id}, _from, state) do
+    filter = %{
+      "user_id" => to_string(user_id),
+      "project_id" => to_string(project_id)
+    }
+
+    result = do_delete_by_filter(filter)
     {:reply, result, state}
   end
 
@@ -129,8 +140,8 @@ defmodule AgentEx.Memory.KnowledgeGraph.Store do
   defp run_ingestion_pipeline(user_id, project_id, agent_id, text, role) do
     now = DateTime.utc_now() |> DateTime.to_iso8601()
 
-    with {:ok, episode_id} <- create_episode(agent_id, user_id, project_id, text, role, now),
-         :ok <- store_episode_embedding(agent_id, user_id, project_id, episode_id, text),
+    with {:ok, episode_id} <- create_episode(user_id, project_id, agent_id, text, role, now),
+         :ok <- store_episode_embedding(user_id, project_id, agent_id, episode_id, text),
          {:ok, extraction} <- Extractor.extract(text),
          {:ok, entity_map} <- resolve_entities(extraction.entities, now),
          :ok <- store_facts(extraction.relationships, entity_map, now),
@@ -148,7 +159,7 @@ defmodule AgentEx.Memory.KnowledgeGraph.Store do
     end
   end
 
-  defp create_episode(agent_id, user_id, project_id, text, role, now) do
+  defp create_episode(user_id, project_id, agent_id, text, role, now) do
     case Client.query("CreateEpisode", %{
            content: text,
            role: role,
@@ -164,7 +175,7 @@ defmodule AgentEx.Memory.KnowledgeGraph.Store do
     end
   end
 
-  defp store_episode_embedding(agent_id, user_id, project_id, episode_id, text) do
+  defp store_episode_embedding(user_id, project_id, agent_id, episode_id, text) do
     with {:ok, vector} <- Embeddings.embed(text),
          {:ok, _} <-
            Client.query("StoreEpisodeEmbedding", %{
@@ -354,41 +365,45 @@ defmodule AgentEx.Memory.KnowledgeGraph.Store do
   @batch_size 500
   @zero_vector List.duplicate(0.0, 1536)
 
-  defp do_delete_by_field(field, value) do
-    deleted = delete_episode_embeddings_by(field, value)
+  defp do_delete_by_filter(filter) do
+    deleted = delete_episode_embeddings_by_filter(filter)
 
-    Logger.info("KnowledgeGraph: deleted #{deleted} episode embeddings for #{field}=#{value}")
+    Logger.info("KnowledgeGraph: deleted #{deleted} episode embeddings for #{inspect(filter)}")
     {:ok, deleted}
   rescue
     e ->
-      Logger.warning("KnowledgeGraph cleanup failed for #{field}=#{value}: #{inspect(e)}")
+      Logger.warning("KnowledgeGraph cleanup failed for #{inspect(filter)}: #{inspect(e)}")
       {:ok, 0}
   end
 
-  defp delete_episode_embeddings_by(field, value, total_deleted \\ 0) do
+  defp delete_episode_embeddings_by_filter(filter, total_deleted \\ 0) do
     case Client.query("SearchEpisodes", %{query_vector: @zero_vector, limit: @batch_size}) do
       {:ok, response} ->
         ids =
           response
           |> parse_episode_results()
-          |> Enum.filter(fn r ->
-            r_val = r[field] || get_in(r, ["properties", field])
-            r_val == value
-          end)
+          |> Enum.filter(&matches_filter?(&1, filter))
           |> Enum.map(fn r -> r["id"] || get_in(r, ["properties", "id"]) end)
           |> Enum.reject(&is_nil/1)
 
-        Enum.each(ids, &Client.query("DeleteMemory", %{id: &1}))
+        Enum.each(ids, &Client.query("DeleteEpisodeEmbedding", %{id: &1}))
 
         if ids == [] do
           total_deleted
         else
-          delete_episode_embeddings_by(field, value, total_deleted + length(ids))
+          delete_episode_embeddings_by_filter(filter, total_deleted + length(ids))
         end
 
       {:error, _} ->
         total_deleted
     end
+  end
+
+  defp matches_filter?(record, filter) do
+    Enum.all?(filter, fn {field, value} ->
+      r_val = record[field] || get_in(record, ["properties", field])
+      to_string(r_val) == value
+    end)
   end
 
   defp parse_episode_results(%{"results" => results}) when is_list(results), do: results

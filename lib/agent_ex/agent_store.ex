@@ -124,8 +124,15 @@ defmodule AgentEx.AgentStore do
       )
 
     Enum.each(keys, fn key ->
-      :ets.delete(state.ets_table, key)
-      :dets.delete(state.dets_table, key)
+      case :dets.delete(state.dets_table, key) do
+        :ok ->
+          :ets.delete(state.ets_table, key)
+
+        {:error, reason} ->
+          Logger.warning(
+            "AgentStore delete_by_project: DETS delete failed for #{inspect(key)}: #{inspect(reason)}"
+          )
+      end
     end)
 
     {:reply, {:ok, length(keys)}, state}

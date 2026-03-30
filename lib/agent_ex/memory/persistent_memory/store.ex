@@ -92,9 +92,13 @@ defmodule AgentEx.Memory.PersistentMemory.Store do
 
   # --- Tier callbacks ---
 
+  @internal_types ["procedural_observation"]
+
   @impl AgentEx.Memory.Tier
   def to_context_messages({user_id, project_id, agent_id}, _identifier \\ nil) do
-    entries = all(user_id, project_id, agent_id)
+    entries =
+      all(user_id, project_id, agent_id)
+      |> Enum.reject(&(&1.type in @internal_types))
 
     if entries == [] do
       []

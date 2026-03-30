@@ -76,7 +76,9 @@ defmodule AgentEx.MemoryTest do
     assert hd(writer_msgs).content == "Write a report"
 
     # Verify isolation: persistent memory
-    assert {:ok, %{value: "data analysis"}} = Memory.recall(@test_uid, @test_pid, analyst, "expertise")
+    assert {:ok, %{value: "data analysis"}} =
+             Memory.recall(@test_uid, @test_pid, analyst, "expertise")
+
     assert :not_found = Memory.recall(@test_uid, @test_pid, writer, "expertise")
     assert {:ok, %{value: "concise"}} = Memory.recall(@test_uid, @test_pid, writer, "style")
     assert :not_found = Memory.recall(@test_uid, @test_pid, analyst, "style")

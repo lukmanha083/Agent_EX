@@ -6,6 +6,8 @@ defmodule AgentEx.Projects do
   alias AgentEx.Projects.Project
   alias AgentEx.Repo
 
+  require Logger
+
   def create_project(attrs) do
     result =
       %Project{}
@@ -32,12 +34,7 @@ defmodule AgentEx.Projects do
   end
 
   def update_project(%Project{} = project, attrs) do
-    result =
-      project
-      |> Project.changeset(attrs)
-      |> Repo.update()
-
-    with {:ok, updated} <- result do
+    with {:ok, updated} <- project |> Project.changeset(attrs) |> Repo.update() do
       ensure_root_path_dir(updated)
       {:ok, updated}
     end
@@ -89,7 +86,15 @@ defmodule AgentEx.Projects do
   """
   def ensure_root_path_dir(%Project{root_path: path}) when is_binary(path) and path != "" do
     expanded = Path.expand(path)
-    File.mkdir_p(expanded)
+
+    case File.mkdir_p(expanded) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("Failed to create project root_path #{expanded}: #{inspect(reason)}")
+        {:error, {:root_path_creation_failed, reason}}
+    end
   end
 
   def ensure_root_path_dir(_), do: :ok

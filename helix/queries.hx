@@ -11,6 +11,10 @@ QUERY DeleteMemory(id: ID) =>
     DROP V<Memory>(id)
     RETURN NONE
 
+QUERY DeleteEpisodeEmbedding(id: ID) =>
+    DROP V<EpisodeEmbedding>(id)
+    RETURN NONE
+
 // --- Knowledge Graph: Create ---
 QUERY CreateEntity(name: String, entity_type: String, description: String, summary: String, now: String) =>
     entity <- AddN<Entity>({

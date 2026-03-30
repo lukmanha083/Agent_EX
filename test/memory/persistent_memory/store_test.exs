@@ -8,7 +8,9 @@ defmodule AgentEx.Memory.PersistentMemory.StoreTest do
   @agent "test-agent"
 
   setup do
-    for entry <- Store.all(@test_uid, @test_pid, @agent), do: Store.delete(@test_uid, @test_pid, @agent, entry.key)
+    for entry <- Store.all(@test_uid, @test_pid, @agent),
+        do: Store.delete(@test_uid, @test_pid, @agent, entry.key)
+
     :ok
   end
 
@@ -20,7 +22,8 @@ defmodule AgentEx.Memory.PersistentMemory.StoreTest do
   end
 
   test "get returns :not_found for missing key" do
-    assert :not_found = Store.get(@test_uid, @test_pid, @agent, "nonexistent_#{System.unique_integer()}")
+    assert :not_found =
+             Store.get(@test_uid, @test_pid, @agent, "nonexistent_#{System.unique_integer()}")
   end
 
   test "get_by_type filters entries" do

@@ -9,7 +9,10 @@ defmodule AgentEx.Memory.WorkingMemory.ServerTest do
   setup do
     agent_id = "agent-#{System.unique_integer([:positive])}"
     session_id = "sess-#{System.unique_integer([:positive])}"
-    {:ok, _pid} = Supervisor.start_session(@test_uid, @test_pid, agent_id, session_id, max_messages: 5)
+
+    {:ok, _pid} =
+      Supervisor.start_session(@test_uid, @test_pid, agent_id, session_id, max_messages: 5)
+
     on_exit(fn -> Supervisor.stop_session(@test_uid, @test_pid, agent_id, session_id) end)
     %{agent_id: agent_id, session_id: session_id}
   end
@@ -82,8 +85,11 @@ defmodule AgentEx.Memory.WorkingMemory.ServerTest do
     Server.add_message(@test_uid, @test_pid, agent_a, sid, "user", "message for agent A")
     Server.add_message(@test_uid, @test_pid, agent_b, sid, "user", "message for agent B")
 
-    assert [%{content: "message for agent A"}] = Server.get_messages(@test_uid, @test_pid, agent_a, sid)
-    assert [%{content: "message for agent B"}] = Server.get_messages(@test_uid, @test_pid, agent_b, sid)
+    assert [%{content: "message for agent A"}] =
+             Server.get_messages(@test_uid, @test_pid, agent_a, sid)
+
+    assert [%{content: "message for agent B"}] =
+             Server.get_messages(@test_uid, @test_pid, agent_b, sid)
 
     Supervisor.stop_session(@test_uid, @test_pid, agent_a, sid)
     Supervisor.stop_session(@test_uid, @test_pid, agent_b, sid)

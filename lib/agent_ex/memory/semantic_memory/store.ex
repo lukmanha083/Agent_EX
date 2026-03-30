@@ -109,8 +109,8 @@ defmodule AgentEx.Memory.SemanticMemory.Store do
   end
 
   @impl GenServer
-  def handle_call({:search, _user_id, _project_id, agent_id, query, limit}, _from, state) do
-    # Over-fetch then filter by agent_id client-side
+  def handle_call({:search, user_id, project_id, agent_id, query, limit}, _from, state) do
+    # Over-fetch then filter by (user_id, project_id, agent_id) client-side
     fetch_limit = limit * 3
 
     result =
@@ -122,7 +122,12 @@ defmodule AgentEx.Memory.SemanticMemory.Store do
           |> parse_search_results()
           |> Enum.filter(fn r ->
             r_agent = r["agent_id"] || get_in(r, ["properties", "agent_id"])
-            r_agent == agent_id
+            r_uid = r["user_id"] || get_in(r, ["properties", "user_id"])
+            r_pid = r["project_id"] || get_in(r, ["properties", "project_id"])
+
+            r_agent == agent_id and
+              to_string(r_uid) == to_string(user_id) and
+              to_string(r_pid) == to_string(project_id)
           end)
           |> Enum.take(limit)
 
@@ -139,30 +144,38 @@ defmodule AgentEx.Memory.SemanticMemory.Store do
   end
 
   @impl GenServer
-  def handle_call({:delete_by_agent, _user_id, _project_id, agent_id}, _from, state) do
-    result = do_delete_by_field("agent_id", agent_id)
+  def handle_call({:delete_by_agent, user_id, project_id, agent_id}, _from, state) do
+    filter = %{
+      "agent_id" => to_string(agent_id),
+      "user_id" => to_string(user_id),
+      "project_id" => to_string(project_id)
+    }
+
+    result = do_delete_by_filter(filter)
     {:reply, result, state}
   end
 
   @impl GenServer
-  def handle_call({:delete_by_project, _user_id, project_id}, _from, state) do
-    result = do_delete_by_field("project_id", to_string(project_id))
+  def handle_call({:delete_by_project, user_id, project_id}, _from, state) do
+    filter = %{
+      "user_id" => to_string(user_id),
+      "project_id" => to_string(project_id)
+    }
+
+    result = do_delete_by_filter(filter)
     {:reply, result, state}
   end
 
   @batch_size 500
   @zero_vector List.duplicate(0.0, 1536)
 
-  defp do_delete_by_field(field, value, total_deleted \\ 0) do
+  defp do_delete_by_filter(filter, total_deleted \\ 0) do
     case Client.query("SearchMemory", %{vector: @zero_vector, limit: @batch_size}) do
       {:ok, response} ->
         ids =
           response
           |> parse_search_results()
-          |> Enum.filter(fn r ->
-            r_val = r[field] || get_in(r, ["properties", field])
-            r_val == value
-          end)
+          |> Enum.filter(&matches_filter?(&1, filter))
           |> Enum.map(fn r -> r["id"] || get_in(r, ["properties", "id"]) end)
           |> Enum.reject(&is_nil/1)
 
@@ -171,13 +184,23 @@ defmodule AgentEx.Memory.SemanticMemory.Store do
         if ids == [] do
           {:ok, total_deleted}
         else
-          do_delete_by_field(field, value, total_deleted + length(ids))
+          do_delete_by_filter(filter, total_deleted + length(ids))
         end
 
       {:error, reason} ->
-        Logger.warning("Semantic memory cleanup for #{field}=#{value} failed: #{inspect(reason)}")
+        Logger.warning(
+          "Semantic memory cleanup for #{inspect(filter)} failed: #{inspect(reason)}"
+        )
+
         {:ok, total_deleted}
     end
+  end
+
+  defp matches_filter?(record, filter) do
+    Enum.all?(filter, fn {field, value} ->
+      r_val = record[field] || get_in(record, ["properties", field])
+      to_string(r_val) == value
+    end)
   end
 
   defp parse_search_results(%{"results" => results}) when is_list(results), do: results
