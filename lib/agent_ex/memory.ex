@@ -177,17 +177,20 @@ defmodule AgentEx.Memory do
   - KG: Removes episode embeddings from HelixDB (best-effort; shared entities/facts kept)
   """
   def delete_agent_data(user_id, project_id, agent_id) do
+    # Stop any active Tier 1 sessions for this agent
+    stop_agent_sessions(user_id, project_id, agent_id)
+
     tasks = [
-      Task.async(fn ->
+      Task.Supervisor.async_nolink(AgentEx.TaskSupervisor, fn ->
         {:persistent, PersistentMemory.Store.delete_all(user_id, project_id, agent_id)}
       end),
-      Task.async(fn ->
+      Task.Supervisor.async_nolink(AgentEx.TaskSupervisor, fn ->
         {:semantic, SemanticMemory.Store.delete_by_agent(user_id, project_id, agent_id)}
       end),
-      Task.async(fn ->
+      Task.Supervisor.async_nolink(AgentEx.TaskSupervisor, fn ->
         {:knowledge_graph, KnowledgeGraph.Store.delete_by_agent(user_id, project_id, agent_id)}
       end),
-      Task.async(fn ->
+      Task.Supervisor.async_nolink(AgentEx.TaskSupervisor, fn ->
         {:procedural, ProceduralMemory.Store.delete_all(user_id, project_id, agent_id)}
       end)
     ]
@@ -205,17 +208,20 @@ defmodule AgentEx.Memory do
   - KG: Removes episode embeddings matching project_id (best-effort; shared entities/facts kept)
   """
   def delete_project_data(user_id, project_id) do
+    # Stop any active Tier 1 sessions for this project
+    stop_project_sessions(user_id, project_id)
+
     tasks = [
-      Task.async(fn ->
+      Task.Supervisor.async_nolink(AgentEx.TaskSupervisor, fn ->
         {:persistent, PersistentMemory.Store.delete_by_project(user_id, project_id)}
       end),
-      Task.async(fn ->
+      Task.Supervisor.async_nolink(AgentEx.TaskSupervisor, fn ->
         {:semantic, SemanticMemory.Store.delete_by_project(user_id, project_id)}
       end),
-      Task.async(fn ->
+      Task.Supervisor.async_nolink(AgentEx.TaskSupervisor, fn ->
         {:knowledge_graph, KnowledgeGraph.Store.delete_by_project(user_id, project_id)}
       end),
-      Task.async(fn ->
+      Task.Supervisor.async_nolink(AgentEx.TaskSupervisor, fn ->
         {:procedural, ProceduralMemory.Store.delete_by_project(user_id, project_id)}
       end)
     ]
@@ -242,6 +248,28 @@ defmodule AgentEx.Memory do
           {:error, reason}
       end
     end)
+  end
+
+  defp stop_agent_sessions(user_id, project_id, agent_id) do
+    Registry.select(AgentEx.Memory.SessionRegistry, [
+      {{{user_id, project_id, agent_id, :"$1"}, :_, :_}, [], [:"$1"]}
+    ])
+    |> Enum.each(fn session_id ->
+      WorkingMemory.Supervisor.stop_session(user_id, project_id, agent_id, session_id)
+    end)
+  rescue
+    _ -> :ok
+  end
+
+  defp stop_project_sessions(user_id, project_id) do
+    Registry.select(AgentEx.Memory.SessionRegistry, [
+      {{{user_id, project_id, :"$1", :"$2"}, :_, :_}, [], [{{:"$1", :"$2"}}]}
+    ])
+    |> Enum.each(fn {agent_id, session_id} ->
+      WorkingMemory.Supervisor.stop_session(user_id, project_id, agent_id, session_id)
+    end)
+  rescue
+    _ -> :ok
   end
 
   # --- Context Building ---

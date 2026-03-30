@@ -89,7 +89,10 @@ defmodule AgentExWeb.ChatLive do
   end
 
   @impl true
-  def terminate(_reason, _socket), do: :ok
+  def terminate(_reason, socket) do
+    stop_current_session(socket)
+    :ok
+  end
 
   @impl true
   def handle_event("new_chat", _params, socket) do
@@ -389,6 +392,7 @@ defmodule AgentExWeb.ChatLive do
 
   defp load_conversation(socket, conversation) do
     socket = cancel_active_run(socket)
+    stop_current_session(socket)
 
     # Load messages from Postgres
     db_messages =
@@ -431,6 +435,17 @@ defmodule AgentExWeb.ChatLive do
       assign(socket, run_id: nil, thinking: false)
     else
       socket
+    end
+  end
+
+  defp stop_current_session(socket) do
+    with %{conversation: %{id: convo_id}} <- socket.assigns,
+         %{current_scope: %{user: %{id: user_id}}} <- socket.assigns,
+         %{project: %{id: project_id}} <- socket.assigns,
+         %{agent_id: agent_id} <- socket.assigns do
+      Memory.stop_session(user_id, project_id, agent_id, "conversation-#{convo_id}")
+    else
+      _ -> :ok
     end
   end
 

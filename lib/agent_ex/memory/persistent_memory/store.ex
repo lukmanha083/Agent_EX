@@ -155,17 +155,28 @@ defmodule AgentEx.Memory.PersistentMemory.Store do
     entry = Entry.new(key, value, type, opts)
     ets_key = {user_id, project_id, agent_id, key}
 
-    :ets.insert(state.ets_table, {ets_key, entry})
-    :dets.insert(state.dets_table, {ets_key, entry})
-    {:reply, :ok, state}
+    case :dets.insert(state.dets_table, {ets_key, entry}) do
+      :ok ->
+        :ets.insert(state.ets_table, {ets_key, entry})
+        {:reply, :ok, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
   end
 
   @impl GenServer
   def handle_call({:delete, user_id, project_id, agent_id, key}, _from, state) do
     ets_key = {user_id, project_id, agent_id, key}
-    :ets.delete(state.ets_table, ets_key)
-    :dets.delete(state.dets_table, ets_key)
-    {:reply, :ok, state}
+
+    case :dets.delete(state.dets_table, ets_key) do
+      :ok ->
+        :ets.delete(state.ets_table, ets_key)
+        {:reply, :ok, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
   end
 
   @impl GenServer

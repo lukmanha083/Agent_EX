@@ -9,12 +9,7 @@ defmodule AgentEx.Projects do
   require Logger
 
   def create_project(attrs) do
-    result =
-      %Project{}
-      |> Project.changeset(attrs)
-      |> Repo.insert()
-
-    with {:ok, project} <- result do
+    with {:ok, project} <- %Project{} |> Project.changeset(attrs) |> Repo.insert() do
       ensure_root_path_dir(project)
       {:ok, project}
     end

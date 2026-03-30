@@ -52,19 +52,16 @@ defmodule AgentEx.Memory.ProceduralMemory.Reflector do
         Message.user("Extract skills from these tool observations:\n\n#{transcript}")
       ]
 
-      result =
-        case ModelClient.create(model_client, messages) do
-          {:ok, %Message{content: content}} ->
-            skills = extract_and_upsert(content, user_id, project_id, agent_id)
-            {:ok, skills}
+      case ModelClient.create(model_client, messages) do
+        {:ok, %Message{content: content}} ->
+          skills = extract_and_upsert(content, user_id, project_id, agent_id)
+          Observer.clear_observations(user_id, project_id, agent_id, session_id)
+          {:ok, skills}
 
-          {:error, reason} ->
-            Logger.warning("ProceduralMemory Reflector failed: #{inspect(reason)}")
-            {:error, {:reflection_failed, reason}}
-        end
-
-      Observer.clear_observations(user_id, project_id, agent_id, session_id)
-      result
+        {:error, reason} ->
+          Logger.warning("ProceduralMemory Reflector failed: #{inspect(reason)}")
+          {:error, {:reflection_failed, reason}}
+      end
     end
   end
 
@@ -108,12 +105,7 @@ defmodule AgentEx.Memory.ProceduralMemory.Reflector do
 
     case Jason.decode(cleaned) do
       {:ok, list} when is_list(list) ->
-        valid =
-          Enum.filter(list, fn item ->
-            is_map(item) and is_binary(item["name"]) and is_binary(item["strategy"])
-          end)
-
-        {:ok, valid}
+        {:ok, Enum.filter(list, &valid_skill_map?/1)}
 
       {:ok, _} ->
         {:error, :not_a_list}
@@ -121,6 +113,12 @@ defmodule AgentEx.Memory.ProceduralMemory.Reflector do
       {:error, reason} ->
         {:error, reason}
     end
+  end
+
+  defp valid_skill_map?(item) do
+    is_map(item) and is_binary(item["name"]) and is_binary(item["strategy"]) and
+      (is_nil(item["tool_patterns"]) or is_list(item["tool_patterns"])) and
+      (is_nil(item["error_patterns"]) or is_list(item["error_patterns"]))
   end
 
   defp upsert_skill(user_id, project_id, agent_id, skill_map) do
@@ -156,8 +154,8 @@ defmodule AgentEx.Memory.ProceduralMemory.Reflector do
 
   defp merge_skill_data(%Skill{} = skill, skill_map) do
     # Merge new tool/error patterns without duplicating
-    new_tools = Enum.uniq(skill.tool_patterns ++ (skill_map["tool_patterns"] || []))
-    new_errors = Enum.uniq(skill.error_patterns ++ (skill_map["error_patterns"] || []))
+    new_tools = Enum.uniq(skill.tool_patterns ++ List.wrap(skill_map["tool_patterns"]))
+    new_errors = Enum.uniq(skill.error_patterns ++ List.wrap(skill_map["error_patterns"]))
 
     # Update strategy if the new one is longer/better (heuristic: prefer longer)
     new_strategy = skill_map["strategy"] || ""

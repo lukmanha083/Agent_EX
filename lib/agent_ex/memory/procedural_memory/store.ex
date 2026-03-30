@@ -147,9 +147,15 @@ defmodule AgentEx.Memory.ProceduralMemory.Store do
   @impl GenServer
   def handle_call({:put, user_id, project_id, agent_id, %Skill{} = skill}, _from, state) do
     ets_key = {user_id, project_id, agent_id, skill.name}
-    :ets.insert(state.ets_table, {ets_key, skill})
-    :dets.insert(state.dets_table, {ets_key, skill})
-    {:reply, :ok, state}
+
+    case :dets.insert(state.dets_table, {ets_key, skill}) do
+      :ok ->
+        :ets.insert(state.ets_table, {ets_key, skill})
+        {:reply, :ok, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
   end
 
   @impl GenServer
