@@ -7,13 +7,8 @@ defmodule AgentEx.Memory.ProceduralMemory.StoreTest do
   @test_pid "test-project"
   @agent "test-agent"
 
-  @test_agents [@agent, "agent1", "agent2", "agent_a", "agent_b"]
-
   setup do
-    for agent <- @test_agents,
-        skill <- Store.all(@test_uid, @test_pid, agent),
-        do: Store.delete(@test_uid, @test_pid, agent, skill.name)
-
+    Store.delete_by_project(@test_uid, @test_pid)
     :ok
   end
 

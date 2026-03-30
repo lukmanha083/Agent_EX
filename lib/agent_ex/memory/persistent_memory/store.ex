@@ -229,8 +229,15 @@ defmodule AgentEx.Memory.PersistentMemory.Store do
 
   defp delete_keys(state, keys) do
     Enum.each(keys, fn key ->
-      :ets.delete(state.ets_table, key)
-      :dets.delete(state.dets_table, key)
+      case :dets.delete(state.dets_table, key) do
+        :ok ->
+          :ets.delete(state.ets_table, key)
+
+        {:error, reason} ->
+          Logger.warning(
+            "PersistentMemory: DETS delete failed for #{inspect(key)}: #{inspect(reason)}"
+          )
+      end
     end)
   end
 
