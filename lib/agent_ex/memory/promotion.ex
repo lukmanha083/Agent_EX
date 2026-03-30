@@ -10,6 +10,7 @@ defmodule AgentEx.Memory.Promotion do
   """
 
   alias AgentEx.{Memory, Message, ModelClient, Tool}
+  alias AgentEx.Memory.ProceduralMemory.Reflector
 
   require Logger
 
@@ -38,9 +39,23 @@ defmodule AgentEx.Memory.Promotion do
   ## Options
   - `:max_messages` — max messages to include in summary (default: 50)
   """
-  @spec close_session_with_summary(term(), term(), String.t(), String.t(), ModelClient.t(), keyword()) ::
+  @spec close_session_with_summary(
+          term(),
+          term(),
+          String.t(),
+          String.t(),
+          ModelClient.t(),
+          keyword()
+        ) ::
           {:ok, String.t()} | {:error, term()}
-  def close_session_with_summary(user_id, project_id, agent_id, session_id, model_client, opts \\ []) do
+  def close_session_with_summary(
+        user_id,
+        project_id,
+        agent_id,
+        session_id,
+        model_client,
+        opts \\ []
+      ) do
     max_messages = Keyword.get(opts, :max_messages, 50)
 
     messages = Memory.get_messages(user_id, project_id, agent_id, session_id)
@@ -74,6 +89,12 @@ defmodule AgentEx.Memory.Promotion do
                  session_id
                ) do
           Logger.info("Promotion: summarized session #{session_id} for agent #{agent_id}")
+
+          # Fire-and-forget skill extraction from observations (supervised)
+          Task.Supervisor.start_child(AgentEx.TaskSupervisor, fn ->
+            Reflector.reflect(user_id, project_id, agent_id, session_id, model_client)
+          end)
+
           {:ok, summary}
         else
           {:ok, %Message{}} ->

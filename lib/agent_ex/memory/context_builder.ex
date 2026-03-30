@@ -7,6 +7,7 @@ defmodule AgentEx.Memory.ContextBuilder do
   alias AgentEx.Memory.{
     KnowledgeGraph,
     PersistentMemory,
+    ProceduralMemory,
     SemanticMemory,
     WorkingMemory
   }
@@ -15,6 +16,7 @@ defmodule AgentEx.Memory.ContextBuilder do
     persistent: 500,
     knowledge_graph: 1000,
     semantic: 500,
+    procedural: 800,
     conversation: 4000,
     total: 8000
   }
@@ -28,16 +30,18 @@ defmodule AgentEx.Memory.ContextBuilder do
       Task.async(fn -> gather_persistent(scope) end),
       Task.async(fn -> gather_knowledge_graph(scope, semantic_query) end),
       Task.async(fn -> gather_semantic(scope, semantic_query) end),
+      Task.async(fn -> gather_procedural(scope) end),
       Task.async(fn -> gather_conversation(scope, session_id) end)
     ]
 
-    [persistent, kg, semantic, conversation] = Task.await_many(tasks, 30_000)
+    [persistent, kg, semantic, procedural, conversation] = Task.await_many(tasks, 30_000)
 
     system_parts =
       [
         truncate_section(persistent, budgets.persistent),
         truncate_section(kg, budgets.knowledge_graph),
-        truncate_section(semantic, budgets.semantic)
+        truncate_section(semantic, budgets.semantic),
+        truncate_section(procedural, budgets.procedural)
       ]
       |> Enum.reject(&(&1 == ""))
 
@@ -54,6 +58,15 @@ defmodule AgentEx.Memory.ContextBuilder do
 
   defp gather_persistent(scope) do
     case PersistentMemory.Store.to_context_messages(scope) do
+      [%{content: content} | _] -> content
+      _ -> ""
+    end
+  rescue
+    _ -> ""
+  end
+
+  defp gather_procedural(scope) do
+    case ProceduralMemory.Store.to_context_messages(scope) do
       [%{content: content} | _] -> content
       _ -> ""
     end

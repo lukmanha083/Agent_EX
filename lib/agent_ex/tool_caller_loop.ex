@@ -30,6 +30,7 @@ defmodule AgentEx.ToolCallerLoop do
   """
 
   alias AgentEx.Memory
+  alias AgentEx.Memory.ProceduralMemory.Observer
   alias AgentEx.Message
   alias AgentEx.ModelClient
   alias AgentEx.Sensing
@@ -140,13 +141,15 @@ defmodule AgentEx.ToolCallerLoop do
             "#{length(last.tool_calls)} tool calls (iteration #{iteration})"
         )
 
-        {:ok, result_message, _observations} =
+        {:ok, result_message, observations} =
           Sensing.sense(context.tool_agent, last.tool_calls,
             timeout: context.tool_timeout,
             intervention: context.intervention,
             tools_map: context.tools_map,
             intervention_context: %{iteration: iteration, generated_messages: generated}
           )
+
+        maybe_record_observations(observations, context.memory, iteration)
 
         all_messages = context.input_messages ++ generated ++ [result_message]
 
@@ -202,7 +205,9 @@ defmodule AgentEx.ToolCallerLoop do
       Memory.add_message(user_id, project_id, agent_id, session_id, "user", msg.content)
     end)
   catch
-    :exit, _ -> :ok
+    :exit, reason ->
+      Logger.debug("ToolCallerLoop: failed to store user messages: #{inspect(reason)}")
+      :ok
   end
 
   defp maybe_store_assistant_response(_message, nil), do: :ok
@@ -216,10 +221,38 @@ defmodule AgentEx.ToolCallerLoop do
        when is_binary(content) and content != "" do
     Memory.add_message(user_id, project_id, agent_id, session_id, "assistant", content)
   catch
-    :exit, _ -> :ok
+    :exit, reason ->
+      Logger.debug("ToolCallerLoop: failed to store assistant response: #{inspect(reason)}")
+      :ok
   end
 
   defp maybe_store_assistant_response(_, _), do: :ok
+
+  defp maybe_record_observations(_observations, nil, _iteration), do: :ok
+
+  defp maybe_record_observations(
+         observations,
+         %{
+           user_id: user_id,
+           project_id: project_id,
+           agent_id: agent_id,
+           session_id: session_id
+         },
+         iteration
+       ) do
+    Observer.record_observations(
+      user_id,
+      project_id,
+      agent_id,
+      session_id,
+      observations,
+      iteration
+    )
+  catch
+    :exit, reason ->
+      Logger.debug("ToolCallerLoop: failed to record observations: #{inspect(reason)}")
+      :ok
+  end
 
   defp has_tool_calls?(%Message{tool_calls: calls}) when is_list(calls) and calls != [], do: true
   defp has_tool_calls?(_), do: false

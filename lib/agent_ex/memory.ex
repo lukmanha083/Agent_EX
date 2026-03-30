@@ -30,10 +30,13 @@ defmodule AgentEx.Memory do
     ContextBuilder,
     KnowledgeGraph,
     PersistentMemory,
+    ProceduralMemory,
     Promotion,
     SemanticMemory,
     WorkingMemory
   }
+
+  require Logger
 
   # --- Session Management (Tier 1) ---
 
@@ -105,11 +108,57 @@ defmodule AgentEx.Memory do
     KnowledgeGraph.Store.hybrid_search(user_id, project_id, agent_id, query, limit)
   end
 
+  # --- Procedural Memory (Tier 4: Skills) ---
+
+  @doc "Store or update a skill."
+  def store_skill(user_id, project_id, agent_id, %ProceduralMemory.Skill{} = skill) do
+    ProceduralMemory.Store.put(user_id, project_id, agent_id, skill)
+  end
+
+  @doc "Retrieve a specific skill by name."
+  def get_skill(user_id, project_id, agent_id, skill_name) do
+    ProceduralMemory.Store.get(user_id, project_id, agent_id, skill_name)
+  end
+
+  @doc "Get all skills for an agent."
+  def list_skills(user_id, project_id, agent_id) do
+    ProceduralMemory.Store.all(user_id, project_id, agent_id)
+  end
+
+  @doc "Get top skills by confidence score."
+  def top_skills(user_id, project_id, agent_id, limit \\ 10) do
+    ProceduralMemory.Store.get_top_skills(user_id, project_id, agent_id, limit)
+  end
+
+  @doc "Get skills in a specific domain."
+  def skills_by_domain(user_id, project_id, agent_id, domain) do
+    ProceduralMemory.Store.get_by_domain(user_id, project_id, agent_id, domain)
+  end
+
+  @doc "Delete a specific skill."
+  def delete_skill(user_id, project_id, agent_id, skill_name) do
+    ProceduralMemory.Store.delete(user_id, project_id, agent_id, skill_name)
+  end
+
   # --- Memory Promotion ---
 
   @doc "Close a session and promote a summary to Tier 3."
-  def close_session_with_summary(user_id, project_id, agent_id, session_id, model_client, opts \\ []) do
-    Promotion.close_session_with_summary(user_id, project_id, agent_id, session_id, model_client, opts)
+  def close_session_with_summary(
+        user_id,
+        project_id,
+        agent_id,
+        session_id,
+        model_client,
+        opts \\ []
+      ) do
+    Promotion.close_session_with_summary(
+      user_id,
+      project_id,
+      agent_id,
+      session_id,
+      model_client,
+      opts
+    )
   end
 
   @doc "Build a save_memory tool for an agent."
@@ -124,16 +173,27 @@ defmodule AgentEx.Memory do
 
   - Tier 2: Removes all persistent memory entries (ETS + DETS)
   - Tier 3: Removes semantic memory vectors from HelixDB (best-effort)
+  - Tier 4: Removes procedural skills (ETS + DETS)
   - KG: Removes episode embeddings from HelixDB (best-effort; shared entities/facts kept)
   """
   def delete_agent_data(user_id, project_id, agent_id) do
     tasks = [
-      Task.async(fn -> PersistentMemory.Store.delete_all(user_id, project_id, agent_id) end),
-      Task.async(fn -> SemanticMemory.Store.delete_by_agent(user_id, project_id, agent_id) end),
-      Task.async(fn -> KnowledgeGraph.Store.delete_by_agent(user_id, project_id, agent_id) end)
+      Task.async(fn ->
+        {:persistent, PersistentMemory.Store.delete_all(user_id, project_id, agent_id)}
+      end),
+      Task.async(fn ->
+        {:semantic, SemanticMemory.Store.delete_by_agent(user_id, project_id, agent_id)}
+      end),
+      Task.async(fn ->
+        {:knowledge_graph, KnowledgeGraph.Store.delete_by_agent(user_id, project_id, agent_id)}
+      end),
+      Task.async(fn ->
+        {:procedural, ProceduralMemory.Store.delete_all(user_id, project_id, agent_id)}
+      end)
     ]
 
-    {:ok, Task.await_many(tasks, 60_000)}
+    results = collect_task_results(tasks)
+    {:ok, results}
   end
 
   @doc """
@@ -141,16 +201,47 @@ defmodule AgentEx.Memory do
 
   - Tier 2: Direct project-scoped delete from ETS/DETS
   - Tier 3: Removes semantic memory vectors matching project_id (best-effort)
+  - Tier 4: Removes procedural skills matching project_id (ETS + DETS)
   - KG: Removes episode embeddings matching project_id (best-effort; shared entities/facts kept)
   """
   def delete_project_data(user_id, project_id) do
     tasks = [
-      Task.async(fn -> PersistentMemory.Store.delete_by_project(user_id, project_id) end),
-      Task.async(fn -> SemanticMemory.Store.delete_by_project(user_id, project_id) end),
-      Task.async(fn -> KnowledgeGraph.Store.delete_by_project(user_id, project_id) end)
+      Task.async(fn ->
+        {:persistent, PersistentMemory.Store.delete_by_project(user_id, project_id)}
+      end),
+      Task.async(fn ->
+        {:semantic, SemanticMemory.Store.delete_by_project(user_id, project_id)}
+      end),
+      Task.async(fn ->
+        {:knowledge_graph, KnowledgeGraph.Store.delete_by_project(user_id, project_id)}
+      end),
+      Task.async(fn ->
+        {:procedural, ProceduralMemory.Store.delete_by_project(user_id, project_id)}
+      end)
     ]
 
-    {:ok, Task.await_many(tasks, 60_000)}
+    results = collect_task_results(tasks)
+    {:ok, results}
+  end
+
+  defp collect_task_results(tasks) do
+    tasks
+    |> Task.yield_many(60_000)
+    |> Enum.map(fn {task, result} ->
+      case result do
+        {:ok, value} ->
+          value
+
+        nil ->
+          Task.shutdown(task, :brutal_kill)
+          Logger.warning("Memory cleanup task timed out: #{inspect(task.ref)}")
+          {:error, :timeout}
+
+        {:exit, reason} ->
+          Logger.warning("Memory cleanup task crashed: #{inspect(reason)}")
+          {:error, reason}
+      end
+    end)
   end
 
   # --- Context Building ---
@@ -183,7 +274,9 @@ defmodule AgentEx.Memory do
     alias AgentEx.Message
 
     semantic_query = last_user_content(messages)
-    context_messages = build_context(user_id, project_id, agent_id, session_id, semantic_query: semantic_query)
+
+    context_messages =
+      build_context(user_id, project_id, agent_id, session_id, semantic_query: semantic_query)
 
     {system_ctx, conversation_ctx} =
       Enum.split_with(context_messages, &(&1.role == "system"))

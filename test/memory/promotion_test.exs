@@ -9,7 +9,13 @@ defmodule AgentEx.Memory.PromotionTest do
 
   describe "save_memory_tool/1" do
     test "returns a Tool struct" do
-      tool = Promotion.save_memory_tool(user_id: @test_uid, project_id: @test_pid, agent_id: "test_agent")
+      tool =
+        Promotion.save_memory_tool(
+          user_id: @test_uid,
+          project_id: @test_pid,
+          agent_id: "test_agent"
+        )
+
       assert %Tool{} = tool
       assert tool.name == "save_memory"
       assert tool.kind == :write
@@ -17,7 +23,13 @@ defmodule AgentEx.Memory.PromotionTest do
     end
 
     test "tool has required parameter schema" do
-      tool = Promotion.save_memory_tool(user_id: @test_uid, project_id: @test_pid, agent_id: "test_agent")
+      tool =
+        Promotion.save_memory_tool(
+          user_id: @test_uid,
+          project_id: @test_pid,
+          agent_id: "test_agent"
+        )
+
       props = tool.parameters["properties"]
       assert Map.has_key?(props, "fact")
       assert Map.has_key?(props, "category")
@@ -35,7 +47,14 @@ defmodule AgentEx.Memory.PromotionTest do
       # Use a dummy client — should never be called for empty sessions
       client = ModelClient.new(model: "test", api_key: "test")
 
-      assert {:ok, ""} = Promotion.close_session_with_summary(@test_uid, @test_pid, agent_id, session_id, client)
+      assert {:ok, ""} =
+               Promotion.close_session_with_summary(
+                 @test_uid,
+                 @test_pid,
+                 agent_id,
+                 session_id,
+                 client
+               )
     end
   end
 end
