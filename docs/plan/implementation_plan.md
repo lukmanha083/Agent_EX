@@ -4497,3 +4497,237 @@ Swarm         │ Swarm          │ Shared convo  │ LLM          │ Dynamic 
 /memory              → MemoryLive            (Phase 7)
 /bridge              → BridgeLive            (Phase 8)
 ```
+
+---
+
+## Phase 8b — Procedural Memory: Option B (Skills Modify AgentConfig)
+
+### Prerequisite
+
+Phase 8b builds on the **Tier 4 Procedural Memory** system (Option A) already implemented:
+- `ProceduralMemory.Store` — ETS+DETS GenServer storing `Skill` structs
+- `ProceduralMemory.Observer` — Records tool execution observations to Tier 2
+- `ProceduralMemory.Reflector` — LLM-based skill extraction on session close
+- `ContextBuilder` — Injects skills as `## Learned Skills & Strategies` system section
+
+Option A keeps skills **separate from AgentConfig** — they are injected by ContextBuilder
+alongside memory tiers but don't modify the agent's definition. Option B promotes
+high-confidence skills **into the AgentConfig itself**, so they become part of the agent's
+permanent personality and capabilities.
+
+### Core Insight
+
+Option A injects skills as a memory context section (like Tier 2/3 facts). This works
+but has a limitation: skills compete for token budget with other memory tiers and are
+formatted generically. Option B promotes proven skills into the agent's config fields
+(`tool_guidance`, `constraints`, `tool_examples`), which appear in the **primary system
+prompt** — the most attention-weighted position in the context window.
+
+The key distinction:
+- **Option A**: Skills are "memories the agent has" (context section)
+- **Option B**: Skills become "capabilities the agent is" (identity section)
+
+### Architecture
+
+```text
+┌─────────────────────────────────────────────────────────────┐
+│                    Agent Session                             │
+│  1. ToolCallerLoop runs → Observer records observations     │
+│  2. Session closes → Reflector extracts skills              │
+│  3. Skills stored in ProceduralMemory.Store (Tier 4)        │
+└─────────────────────────────┬───────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│              ProceduralMemory.Promoter (NEW)                 │
+│                                                              │
+│  Periodic or on-demand:                                      │
+│  1. Read top skills from Tier 4 (confidence ≥ threshold)    │
+│  2. Generate AgentConfig field updates via LLM               │
+│  3. Write to AgentConfig.learned_skills (new field)          │
+│  4. build_system_messages() includes learned skills section  │
+└─────────────────────────────┬───────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    AgentConfig (enhanced)                     │
+│                                                              │
+│  Existing fields (human-authored):                           │
+│  ├─ role, expertise, personality                             │
+│  ├─ goal, success_criteria, constraints                      │
+│  ├─ tool_guidance, tool_examples                             │
+│  └─ system_prompt                                            │
+│                                                              │
+│  New field (machine-learned, read-only in UI):               │
+│  └─ learned_skills: [                                        │
+│       %{name, domain, strategy, tool_patterns, confidence}   │
+│     ]                                                        │
+│                                                              │
+│  build_system_messages() order:                              │
+│  1. build_identity (role, expertise, personality)            │
+│  2. build_goal (goal, success_criteria)                      │
+│  3. build_constraints (constraints, scope)                   │
+│  4. build_learned_skills (NEW — from learned_skills field)   │
+│  5. build_tool_guidance (tool_guidance)                      │
+│  6. build_output_format (output_format)                      │
+│  7. build_system_prompt (free-form)                          │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### New AgentConfig Field
+
+```elixir
+defstruct [
+  # ... existing fields ...
+  learned_skills: []   # [%{name, domain, strategy, tool_patterns, confidence}]
+]
+```
+
+**Design constraints:**
+- `learned_skills` is **not** in `@updatable_fields` — users cannot directly edit it
+- The UI shows learned skills as read-only badges/cards in the agent editor
+- A "Reset Skills" button clears the field (for when skills become stale)
+- Skills are plain maps (not Skill structs) to keep AgentConfig serialization simple
+
+### build_learned_skills/1
+
+New section builder inserted between `build_constraints` and `build_tool_guidance`:
+
+```elixir
+defp build_learned_skills(%{learned_skills: skills})
+     when is_list(skills) and skills != [] do
+  formatted =
+    skills
+    |> Enum.sort_by(& &1.confidence, :desc)
+    |> Enum.map_join("\n", fn skill ->
+      pct = round(skill.confidence * 100)
+      base = "- **#{skill.name}** (#{pct}%): #{skill.strategy}"
+
+      if skill[:tool_patterns] && skill.tool_patterns != [] do
+        base <> " [Tools: #{Enum.join(skill.tool_patterns, " → ")}]"
+      else
+        base
+      end
+    end)
+
+  "## Learned Strategies\n#{formatted}"
+end
+
+defp build_learned_skills(_), do: nil
+```
+
+### ProceduralMemory.Promoter
+
+New module that bridges Tier 4 skills into AgentConfig:
+
+```elixir
+defmodule AgentEx.Memory.ProceduralMemory.Promoter do
+  @moduledoc """
+  Promotes high-confidence Tier 4 skills into AgentConfig.learned_skills.
+  """
+
+  alias AgentEx.{AgentConfig, AgentStore}
+  alias AgentEx.Memory.ProceduralMemory.Store
+
+  @confidence_threshold 0.7
+  @max_promoted_skills 8
+
+  @doc """
+  Promote top skills into the agent's config.
+  Called after Reflector.reflect() or on a periodic schedule.
+  """
+  def promote(user_id, project_id, agent_id) do
+    skills =
+      Store.get_top_skills(user_id, project_id, agent_id, @max_promoted_skills)
+      |> Enum.filter(& &1.confidence >= @confidence_threshold)
+      |> Enum.map(&skill_to_map/1)
+
+    case AgentStore.get(user_id, project_id, agent_id) do
+      {:ok, config} ->
+        updated = %{config | learned_skills: skills, updated_at: DateTime.utc_now()}
+        AgentStore.save(updated)
+
+      :not_found ->
+        {:error, :agent_not_found}
+    end
+  end
+
+  defp skill_to_map(skill) do
+    %{
+      name: skill.name,
+      domain: skill.domain,
+      strategy: skill.strategy,
+      tool_patterns: skill.tool_patterns,
+      confidence: skill.confidence
+    }
+  end
+end
+```
+
+### Locked vs Learnable Fields
+
+To prevent machine-generated content from overwriting user intent:
+
+| Field | Source | Editable | Override |
+|-------|--------|----------|---------|
+| `role` | Human | Yes | Never auto-modified |
+| `expertise` | Human | Yes | Never auto-modified |
+| `constraints` | Human | Yes | Never auto-modified |
+| `tool_guidance` | Human | Yes | Never auto-modified |
+| `learned_skills` | Machine | Read-only | Promoter writes, user can reset |
+| `system_prompt` | Human | Yes | Never auto-modified |
+
+The `learned_skills` field is a **separate channel** — it never overwrites human-authored
+fields. The `build_system_messages/1` function inserts learned skills as their own section
+between constraints and tool guidance, giving them prominent placement without conflicting
+with user-authored content.
+
+### Integration with Phase 8 Reward System
+
+The Phase 8 reward system (OutcomeManager, RewardEvaluator, ProxyModel) provides
+**delayed outcome signals** that Tier 4 doesn't currently handle:
+
+```text
+Phase 8 Reward Flow:
+  1. Agent completes task → schedules outcome check
+  2. Hours/days later → outcome webhook arrives
+  3. RewardEvaluator assigns credit to skills used in that session
+  4. Skill confidence updated retroactively
+  5. Promoter re-evaluates which skills meet threshold
+  6. AgentConfig.learned_skills updated
+
+Tier 4 + Phase 8 Integration:
+  RewardEvaluator.evaluate_outcome(session_id, outcome)
+    → Identify skills used (from observations)
+    → Update Skill.update_confidence(skill, delayed_signal)
+    → Promoter.promote(user_id, project_id, agent_id)
+```
+
+This creates a **full reinforcement loop**:
+- **Immediate**: Reflector extracts skills on session close (Option A, already implemented)
+- **Delayed**: RewardEvaluator updates confidence when real outcomes arrive (Phase 8)
+- **Promotion**: High-confidence skills promoted into AgentConfig (Option B)
+- **Context**: Agent sees proven strategies in its system prompt, improving future sessions
+
+### File Manifest
+
+| Action | File | Description |
+|--------|------|-------------|
+| Create | `lib/agent_ex/memory/procedural_memory/promoter.ex` | Promote Tier 4 skills → AgentConfig |
+| Modify | `lib/agent_ex/agent_config.ex` | Add `learned_skills: []` field, `build_learned_skills/1` |
+| Modify | `lib/agent_ex/agent_store.ex` | Ensure learned_skills serialized in DETS |
+| Modify | `lib/agent_ex/memory/promotion.ex` | Call Promoter after Reflector |
+| Modify | `lib/agent_ex_web/live/agents_live.ex` | Show learned skills in agent editor (read-only) |
+| Modify | `lib/agent_ex_web/components/agent_components.ex` | Skill badge/card component |
+| Create | `test/memory/procedural_memory/promoter_test.exs` | Promoter tests |
+
+### Design Decisions
+
+| ID | Decision | Rationale |
+|----|----------|-----------|
+| D1 | Separate `learned_skills` field, not merging into existing fields | Prevents overwriting user intent; clear separation of human vs machine content |
+| D2 | Read-only in UI with "Reset" option | Users need escape hatch when skills become stale |
+| D3 | Confidence threshold 0.7 for promotion | Only promote skills that have been consistently successful |
+| D4 | Max 8 promoted skills | Keeps system prompt concise; most agents have 3-5 core strategies |
+| D5 | Plain maps in AgentConfig, not Skill structs | Simpler DETS serialization; AgentConfig stays framework-agnostic |
+| D6 | Inserted between constraints and tool_guidance in system prompt | High-attention position without displacing user-authored sections |
