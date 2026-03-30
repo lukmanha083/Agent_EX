@@ -1,5 +1,5 @@
 defmodule AgentEx.StatefulToolTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias AgentEx.{StatefulTool, Tool}
 
@@ -21,10 +21,17 @@ defmodule AgentEx.StatefulToolTest do
     def put(agent_id, key, value) do
       Agent.update(__MODULE__, &Map.put(&1, {agent_id, key}, value))
     end
+
+    def reset do
+      Agent.update(__MODULE__, fn _ -> %{} end)
+    end
   end
 
   setup do
-    {:ok, _} = MockStore.start_link()
+    case MockStore.start_link() do
+      {:ok, _} -> :ok
+      {:error, {:already_started, _}} -> MockStore.reset()
+    end
 
     counter_tool =
       Tool.new(
