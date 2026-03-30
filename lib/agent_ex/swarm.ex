@@ -17,7 +17,7 @@ defmodule AgentEx.Swarm do
 
       {:ok, result} = Swarm.run(agents, client, messages,
         start: "planner",
-        memory: %{session_id: "swarm-session-1"}
+        memory: %{user_id: user_id, project_id: project_id, session_id: "swarm-session-1"}
       )
 
   ## AutoGen equivalent (Python):
@@ -61,7 +61,7 @@ defmodule AgentEx.Swarm do
           max_iterations: pos_integer(),
           intervention: [AgentEx.Intervention.handler()],
           model_fn: ([Message.t()], [Tool.t()] -> {:ok, Message.t()} | {:error, term()}),
-          memory: %{session_id: String.t()} | nil
+          memory: %{user_id: term(), project_id: term(), session_id: String.t()} | nil
         ]
 
   @type result :: {:ok, [Message.t()], HandoffMessage.t() | nil} | {:error, term()}
@@ -94,7 +94,7 @@ defmodule AgentEx.Swarm do
 
     # Start memory sessions for each agent if memory is enabled
     if memory_opts do
-      start_memory_sessions(agents, memory_opts.session_id)
+      start_memory_sessions(agents, memory_opts)
     end
 
     context = %{
@@ -120,7 +120,7 @@ defmodule AgentEx.Swarm do
 
     # Clean up memory sessions
     if memory_opts do
-      stop_memory_sessions(agents, memory_opts.session_id)
+      stop_memory_sessions(agents, memory_opts)
     end
 
     result
@@ -222,31 +222,47 @@ defmodule AgentEx.Swarm do
 
   defp maybe_inject_memory(messages, _agent_name, nil), do: messages
 
-  defp maybe_inject_memory(messages, agent_name, %{session_id: session_id}) do
-    Memory.inject_memory_context(messages, agent_name, session_id)
+  defp maybe_inject_memory(messages, agent_name, %{
+         user_id: user_id,
+         project_id: project_id,
+         session_id: session_id
+       }) do
+    Memory.inject_memory_context(messages, user_id, project_id, agent_name, session_id)
   end
 
   defp maybe_store_turn(_agent_name, _response, nil), do: :ok
 
-  defp maybe_store_turn(agent_name, %Message{content: content}, %{session_id: session_id})
+  defp maybe_store_turn(agent_name, %Message{content: content}, %{
+         user_id: user_id,
+         project_id: project_id,
+         session_id: session_id
+       })
        when is_binary(content) and content != "" do
-    Memory.add_message(agent_name, session_id, "assistant", content)
+    Memory.add_message(user_id, project_id, agent_name, session_id, "assistant", content)
   end
 
   defp maybe_store_turn(_, _, _), do: :ok
 
-  defp start_memory_sessions(agents, session_id) do
+  defp start_memory_sessions(agents, %{
+         user_id: user_id,
+         project_id: project_id,
+         session_id: session_id
+       }) do
     Enum.each(agents, fn %Agent{name: name} ->
-      case Memory.start_session(name, session_id) do
+      case Memory.start_session(user_id, project_id, name, session_id) do
         {:ok, _} -> :ok
         {:error, {:already_started, _}} -> :ok
       end
     end)
   end
 
-  defp stop_memory_sessions(agents, session_id) do
+  defp stop_memory_sessions(agents, %{
+         user_id: user_id,
+         project_id: project_id,
+         session_id: session_id
+       }) do
     Enum.each(agents, fn %Agent{name: name} ->
-      Memory.stop_session(name, session_id)
+      Memory.stop_session(user_id, project_id, name, session_id)
     end)
   end
 

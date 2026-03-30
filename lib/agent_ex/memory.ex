@@ -2,94 +2,96 @@ defmodule AgentEx.Memory do
   @moduledoc """
   Public API facade for the 3-tier agent memory system with knowledge graph.
 
-  All operations are scoped by `agent_id` — each agent (GenServer, Swarm participant,
-  or standalone) gets its own isolated memory space.
+  All operations are scoped by `(user_id, project_id, agent_id)` for multi-tenant isolation.
 
   ## Tiers
-  - **Tier 1 (Working Memory)**: Per-agent, per-session conversation history
-  - **Tier 2 (Persistent Memory)**: Per-agent key-value facts (ETS + DETS)
-  - **Tier 3 (Semantic Memory)**: Per-agent vector-based semantic search (HelixDB)
+  - **Tier 1 (Working Memory)**: Per-session conversation history
+  - **Tier 2 (Persistent Memory)**: Key-value facts (ETS + DETS)
+  - **Tier 3 (Semantic Memory)**: Vector-based semantic search (HelixDB)
   - **Knowledge Graph**: Shared entities/facts, per-agent episodes (HelixDB)
 
   ## Example — multi-agent memory isolation
 
-      # Analyst agent remembers its own preferences
-      AgentEx.Memory.start_session("analyst", "session-1")
-      AgentEx.Memory.remember("analyst", "expertise", "data analysis", "fact")
-      AgentEx.Memory.add_message("analyst", "session-1", "user", "Analyze AAPL")
+      uid = 1
+      pid = 1
 
-      # Writer agent has its own memory space
-      AgentEx.Memory.start_session("writer", "session-1")
-      AgentEx.Memory.remember("writer", "style", "concise", "preference")
+      AgentEx.Memory.start_session(uid, pid, "analyst", "session-1")
+      AgentEx.Memory.remember(uid, pid, "analyst", "expertise", "data analysis", "fact")
+
+      AgentEx.Memory.start_session(uid, pid, "writer", "session-1")
+      AgentEx.Memory.remember(uid, pid, "writer", "style", "concise", "preference")
 
       # Each agent's context only sees its own memories
-      AgentEx.Memory.build_context("analyst", "session-1")  # analyst's view
-      AgentEx.Memory.build_context("writer", "session-1")   # writer's view
+      AgentEx.Memory.build_context(uid, pid, "analyst", "session-1")
+      AgentEx.Memory.build_context(uid, pid, "writer", "session-1")
   """
 
   alias AgentEx.Memory.{
     ContextBuilder,
     KnowledgeGraph,
     PersistentMemory,
+    ProceduralMemory,
     Promotion,
     SemanticMemory,
     WorkingMemory
   }
 
+  require Logger
+
   # --- Session Management (Tier 1) ---
 
-  def start_session(agent_id, session_id, opts \\ []) do
-    WorkingMemory.Supervisor.start_session(agent_id, session_id, opts)
+  def start_session(user_id, project_id, agent_id, session_id, opts \\ []) do
+    WorkingMemory.Supervisor.start_session(user_id, project_id, agent_id, session_id, opts)
   end
 
-  def stop_session(agent_id, session_id) do
-    WorkingMemory.Supervisor.stop_session(agent_id, session_id)
+  def stop_session(user_id, project_id, agent_id, session_id) do
+    WorkingMemory.Supervisor.stop_session(user_id, project_id, agent_id, session_id)
   end
 
-  def add_message(agent_id, session_id, role, content) do
-    WorkingMemory.Server.add_message(agent_id, session_id, role, content)
+  def add_message(user_id, project_id, agent_id, session_id, role, content) do
+    WorkingMemory.Server.add_message(user_id, project_id, agent_id, session_id, role, content)
   end
 
-  def get_messages(agent_id, session_id) do
-    WorkingMemory.Server.get_messages(agent_id, session_id)
+  def get_messages(user_id, project_id, agent_id, session_id) do
+    WorkingMemory.Server.get_messages(user_id, project_id, agent_id, session_id)
   end
 
-  def get_recent_messages(agent_id, session_id, n) do
-    WorkingMemory.Server.get_recent(agent_id, session_id, n)
+  def get_recent_messages(user_id, project_id, agent_id, session_id, n) do
+    WorkingMemory.Server.get_recent(user_id, project_id, agent_id, session_id, n)
   end
 
   # --- Persistent Memory (Tier 2) ---
 
-  def remember(agent_id, key, value, type \\ "preference") do
-    PersistentMemory.Store.put(agent_id, key, value, type)
+  def remember(user_id, project_id, agent_id, key, value, type \\ "preference") do
+    PersistentMemory.Store.put(user_id, project_id, agent_id, key, value, type)
   end
 
-  def recall(agent_id, key) do
-    PersistentMemory.Store.get(agent_id, key)
+  def recall(user_id, project_id, agent_id, key) do
+    PersistentMemory.Store.get(user_id, project_id, agent_id, key)
   end
 
-  def recall_by_type(agent_id, type) do
-    PersistentMemory.Store.get_by_type(agent_id, type)
+  def recall_by_type(user_id, project_id, agent_id, type) do
+    PersistentMemory.Store.get_by_type(user_id, project_id, agent_id, type)
   end
 
-  def forget(agent_id, key) do
-    PersistentMemory.Store.delete(agent_id, key)
+  def forget(user_id, project_id, agent_id, key) do
+    PersistentMemory.Store.delete(user_id, project_id, agent_id, key)
   end
 
   # --- Semantic Memory (Tier 3) ---
 
-  def store_memory(agent_id, text, type \\ "general", session_id \\ "") do
-    SemanticMemory.Store.store(agent_id, text, type, session_id)
+  def store_memory(user_id, project_id, agent_id, text, type \\ "general", session_id \\ "") do
+    SemanticMemory.Store.store(user_id, project_id, agent_id, text, type, session_id)
   end
 
-  def search_memory(agent_id, query, limit \\ 5) do
-    SemanticMemory.Store.search(agent_id, query, limit)
+  def search_memory(user_id, project_id, agent_id, query, limit \\ 5) do
+    SemanticMemory.Store.search(user_id, project_id, agent_id, query, limit)
   end
 
   # --- Knowledge Graph ---
 
-  def ingest(agent_id, text, role \\ "user") do
-    KnowledgeGraph.Store.ingest(agent_id, text, role)
+  def ingest(user_id, project_id, agent_id, text, role \\ "user") do
+    KnowledgeGraph.Store.ingest(user_id, project_id, agent_id, text, role)
   end
 
   @doc "Query an entity by name (shared across agents)."
@@ -102,15 +104,61 @@ defmodule AgentEx.Memory do
     KnowledgeGraph.Store.query_related(name, hops)
   end
 
-  def hybrid_search(agent_id, query, limit \\ 5) do
-    KnowledgeGraph.Store.hybrid_search(agent_id, query, limit)
+  def hybrid_search(user_id, project_id, agent_id, query, limit \\ 5) do
+    KnowledgeGraph.Store.hybrid_search(user_id, project_id, agent_id, query, limit)
+  end
+
+  # --- Procedural Memory (Tier 4: Skills) ---
+
+  @doc "Store or update a skill."
+  def store_skill(user_id, project_id, agent_id, %ProceduralMemory.Skill{} = skill) do
+    ProceduralMemory.Store.put(user_id, project_id, agent_id, skill)
+  end
+
+  @doc "Retrieve a specific skill by name."
+  def get_skill(user_id, project_id, agent_id, skill_name) do
+    ProceduralMemory.Store.get(user_id, project_id, agent_id, skill_name)
+  end
+
+  @doc "Get all skills for an agent."
+  def list_skills(user_id, project_id, agent_id) do
+    ProceduralMemory.Store.all(user_id, project_id, agent_id)
+  end
+
+  @doc "Get top skills by confidence score."
+  def top_skills(user_id, project_id, agent_id, limit \\ 10) do
+    ProceduralMemory.Store.get_top_skills(user_id, project_id, agent_id, limit)
+  end
+
+  @doc "Get skills in a specific domain."
+  def skills_by_domain(user_id, project_id, agent_id, domain) do
+    ProceduralMemory.Store.get_by_domain(user_id, project_id, agent_id, domain)
+  end
+
+  @doc "Delete a specific skill."
+  def delete_skill(user_id, project_id, agent_id, skill_name) do
+    ProceduralMemory.Store.delete(user_id, project_id, agent_id, skill_name)
   end
 
   # --- Memory Promotion ---
 
   @doc "Close a session and promote a summary to Tier 3."
-  def close_session_with_summary(agent_id, session_id, model_client, opts \\ []) do
-    Promotion.close_session_with_summary(agent_id, session_id, model_client, opts)
+  def close_session_with_summary(
+        user_id,
+        project_id,
+        agent_id,
+        session_id,
+        model_client,
+        opts \\ []
+      ) do
+    Promotion.close_session_with_summary(
+      user_id,
+      project_id,
+      agent_id,
+      session_id,
+      model_client,
+      opts
+    )
   end
 
   @doc "Build a save_memory tool for an agent."
@@ -118,10 +166,116 @@ defmodule AgentEx.Memory do
     Promotion.save_memory_tool(opts)
   end
 
+  # --- Data Cleanup ---
+
+  @doc """
+  Delete all memory data for an agent across all tiers.
+
+  - Tier 2: Removes all persistent memory entries (ETS + DETS)
+  - Tier 3: Removes semantic memory vectors from HelixDB (best-effort)
+  - Tier 4: Removes procedural skills (ETS + DETS)
+  - KG: Removes episode embeddings from HelixDB (best-effort; shared entities/facts kept)
+  """
+  def delete_agent_data(user_id, project_id, agent_id) do
+    # Stop any active Tier 1 sessions for this agent
+    stop_agent_sessions(user_id, project_id, agent_id)
+
+    tasks = [
+      Task.Supervisor.async_nolink(AgentEx.TaskSupervisor, fn ->
+        {:persistent, PersistentMemory.Store.delete_all(user_id, project_id, agent_id)}
+      end),
+      Task.Supervisor.async_nolink(AgentEx.TaskSupervisor, fn ->
+        {:semantic, SemanticMemory.Store.delete_by_agent(user_id, project_id, agent_id)}
+      end),
+      Task.Supervisor.async_nolink(AgentEx.TaskSupervisor, fn ->
+        {:knowledge_graph, KnowledgeGraph.Store.delete_by_agent(user_id, project_id, agent_id)}
+      end),
+      Task.Supervisor.async_nolink(AgentEx.TaskSupervisor, fn ->
+        {:procedural, ProceduralMemory.Store.delete_all(user_id, project_id, agent_id)}
+      end)
+    ]
+
+    results = collect_task_results(tasks)
+    {:ok, results}
+  end
+
+  @doc """
+  Delete all memory data for a project across all tiers.
+
+  - Tier 2: Direct project-scoped delete from ETS/DETS
+  - Tier 3: Removes semantic memory vectors matching project_id (best-effort)
+  - Tier 4: Removes procedural skills matching project_id (ETS + DETS)
+  - KG: Removes episode embeddings matching project_id (best-effort; shared entities/facts kept)
+  """
+  def delete_project_data(user_id, project_id) do
+    # Stop any active Tier 1 sessions for this project
+    stop_project_sessions(user_id, project_id)
+
+    tasks = [
+      Task.Supervisor.async_nolink(AgentEx.TaskSupervisor, fn ->
+        {:persistent, PersistentMemory.Store.delete_by_project(user_id, project_id)}
+      end),
+      Task.Supervisor.async_nolink(AgentEx.TaskSupervisor, fn ->
+        {:semantic, SemanticMemory.Store.delete_by_project(user_id, project_id)}
+      end),
+      Task.Supervisor.async_nolink(AgentEx.TaskSupervisor, fn ->
+        {:knowledge_graph, KnowledgeGraph.Store.delete_by_project(user_id, project_id)}
+      end),
+      Task.Supervisor.async_nolink(AgentEx.TaskSupervisor, fn ->
+        {:procedural, ProceduralMemory.Store.delete_by_project(user_id, project_id)}
+      end)
+    ]
+
+    results = collect_task_results(tasks)
+    {:ok, results}
+  end
+
+  defp collect_task_results(tasks) do
+    tasks
+    |> Task.yield_many(60_000)
+    |> Enum.map(fn {task, result} ->
+      case result do
+        {:ok, value} ->
+          value
+
+        nil ->
+          Task.shutdown(task, :brutal_kill)
+          Logger.warning("Memory cleanup task timed out: #{inspect(task.ref)}")
+          {:error, :timeout}
+
+        {:exit, reason} ->
+          Logger.warning("Memory cleanup task crashed: #{inspect(reason)}")
+          {:error, reason}
+      end
+    end)
+  end
+
+  defp stop_agent_sessions(user_id, project_id, agent_id) do
+    Registry.select(AgentEx.Memory.SessionRegistry, [
+      {{{user_id, project_id, agent_id, :"$1"}, :_, :_}, [], [:"$1"]}
+    ])
+    |> Enum.each(fn session_id ->
+      WorkingMemory.Supervisor.stop_session(user_id, project_id, agent_id, session_id)
+    end)
+  rescue
+    _ -> :ok
+  end
+
+  defp stop_project_sessions(user_id, project_id) do
+    Registry.select(AgentEx.Memory.SessionRegistry, [
+      {{{user_id, project_id, :"$1", :"$2"}, :_, :_}, [], [{{:"$1", :"$2"}}]}
+    ])
+    |> Enum.each(fn {agent_id, session_id} ->
+      WorkingMemory.Supervisor.stop_session(user_id, project_id, agent_id, session_id)
+    end)
+  rescue
+    _ -> :ok
+  end
+
   # --- Context Building ---
 
-  def build_context(agent_id, session_id, opts \\ []) do
-    ContextBuilder.build(agent_id, session_id, opts)
+  def build_context(user_id, project_id, agent_id, session_id, opts \\ []) do
+    ContextBuilder.build(user_id, project_id, agent_id, session_id, opts)
   end
 
   @doc """
@@ -144,11 +298,13 @@ defmodule AgentEx.Memory do
   Inserts system-level context (Tier 2/3/KG) after existing system messages,
   then conversation history (Tier 1) before the current user messages.
   """
-  def inject_memory_context(messages, agent_id, session_id) do
+  def inject_memory_context(messages, user_id, project_id, agent_id, session_id) do
     alias AgentEx.Message
 
     semantic_query = last_user_content(messages)
-    context_messages = build_context(agent_id, session_id, semantic_query: semantic_query)
+
+    context_messages =
+      build_context(user_id, project_id, agent_id, session_id, semantic_query: semantic_query)
 
     {system_ctx, conversation_ctx} =
       Enum.split_with(context_messages, &(&1.role == "system"))

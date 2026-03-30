@@ -19,7 +19,7 @@ defmodule AgentEx.ToolCallerLoop do
   2. Stores each conversation turn in working memory
 
       AgentEx.ToolCallerLoop.run(tool_agent, client, messages, tools,
-        memory: %{agent_id: "analyst", session_id: "sess-1"}
+        memory: %{user_id: uid, project_id: pid, agent_id: "analyst", session_id: "sess-1"}
       )
 
   ## Intervention pipeline
@@ -30,6 +30,7 @@ defmodule AgentEx.ToolCallerLoop do
   """
 
   alias AgentEx.Memory
+  alias AgentEx.Memory.ProceduralMemory.Observer
   alias AgentEx.Message
   alias AgentEx.ModelClient
   alias AgentEx.Sensing
@@ -37,7 +38,12 @@ defmodule AgentEx.ToolCallerLoop do
 
   require Logger
 
-  @type memory_opts :: %{agent_id: String.t(), session_id: String.t()}
+  @type memory_opts :: %{
+          user_id: term(),
+          project_id: term(),
+          agent_id: String.t(),
+          session_id: String.t()
+        }
 
   @type opts :: [
           max_iterations: pos_integer(),
@@ -61,9 +67,9 @@ defmodule AgentEx.ToolCallerLoop do
   - `:caller_source` — source label for assistant messages (default: "assistant")
   - `:tool_timeout` — per-tool execution timeout in ms (default: 30_000)
   - `:intervention` — list of intervention handlers (modules or functions)
-  - `:memory` — `%{agent_id: "...", session_id: "..."}` to enable per-agent memory.
-    When set, injects memory context before the first LLM call and stores
-    each user/assistant turn in working memory.
+  - `:memory` — `%{user_id: ..., project_id: ..., agent_id: "...", session_id: "..."}`
+    to enable per-agent memory. When set, injects memory context before the
+    first LLM call and stores each user/assistant turn in working memory.
   - `:model_fn` — override for `ModelClient.create/3`. Signature:
     `(messages, tools) -> {:ok, Message.t()} | {:error, term()}`.
     Useful for testing or wrapping with event broadcasting.
@@ -135,13 +141,15 @@ defmodule AgentEx.ToolCallerLoop do
             "#{length(last.tool_calls)} tool calls (iteration #{iteration})"
         )
 
-        {:ok, result_message, _observations} =
+        {:ok, result_message, observations} =
           Sensing.sense(context.tool_agent, last.tool_calls,
             timeout: context.tool_timeout,
             intervention: context.intervention,
             tools_map: context.tools_map,
             intervention_context: %{iteration: iteration, generated_messages: generated}
           )
+
+        maybe_record_observations(observations, context.memory, iteration)
 
         all_messages = context.input_messages ++ generated ++ [result_message]
 
@@ -174,35 +182,77 @@ defmodule AgentEx.ToolCallerLoop do
 
   defp maybe_inject_memory_context(messages, nil), do: messages
 
-  defp maybe_inject_memory_context(messages, %{agent_id: agent_id, session_id: session_id}) do
-    Memory.inject_memory_context(messages, agent_id, session_id)
+  defp maybe_inject_memory_context(messages, %{
+         user_id: user_id,
+         project_id: project_id,
+         agent_id: agent_id,
+         session_id: session_id
+       }) do
+    Memory.inject_memory_context(messages, user_id, project_id, agent_id, session_id)
   end
 
   defp maybe_store_user_messages(_messages, nil), do: :ok
 
-  defp maybe_store_user_messages(messages, %{agent_id: agent_id, session_id: session_id}) do
+  defp maybe_store_user_messages(messages, %{
+         user_id: user_id,
+         project_id: project_id,
+         agent_id: agent_id,
+         session_id: session_id
+       }) do
     messages
     |> Enum.filter(&(&1.role == :user))
     |> Enum.each(fn msg ->
-      Memory.add_message(agent_id, session_id, "user", msg.content)
+      Memory.add_message(user_id, project_id, agent_id, session_id, "user", msg.content)
     end)
   catch
-    :exit, _ -> :ok
+    :exit, reason ->
+      Logger.debug("ToolCallerLoop: failed to store user messages: #{inspect(reason)}")
+      :ok
   end
 
   defp maybe_store_assistant_response(_message, nil), do: :ok
 
   defp maybe_store_assistant_response(%Message{content: content}, %{
+         user_id: user_id,
+         project_id: project_id,
          agent_id: agent_id,
          session_id: session_id
        })
        when is_binary(content) and content != "" do
-    Memory.add_message(agent_id, session_id, "assistant", content)
+    Memory.add_message(user_id, project_id, agent_id, session_id, "assistant", content)
   catch
-    :exit, _ -> :ok
+    :exit, reason ->
+      Logger.debug("ToolCallerLoop: failed to store assistant response: #{inspect(reason)}")
+      :ok
   end
 
   defp maybe_store_assistant_response(_, _), do: :ok
+
+  defp maybe_record_observations(_observations, nil, _iteration), do: :ok
+
+  defp maybe_record_observations(
+         observations,
+         %{
+           user_id: user_id,
+           project_id: project_id,
+           agent_id: agent_id,
+           session_id: session_id
+         },
+         iteration
+       ) do
+    Observer.record_observations(
+      user_id,
+      project_id,
+      agent_id,
+      session_id,
+      observations,
+      iteration
+    )
+  catch
+    :exit, reason ->
+      Logger.debug("ToolCallerLoop: failed to record observations: #{inspect(reason)}")
+      :ok
+  end
 
   defp has_tool_calls?(%Message{tool_calls: calls}) when is_list(calls) and calls != [], do: true
   defp has_tool_calls?(_), do: false

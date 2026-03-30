@@ -1,6 +1,6 @@
 defmodule AgentEx.Memory.KnowledgeGraph.Store do
   @moduledoc """
-  Orchestrates knowledge graph operations, scoped by `agent_id`.
+  Orchestrates knowledge graph operations, scoped by `(user_id, project_id, agent_id)`.
 
   - **Episodes** are per-agent (each agent's conversation turns are separate)
   - **Entities** are shared (world knowledge is universal across agents)
@@ -26,8 +26,8 @@ defmodule AgentEx.Memory.KnowledgeGraph.Store do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
 
-  def ingest(agent_id, text, role \\ "user") do
-    GenServer.call(__MODULE__, {:ingest, agent_id, text, role}, 60_000)
+  def ingest(user_id, project_id, agent_id, text, role \\ "user") do
+    GenServer.call(__MODULE__, {:ingest, user_id, project_id, agent_id, text, role}, 60_000)
   end
 
   def query_entity(name) do
@@ -38,15 +38,35 @@ defmodule AgentEx.Memory.KnowledgeGraph.Store do
     GenServer.call(__MODULE__, {:query_related, name, hops}, 30_000)
   end
 
-  def hybrid_search(agent_id, query, limit \\ 5) do
-    GenServer.call(__MODULE__, {:hybrid_search, agent_id, query, limit}, 30_000)
+  def hybrid_search(user_id, project_id, agent_id, query, limit \\ 5) do
+    GenServer.call(
+      __MODULE__,
+      {:hybrid_search, user_id, project_id, agent_id, query, limit},
+      30_000
+    )
+  end
+
+  @doc """
+  Delete all episodes and episode embeddings for an agent.
+
+  Entities and facts are shared across agents and are NOT deleted.
+  Uses broad vector search + client-side agent_id filter since HelixDB
+  doesn't support property-based queries.
+  """
+  def delete_by_agent(user_id, project_id, agent_id) do
+    GenServer.call(__MODULE__, {:delete_by_agent, user_id, project_id, agent_id}, 60_000)
+  end
+
+  @doc "Delete all episodes and episode embeddings for a project (scoped by project_id metadata)."
+  def delete_by_project(user_id, project_id) do
+    GenServer.call(__MODULE__, {:delete_by_project, user_id, project_id}, 60_000)
   end
 
   # --- Tier callbacks ---
 
   @impl AgentEx.Memory.Tier
-  def to_context_messages(agent_id, query) when is_binary(query) do
-    case hybrid_search(agent_id, query) do
+  def to_context_messages({user_id, project_id, agent_id}, query) when is_binary(query) do
+    case hybrid_search(user_id, project_id, agent_id, query) do
       {:ok, context} when context != "" ->
         [%{role: "system", content: "## Knowledge Graph\n#{context}"}]
 
@@ -56,8 +76,8 @@ defmodule AgentEx.Memory.KnowledgeGraph.Store do
   end
 
   @impl AgentEx.Memory.Tier
-  def token_estimate(agent_id, query) when is_binary(query) do
-    case hybrid_search(agent_id, query) do
+  def token_estimate({user_id, project_id, agent_id}, query) when is_binary(query) do
+    case hybrid_search(user_id, project_id, agent_id, query) do
       {:ok, context} -> div(String.length(context), 4)
       _ -> 0
     end
@@ -69,8 +89,8 @@ defmodule AgentEx.Memory.KnowledgeGraph.Store do
   def init(_opts), do: {:ok, %{}}
 
   @impl GenServer
-  def handle_call({:ingest, agent_id, text, role}, _from, state) do
-    result = run_ingestion_pipeline(agent_id, text, role)
+  def handle_call({:ingest, user_id, project_id, agent_id, text, role}, _from, state) do
+    result = run_ingestion_pipeline(user_id, project_id, agent_id, text, role)
     {:reply, result, state}
   end
 
@@ -87,18 +107,41 @@ defmodule AgentEx.Memory.KnowledgeGraph.Store do
   end
 
   @impl GenServer
-  def handle_call({:hybrid_search, agent_id, query, limit}, _from, state) do
-    result = Retriever.hybrid_search(agent_id, query, limit)
+  def handle_call({:hybrid_search, user_id, project_id, agent_id, query, limit}, _from, state) do
+    result = Retriever.hybrid_search(user_id, project_id, agent_id, query, limit)
+    {:reply, result, state}
+  end
+
+  @impl GenServer
+  def handle_call({:delete_by_agent, user_id, project_id, agent_id}, _from, state) do
+    filter = %{
+      "agent_id" => to_string(agent_id),
+      "user_id" => to_string(user_id),
+      "project_id" => to_string(project_id)
+    }
+
+    result = do_delete_by_filter(filter)
+    {:reply, result, state}
+  end
+
+  @impl GenServer
+  def handle_call({:delete_by_project, user_id, project_id}, _from, state) do
+    filter = %{
+      "user_id" => to_string(user_id),
+      "project_id" => to_string(project_id)
+    }
+
+    result = do_delete_by_filter(filter)
     {:reply, result, state}
   end
 
   # --- Ingestion Pipeline ---
 
-  defp run_ingestion_pipeline(agent_id, text, role) do
+  defp run_ingestion_pipeline(user_id, project_id, agent_id, text, role) do
     now = DateTime.utc_now() |> DateTime.to_iso8601()
 
-    with {:ok, episode_id} <- create_episode(agent_id, text, role, now),
-         :ok <- store_episode_embedding(agent_id, episode_id, text),
+    with {:ok, episode_id} <- create_episode(user_id, project_id, agent_id, text, role, now),
+         :ok <- store_episode_embedding(user_id, project_id, agent_id, episode_id, text),
          {:ok, extraction} <- Extractor.extract(text),
          {:ok, entity_map} <- resolve_entities(extraction.entities, now),
          :ok <- store_facts(extraction.relationships, entity_map, now),
@@ -116,12 +159,14 @@ defmodule AgentEx.Memory.KnowledgeGraph.Store do
     end
   end
 
-  defp create_episode(agent_id, text, role, now) do
+  defp create_episode(user_id, project_id, agent_id, text, role, now) do
     case Client.query("CreateEpisode", %{
            content: text,
            role: role,
            source: "conversation",
            agent_id: agent_id,
+           user_id: user_id,
+           project_id: project_id,
            now: now
          }) do
       {:ok, %{"episode" => %{"id" => id}}} -> {:ok, id}
@@ -130,13 +175,15 @@ defmodule AgentEx.Memory.KnowledgeGraph.Store do
     end
   end
 
-  defp store_episode_embedding(agent_id, episode_id, text) do
+  defp store_episode_embedding(user_id, project_id, agent_id, episode_id, text) do
     with {:ok, vector} <- Embeddings.embed(text),
          {:ok, _} <-
            Client.query("StoreEpisodeEmbedding", %{
              episode_id: episode_id,
              content_summary: text,
              agent_id: agent_id,
+             user_id: user_id,
+             project_id: project_id,
              vector: vector,
              now: DateTime.utc_now() |> DateTime.to_iso8601()
            }) do
@@ -312,6 +359,57 @@ defmodule AgentEx.Memory.KnowledgeGraph.Store do
 
   defp find_nested_id(list) when is_list(list), do: Enum.find_value(list, &find_nested_id/1)
   defp find_nested_id(_), do: nil
+
+  # --- Agent-scoped cleanup (episodes only; entities/facts are shared) ---
+
+  @batch_size 500
+  @zero_vector List.duplicate(0.0, 1536)
+
+  defp do_delete_by_filter(filter) do
+    deleted = delete_episode_embeddings_by_filter(filter)
+
+    Logger.info("KnowledgeGraph: deleted #{deleted} episode embeddings for #{inspect(filter)}")
+    {:ok, deleted}
+  rescue
+    e ->
+      Logger.warning("KnowledgeGraph cleanup failed for #{inspect(filter)}: #{inspect(e)}")
+      {:ok, 0}
+  end
+
+  defp delete_episode_embeddings_by_filter(filter, total_deleted \\ 0) do
+    case Client.query("SearchEpisodes", %{query_vector: @zero_vector, limit: @batch_size}) do
+      {:ok, response} ->
+        ids =
+          response
+          |> parse_episode_results()
+          |> Enum.filter(&matches_filter?(&1, filter))
+          |> Enum.map(fn r -> r["id"] || get_in(r, ["properties", "id"]) end)
+          |> Enum.reject(&is_nil/1)
+
+        Enum.each(ids, &Client.query("DeleteEpisodeEmbedding", %{id: &1}))
+
+        if ids == [] do
+          total_deleted
+        else
+          delete_episode_embeddings_by_filter(filter, total_deleted + length(ids))
+        end
+
+      {:error, _} ->
+        total_deleted
+    end
+  end
+
+  defp matches_filter?(record, filter) do
+    Enum.all?(filter, fn {field, value} ->
+      r_val = record[field] || get_in(record, ["properties", field])
+      to_string(r_val) == value
+    end)
+  end
+
+  defp parse_episode_results(%{"results" => results}) when is_list(results), do: results
+  defp parse_episode_results(%{"embeddings" => results}) when is_list(results), do: results
+  defp parse_episode_results(results) when is_list(results), do: results
+  defp parse_episode_results(_), do: []
 
   # --- Direct queries (entities are shared, no agent scope needed) ---
 

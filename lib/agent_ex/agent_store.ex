@@ -50,6 +50,11 @@ defmodule AgentEx.AgentStore do
     GenServer.call(__MODULE__, {:delete, user_id, project_id, agent_id})
   end
 
+  @doc "Delete all agent configs for a project. Used for cascade delete."
+  def delete_by_project(user_id, project_id) do
+    GenServer.call(__MODULE__, {:delete_by_project, user_id, project_id})
+  end
+
   # --- Server callbacks ---
 
   @impl GenServer
@@ -104,6 +109,33 @@ defmodule AgentEx.AgentStore do
       {:error, reason} ->
         {:reply, {:error, reason}, state}
     end
+  end
+
+  @impl GenServer
+  def handle_call({:delete_by_project, user_id, project_id}, _from, state) do
+    keys =
+      :ets.foldl(
+        fn
+          {{^user_id, ^project_id, _} = key, _}, acc -> [key | acc]
+          _, acc -> acc
+        end,
+        [],
+        state.ets_table
+      )
+
+    Enum.each(keys, fn key ->
+      case :dets.delete(state.dets_table, key) do
+        :ok ->
+          :ets.delete(state.ets_table, key)
+
+        {:error, reason} ->
+          Logger.warning(
+            "AgentStore delete_by_project: DETS delete failed for #{inspect(key)}: #{inspect(reason)}"
+          )
+      end
+    end)
+
+    {:reply, {:ok, length(keys)}, state}
   end
 
   @impl GenServer

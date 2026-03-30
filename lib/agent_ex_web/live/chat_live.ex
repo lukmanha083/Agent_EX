@@ -1,7 +1,7 @@
 defmodule AgentExWeb.ChatLive do
   use AgentExWeb, :live_view
 
-  alias AgentEx.{AgentStore, Chat, EventLoop, Memory}
+  alias AgentEx.{AgentConfig, AgentStore, Chat, EventLoop, Memory}
   alias AgentEx.EventLoop.Event
 
   import AgentExWeb.ChatComponents
@@ -60,8 +60,9 @@ defmodule AgentExWeb.ChatLive do
       {:noreply, socket}
     else
       user = socket.assigns.current_scope.user
+      project = socket.assigns.project
 
-      case Chat.get_user_conversation(user.id, socket.assigns.project.id, id) do
+      case Chat.get_user_conversation(user.id, project.id, id) do
         nil ->
           {:noreply,
            socket
@@ -88,7 +89,10 @@ defmodule AgentExWeb.ChatLive do
   end
 
   @impl true
-  def terminate(_reason, _socket), do: :ok
+  def terminate(_reason, socket) do
+    stop_current_session(socket)
+    :ok
+  end
 
   @impl true
   def handle_event("new_chat", _params, socket) do
@@ -323,7 +327,12 @@ defmodule AgentExWeb.ChatLive do
           AgentEx.Message.user(message)
         ]
 
-        memory_opts = %{agent_id: socket.assigns.agent_id, session_id: session_id}
+        memory_opts = %{
+          user_id: socket.assigns.current_scope.user.id,
+          project_id: socket.assigns.project.id,
+          agent_id: socket.assigns.agent_id,
+          session_id: session_id
+        }
 
         EventLoop.run(run_id, tool_agent, client, input_messages, tools,
           memory: memory_opts,
@@ -363,7 +372,7 @@ defmodule AgentExWeb.ChatLive do
              }) do
           {:ok, conversation} ->
             session_id = "conversation-#{conversation.id}"
-            Memory.start_session(socket.assigns.agent_id, session_id)
+            Memory.start_session(user.id, project.id, socket.assigns.agent_id, session_id)
 
             conversations = Chat.list_conversations(user.id, project.id)
 
@@ -383,6 +392,7 @@ defmodule AgentExWeb.ChatLive do
 
   defp load_conversation(socket, conversation) do
     socket = cancel_active_run(socket)
+    stop_current_session(socket)
 
     # Load messages from Postgres
     db_messages =
@@ -393,11 +403,13 @@ defmodule AgentExWeb.ChatLive do
 
     # Hydrate Tier 1 working memory
     session_id = "conversation-#{conversation.id}"
+    user = socket.assigns.current_scope.user
+    project = socket.assigns.project
     agent_id = socket.assigns.agent_id
 
-    case Memory.start_session(agent_id, session_id) do
+    case Memory.start_session(user.id, project.id, agent_id, session_id) do
       {:ok, _} ->
-        hydrate_working_memory(agent_id, session_id, db_messages)
+        hydrate_working_memory(user.id, project.id, agent_id, session_id, db_messages)
 
       {:error, {:already_started, _}} ->
         :ok
@@ -426,9 +438,27 @@ defmodule AgentExWeb.ChatLive do
     end
   end
 
-  defp hydrate_working_memory(agent_id, session_id, messages) do
+  defp stop_current_session(socket) do
+    with %{conversation: %{id: convo_id}} <- socket.assigns,
+         %{current_scope: %{user: %{id: user_id}}} <- socket.assigns,
+         %{project: %{id: project_id}} <- socket.assigns,
+         %{agent_id: agent_id} <- socket.assigns do
+      Memory.stop_session(user_id, project_id, agent_id, "conversation-#{convo_id}")
+    else
+      _ -> :ok
+    end
+  end
+
+  defp hydrate_working_memory(user_id, project_id, agent_id, session_id, messages) do
     Enum.each(messages, fn msg ->
-      Memory.add_message(agent_id, session_id, to_string(msg.role), msg.content)
+      Memory.add_message(
+        user_id,
+        project_id,
+        agent_id,
+        session_id,
+        to_string(msg.role),
+        msg.content
+      )
     end)
   rescue
     e ->
@@ -477,8 +507,11 @@ defmodule AgentExWeb.ChatLive do
   end
 
   defp load_from_agent(agent, _user) do
-    system_prompt = AgentEx.AgentConfig.build_system_messages(agent)
-    prompt = if system_prompt == "", do: "You are a helpful AI assistant.", else: system_prompt
+    system_prompt = AgentConfig.build_system_messages(agent)
+
+    prompt =
+      if system_prompt in [nil, ""], do: "You are a helpful AI assistant.", else: system_prompt
+
     {agent.provider, agent.model, default_tools(), prompt}
   end
 

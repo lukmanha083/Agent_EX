@@ -53,6 +53,8 @@ defmodule AgentEx.StatefulToolTest do
           state_key: "counter",
           agent_id: "test",
           initial_state: %{"count" => 0},
+          user_id: "test-user",
+          project_id: "test-project",
           store: MockStore
         )
 
@@ -66,6 +68,8 @@ defmodule AgentEx.StatefulToolTest do
           state_key: "counter",
           agent_id: "test",
           initial_state: %{"count" => 0},
+          user_id: "test-user",
+          project_id: "test-project",
           store: MockStore
         )
 
@@ -90,6 +94,8 @@ defmodule AgentEx.StatefulToolTest do
           state_key: "peek",
           agent_id: "test",
           initial_state: %{"val" => 42},
+          user_id: "test-user",
+          project_id: "test-project",
           store: MockStore
         )
 
@@ -114,6 +120,8 @@ defmodule AgentEx.StatefulToolTest do
           state_key: "fail",
           agent_id: "test",
           initial_state: %{},
+          user_id: "test-user",
+          project_id: "test-project",
           store: MockStore
         )
 
@@ -125,6 +133,8 @@ defmodule AgentEx.StatefulToolTest do
         StatefulTool.wrap(tool,
           state_key: "counter",
           agent_id: "test",
+          user_id: "test-user",
+          project_id: "test-project",
           store: MockStore
         )
 
@@ -139,6 +149,8 @@ defmodule AgentEx.StatefulToolTest do
           state_key: "counter",
           agent_id: "agent_a",
           initial_state: %{"count" => 0},
+          user_id: "test-user",
+          project_id: "test-project",
           store: MockStore
         )
 
@@ -147,6 +159,8 @@ defmodule AgentEx.StatefulToolTest do
           state_key: "counter",
           agent_id: "agent_b",
           initial_state: %{"count" => 0},
+          user_id: "test-user",
+          project_id: "test-project",
           store: MockStore
         )
 
@@ -172,6 +186,8 @@ defmodule AgentEx.StatefulToolTest do
           state_key: "search",
           agent_id: "test",
           initial_state: %{"history" => []},
+          user_id: "test-user",
+          project_id: "test-project",
           store: MockStore
         )
 

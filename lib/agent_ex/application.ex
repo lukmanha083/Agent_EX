@@ -32,6 +32,7 @@ defmodule AgentEx.Application do
       {Registry, keys: :unique, name: AgentEx.Memory.SessionRegistry},
       AgentEx.Memory.WorkingMemory.Supervisor,
       AgentEx.Memory.PersistentMemory.Store,
+      AgentEx.Memory.ProceduralMemory.Store,
       AgentEx.Memory.SemanticMemory.Store,
       AgentEx.Memory.KnowledgeGraph.Store,
 
