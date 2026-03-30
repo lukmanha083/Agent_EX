@@ -42,6 +42,8 @@ defmodule AgentEx.Projects do
       # Conversations + messages cascade via DB foreign key (on_delete: :delete_all)
       # Agent configs: remove from ETS/DETS
       AgentEx.AgentStore.delete_by_project(project.user_id, project.id)
+      # HTTP tool configs: remove from ETS/DETS
+      AgentEx.HttpToolStore.delete_by_project(project.user_id, project.id)
       # Memory: all tiers scoped by (user_id, project_id) — direct project-scoped delete
       Task.start(fn -> AgentEx.Memory.delete_project_data(project.user_id, project.id) end)
       {:ok, deleted}

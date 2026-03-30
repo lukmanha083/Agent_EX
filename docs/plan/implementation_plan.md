@@ -16,14 +16,17 @@ that decides which pipe pattern to compose.
 # ...informed by Tier 3 memory of past successful workflows
 ```
 
-**Status:** Phases 1–5 implemented. Auth + password registration
+**Status:** Phases 1–5b implemented. Auth + password registration
 implemented (2026-03-22). Phase 4b (User Timezone + User Scoping) merged (2026-03-23).
 Phase 4d (Dashboard Refactor) merged (2026-03-23). Phase 4c (Conversation History)
 implemented (2026-03-25). Phase 5 (Agent Builder + Unified Tool Management) implemented
 (2026-03-26). Intervention redesign: embedded in agent editor with per-handler config
 (WriteGateHandler allowlist), sandbox boundary (root_path, disallowed commands) (2026-03-27).
-Phase 5a (Project Scope) next — must land before app grows more complex.
-Phase 5b (Chat Orchestrator + REST API Tools + Agent-as-Tool) follows.
+Phase 5a (Project Scope) implemented (2026-03-29).
+Phase 5b (Chat Orchestrator + REST API Tools + Agent-as-Tool) implemented (2026-03-30):
+HttpTool struct + HttpToolStore (ETS/DETS), AgentBridge (agents as delegate tools),
+ToolAssembler (unified tool assembly), ChatLive rewired to dynamic orchestrator.
+Phase 5c (Workflow Engine) next.
 Phase 8 (Hybrid Bridge — Remote Computer Use) is the final phase.
 
 **Table of Contents**

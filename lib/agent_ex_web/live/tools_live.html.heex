@@ -40,10 +40,19 @@
         mcp_servers={@mcp_servers}
         custom_tools={@custom_tools}
         attached_sources={@attached_sources}
+        http_tools={@http_tools}
       />
     <% end %>
   </div>
 
-  <!-- MCP connect dialog -->
+  <!-- Dialogs -->
   <.mcp_connect_dialog :if={not (assigns[:current_project] && @current_project.is_default)} show={@show_mcp_form} form={@mcp_form} />
+  <.http_tool_editor_dialog
+    :if={not (assigns[:current_project] && @current_project.is_default)}
+    show={@show_http_editor}
+    form={@http_form}
+    editing={@editing_http_tool}
+    test_result={@http_test_result}
+    test_loading={@http_test_loading}
+  />
 </div>

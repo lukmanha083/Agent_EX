@@ -10,6 +10,7 @@ defmodule AgentEx.Accounts.User do
     field(:timezone, :string, default: "Etc/UTC")
     field(:provider, :string, default: "openai")
     field(:model, :string, default: "gpt-4o-mini")
+    field(:disabled_builtins, {:array, :string}, default: [])
     # Placeholder: encrypted storage for provider API keys (wired up in future phase)
     field(:provider_api_key, :binary, redact: true)
     field(:confirmed_at, :naive_datetime)
@@ -70,7 +71,7 @@ defmodule AgentEx.Accounts.User do
   """
   def provider_changeset(user, attrs, _opts \\ []) do
     user
-    |> cast(attrs, [:provider, :model])
+    |> cast(attrs, [:provider, :model, :disabled_builtins])
     |> validate_required([:provider, :model])
     |> validate_inclusion(:provider, AgentEx.ProviderHelpers.valid_providers())
     |> validate_model_for_provider()
