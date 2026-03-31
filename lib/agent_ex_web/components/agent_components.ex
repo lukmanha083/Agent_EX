@@ -89,7 +89,7 @@ defmodule AgentExWeb.AgentComponents do
 
       <div class="mt-auto flex items-center gap-2 flex-wrap">
         <.badge variant="secondary" class="text-[10px]">
-          {length(@agent.tool_ids || [])} tools
+          {if (@agent.tool_ids || []) == [], do: "all tools", else: "#{length(@agent.tool_ids)} tools"}
         </.badge>
         <.badge :if={(@agent.intervention_pipeline || []) != []} variant="outline" class="text-[10px]">
           {length(@agent.intervention_pipeline || [])} handlers

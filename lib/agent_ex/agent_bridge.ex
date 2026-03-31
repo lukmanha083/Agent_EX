@@ -63,7 +63,11 @@ defmodule AgentEx.AgentBridge do
     Pipe.delegate_tool(config.name, pipe_agent, model_client, pipe_opts)
   end
 
-  defp resolve_tools(%AgentConfig{tool_ids: []}, _user_id, _project_id, _opts), do: []
+  # Empty tool_ids = all available tools (wildcard).
+  # This is the default for new agents since there's no tool selector UI yet.
+  defp resolve_tools(%AgentConfig{tool_ids: []}, _user_id, _project_id, opts) do
+    Keyword.get(opts, :available_tools, [])
+  end
 
   defp resolve_tools(%AgentConfig{tool_ids: tool_ids}, _user_id, _project_id, opts)
        when is_list(tool_ids) do
