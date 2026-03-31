@@ -71,7 +71,10 @@ defmodule AgentEx.NetworkPolicy do
   # IPv4 checks
   defp check_ip({127, _, _, _}), do: blocked("loopback (127.0.0.0/8)")
   defp check_ip({10, _, _, _}), do: blocked("private network (10.0.0.0/8)")
-  defp check_ip({172, b, _, _}) when b >= 16 and b <= 31, do: blocked("private network (172.16.0.0/12)")
+
+  defp check_ip({172, b, _, _}) when b >= 16 and b <= 31,
+    do: blocked("private network (172.16.0.0/12)")
+
   defp check_ip({192, 168, _, _}), do: blocked("private network (192.168.0.0/16)")
   defp check_ip({169, 254, _, _}), do: blocked("link-local / metadata (169.254.0.0/16)")
   defp check_ip({0, 0, 0, 0}), do: blocked("unspecified address (0.0.0.0)")
@@ -81,11 +84,15 @@ defmodule AgentEx.NetworkPolicy do
   defp check_ip6({0, 0, 0, 0, 0, 0, 0, 1}), do: blocked("loopback (::1)")
   defp check_ip6({0, 0, 0, 0, 0, 0, 0, 0}), do: blocked("unspecified address (::)")
   # fe80::/10 link-local
-  defp check_ip6({a, _, _, _, _, _, _, _}) when a >= 0xFE80 and a <= 0xFEBF, do: blocked("link-local (fe80::/10)")
+  defp check_ip6({a, _, _, _, _, _, _, _}) when a >= 0xFE80 and a <= 0xFEBF,
+    do: blocked("link-local (fe80::/10)")
+
   # fdaa::/16 Fly.io private network
   defp check_ip6({0xFDAA, _, _, _, _, _, _, _}), do: blocked("Fly.io private network (fdaa::/16)")
   # fc00::/7 unique local (ULA) — covers fd00::/8 and fc00::/8
-  defp check_ip6({a, _, _, _, _, _, _, _}) when a >= 0xFC00 and a <= 0xFDFF, do: blocked("unique local address (fc00::/7)")
+  defp check_ip6({a, _, _, _, _, _, _, _}) when a >= 0xFC00 and a <= 0xFDFF,
+    do: blocked("unique local address (fc00::/7)")
+
   # ::ffff:0:0/96 IPv4-mapped — check the embedded IPv4
   defp check_ip6({0, 0, 0, 0, 0, 0xFFFF, hi, lo}) do
     ipv4 = {hi >>> 8, hi &&& 0xFF, lo >>> 8, lo &&& 0xFF}
