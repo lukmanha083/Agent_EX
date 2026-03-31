@@ -28,6 +28,7 @@ defmodule AgentEx.Memory.ContextBuilder do
     budgets =
       TokenBudget.calculate(context_window)
       |> Map.merge(opts[:budgets] || %{})
+
     scope = {user_id, project_id, agent_id}
 
     tasks = [

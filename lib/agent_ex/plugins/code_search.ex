@@ -109,8 +109,7 @@ defmodule AgentEx.Plugins.CodeSearch do
           },
           "file_pattern" => %{
             "type" => "string",
-            "description" =>
-              "Glob pattern to filter which files to search (default: '**/*')"
+            "description" => "Glob pattern to filter which files to search (default: '**/*')"
           },
           "case_sensitive" => %{
             "type" => "boolean",
@@ -138,7 +137,9 @@ defmodule AgentEx.Plugins.CodeSearch do
 
             results =
               Path.wildcard(full_glob)
-              |> Enum.filter(&(valid_within_root?(&1, root) and regular_file_under_size?(&1, max_file_size)))
+              |> Enum.filter(
+                &(valid_within_root?(&1, root) and regular_file_under_size?(&1, max_file_size))
+              )
               |> Enum.flat_map(&search_file(&1, regex, root, context_lines))
               |> Enum.take(max_results)
 
@@ -157,8 +158,7 @@ defmodule AgentEx.Plugins.CodeSearch do
   defp file_info_tool(root) do
     Tool.new(
       name: "file_info",
-      description:
-        "Get metadata about a file: size, type, modification time, and permissions.",
+      description: "Get metadata about a file: size, type, modification time, and permissions.",
       parameters: %{
         "type" => "object",
         "properties" => %{

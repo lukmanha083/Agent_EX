@@ -35,7 +35,9 @@ defmodule AgentEx.Memory.TokenBudgetTest do
 
     test "memory zone is smaller than conversation zone" do
       budgets = TokenBudget.calculate(128_000)
-      memory_total = budgets.persistent + budgets.knowledge_graph + budgets.semantic + budgets.procedural
+
+      memory_total =
+        budgets.persistent + budgets.knowledge_graph + budgets.semantic + budgets.procedural
 
       assert budgets.conversation > memory_total
     end
