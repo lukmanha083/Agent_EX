@@ -21,15 +21,21 @@ defmodule AgentEx.Tools.WebFetch do
   end
 
   defp execute(%{"url" => url}, max_length) do
-    case Req.get(url, receive_timeout: 15_000, max_redirects: 5) do
-      {:ok, %{status: 200, body: body}} when is_binary(body) ->
-        {:ok, body |> strip_html() |> String.slice(0, max_length)}
-
-      {:ok, %{status: status}} ->
-        {:error, "HTTP #{status}"}
-
+    case AgentEx.NetworkPolicy.validate(url) do
       {:error, reason} ->
-        {:error, "Fetch failed: #{inspect(reason)}"}
+        {:error, "SSRF blocked: #{reason}"}
+
+      :ok ->
+        case Req.get(url, receive_timeout: 15_000, max_redirects: 5) do
+          {:ok, %{status: 200, body: body}} when is_binary(body) ->
+            {:ok, body |> strip_html() |> String.slice(0, max_length)}
+
+          {:ok, %{status: status}} ->
+            {:error, "HTTP #{status}"}
+
+          {:error, reason} ->
+            {:error, "Fetch failed: #{inspect(reason)}"}
+        end
     end
   end
 
