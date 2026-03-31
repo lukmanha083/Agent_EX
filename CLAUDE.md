@@ -84,6 +84,7 @@ Companion to the Python learning project at `../agent/`.
 - `lib/agent_ex/agent_bridge.ex` — Convert AgentStore agents → delegate tools for orchestrator
 - `lib/agent_ex/tool_assembler.ex` — Assemble all tool sources into unified `[Tool]` list per user/project
 - `lib/agent_ex/provider_tools.ex` — Hardcoded registry of provider built-in tools (Anthropic, OpenAI, Moonshot)
+- `lib/agent_ex/network_policy.ex` — SSRF protection: blocks requests to loopback, private, link-local, Fly.io internal
 - `lib/agent_ex/example.ex` — Usage example
 
 ### 4-Tier Memory System + Knowledge Graph (`AgentEx.Memory`)

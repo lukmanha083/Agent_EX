@@ -261,10 +261,16 @@ defmodule AgentExWeb.ToolsLive do
   defp run_http_test(form) do
     headers = form["headers"] || %{}
     method = Map.get(@method_map, String.downcase(form["method"] || "get"), :get)
-    # Interpolate template params with "test" placeholders so the URL is valid
     url = fill_test_placeholders(form["url_template"] || "")
     headers = fill_test_headers(headers)
 
+    case AgentEx.NetworkPolicy.validate(url) do
+      {:error, reason} -> "Blocked: #{reason}"
+      :ok -> do_http_test_request(method, url, headers)
+    end
+  end
+
+  defp do_http_test_request(method, url, headers) do
     case Req.request(method: method, url: url, headers: headers, receive_timeout: 10_000) do
       {:ok, %{status: status, body: body}} ->
         body_str = if is_binary(body), do: body, else: Jason.encode!(body, pretty: true)

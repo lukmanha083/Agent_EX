@@ -106,32 +106,40 @@ defmodule AgentEx.HttpTool do
   defp build_function(config) do
     fn args ->
       url = interpolate(config.url_template, args)
-      headers = interpolate_headers(config.headers, args)
-      method = parse_method(config.method)
 
-      url_params = extract_template_params(config.url_template)
-      header_params = extract_header_params(config.headers)
-      body_args = Map.drop(args, url_params ++ header_params)
-
-      req_opts = [method: method, url: url, headers: headers, receive_timeout: 10_000]
-
-      req_opts =
-        if method in [:post, :put, :patch] do
-          Keyword.put(req_opts, :json, body_args)
-        else
-          req_opts
-        end
-
-      case Req.request(req_opts) do
-        {:ok, %{status: status, body: body}} when status in 200..299 ->
-          {:ok, extract_by_type(body, config.response_type, config.response_path)}
-
-        {:ok, %{status: status, body: body}} ->
-          {:error, "HTTP #{status}: #{inspect(body)}"}
-
-        {:error, exception} ->
-          {:error, inspect(exception)}
+      case AgentEx.NetworkPolicy.validate(url) do
+        {:error, reason} -> {:error, "SSRF blocked: #{reason}"}
+        :ok -> execute_request(config, args, url)
       end
+    end
+  end
+
+  defp execute_request(config, args, url) do
+    headers = interpolate_headers(config.headers, args)
+    method = parse_method(config.method)
+
+    url_params = extract_template_params(config.url_template)
+    header_params = extract_header_params(config.headers)
+    body_args = Map.drop(args, url_params ++ header_params)
+
+    req_opts = [method: method, url: url, headers: headers, receive_timeout: 10_000]
+
+    req_opts =
+      if method in [:post, :put, :patch] do
+        Keyword.put(req_opts, :json, body_args)
+      else
+        req_opts
+      end
+
+    case Req.request(req_opts) do
+      {:ok, %{status: status, body: body}} when status in 200..299 ->
+        {:ok, extract_by_type(body, config.response_type, config.response_path)}
+
+      {:ok, %{status: status, body: body}} ->
+        {:error, "HTTP #{status}: #{inspect(body)}"}
+
+      {:error, exception} ->
+        {:error, inspect(exception)}
     end
   end
 
