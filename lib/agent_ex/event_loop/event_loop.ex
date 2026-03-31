@@ -188,13 +188,21 @@ defmodule AgentEx.EventLoop do
          _result
        ) do
     # Agent: full promotion (session summary → Tier 3, skill reflection → Tier 4)
-    Task.Supervisor.start_child(AgentEx.TaskSupervisor, fn ->
-      try do
-        Memory.Promotion.close_session_with_summary(uid, pid, aid, sid, model_client)
-      rescue
-        e -> Logger.warning("EventLoop: promotion failed: #{Exception.message(e)}")
-      end
-    end)
+    case Task.Supervisor.start_child(AgentEx.TaskSupervisor, fn ->
+           try do
+             Memory.Promotion.close_session_with_summary(uid, pid, aid, sid, model_client)
+           rescue
+             e -> Logger.warning("EventLoop: promotion failed: #{Exception.message(e)}")
+           end
+         end) do
+      {:ok, _pid} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "EventLoop: failed to start promotion task for agent=#{aid}: #{inspect(reason)}"
+        )
+    end
   end
 
   defp maybe_promote_on_completion(_memory_opts, _model_client, _result) do

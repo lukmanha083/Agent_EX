@@ -68,7 +68,7 @@ defmodule AgentEx.Tool do
       description: Keyword.get(opts, :description),
       parameters: nil,
       function: nil,
-      kind: :builtin,
+      kind: Keyword.get(opts, :kind, :builtin),
       type: Keyword.get(opts, :type)
     }
   end

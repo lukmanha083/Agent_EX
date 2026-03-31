@@ -91,7 +91,7 @@ defmodule AgentEx.ProviderTools do
     list(provider)
     |> Enum.reject(fn spec -> MapSet.member?(disabled, spec.name) end)
     |> Enum.map(fn spec ->
-      Tool.builtin(spec.name, type: spec.type, description: spec.description)
+      Tool.builtin(spec.name, type: spec.type, description: spec.description, kind: spec.kind)
     end)
   end
 
@@ -107,7 +107,7 @@ defmodule AgentEx.ProviderTools do
     |> Enum.reject(fn spec -> MapSet.member?(disabled, spec.name) end)
     |> Enum.filter(fn spec -> spec.kind == :read end)
     |> Enum.map(fn spec ->
-      Tool.builtin(spec.name, type: spec.type, description: spec.description)
+      Tool.builtin(spec.name, type: spec.type, description: spec.description, kind: spec.kind)
     end)
   end
 

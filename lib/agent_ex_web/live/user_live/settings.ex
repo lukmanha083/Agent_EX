@@ -275,10 +275,14 @@ defmodule AgentExWeb.UserLive.Settings do
           provider =
             Ecto.Changeset.get_field(changeset, :provider) || socket.assigns.selected_provider
 
+          model =
+            Ecto.Changeset.get_field(changeset, :model) || socket.assigns.selected_model
+
           {:noreply,
            assign(socket,
              provider_form: to_form(changeset, action: :insert),
-             selected_provider: provider
+             selected_provider: provider,
+             selected_model: model
            )}
       end
     else
