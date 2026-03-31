@@ -35,7 +35,8 @@ defmodule AgentExWeb.ToolsLive do
        editing_http_tool: false,
        http_test_result: nil,
        http_test_loading: false,
-       http_test_ref: nil
+       http_test_ref: nil,
+       active_tab: "builtin"
      )}
   end
 
@@ -183,7 +184,9 @@ defmodule AgentExWeb.ToolsLive do
         http_tools = HttpToolStore.list(user.id, project.id)
 
         {:noreply,
-         socket |> assign(http_tools: http_tools) |> put_flash(:info, "HTTP tool deleted")}
+         socket
+         |> assign(http_tools: http_tools, active_tab: "http")
+         |> put_flash(:info, "HTTP tool deleted")}
 
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, "Delete failed: #{inspect(reason)}")}
@@ -258,7 +261,9 @@ defmodule AgentExWeb.ToolsLive do
   defp run_http_test(form) do
     headers = form["headers"] || %{}
     method = Map.get(@method_map, String.downcase(form["method"] || "get"), :get)
-    url = form["url_template"] || ""
+    # Interpolate template params with "test" placeholders so the URL is valid
+    url = fill_test_placeholders(form["url_template"] || "")
+    headers = fill_test_headers(headers)
 
     case Req.request(method: method, url: url, headers: headers, receive_timeout: 10_000) do
       {:ok, %{status: status, body: body}} ->
@@ -269,6 +274,18 @@ defmodule AgentExWeb.ToolsLive do
         "Error: #{inspect(exception)}"
     end
   end
+
+  defp fill_test_placeholders(url) do
+    Regex.replace(~r/\{\{(\w+)\}\}/, url, fn _match, key -> "test_#{key}" end)
+  end
+
+  defp fill_test_headers(headers) when is_map(headers) do
+    Map.new(headers, fn {k, v} ->
+      {k, Regex.replace(~r/\{\{(\w+)\}\}/, v, fn _match, key -> "test_#{key}" end)}
+    end)
+  end
+
+  defp fill_test_headers(headers), do: headers
 
   # --- Private helpers ---
 
@@ -323,7 +340,12 @@ defmodule AgentExWeb.ToolsLive do
 
         {:noreply,
          socket
-         |> assign(http_tools: http_tools, show_http_editor: false, http_test_result: nil)
+         |> assign(
+           http_tools: http_tools,
+           show_http_editor: false,
+           http_test_result: nil,
+           active_tab: "http"
+         )
          |> put_flash(:info, flash_msg)}
 
       {:error, reason} ->

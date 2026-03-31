@@ -277,22 +277,38 @@ defmodule AgentExWeb.UserLive.Settings do
   end
 
   def handle_event("disable_builtin", %{"name" => name}, socket) do
-    disabled = Enum.uniq([name | socket.assigns.disabled_builtins])
     user = socket.assigns.current_scope.user
 
-    case Accounts.update_user_disabled_builtins(user, disabled) do
-      {:ok, _} -> {:noreply, assign(socket, disabled_builtins: disabled)}
-      {:error, _} -> {:noreply, put_flash(socket, :error, "Failed to update")}
+    if Accounts.sudo_mode?(user) do
+      disabled = Enum.uniq([name | socket.assigns.disabled_builtins])
+
+      case Accounts.update_user_disabled_builtins(user, disabled) do
+        {:ok, _} -> {:noreply, assign(socket, disabled_builtins: disabled)}
+        {:error, _} -> {:noreply, put_flash(socket, :error, "Failed to update")}
+      end
+    else
+      {:noreply,
+       socket
+       |> put_flash(:error, "Session expired. Please re-authenticate.")
+       |> push_navigate(to: ~p"/users/log-in")}
     end
   end
 
   def handle_event("enable_builtin", %{"name" => name}, socket) do
-    disabled = Enum.reject(socket.assigns.disabled_builtins, &(&1 == name))
     user = socket.assigns.current_scope.user
 
-    case Accounts.update_user_disabled_builtins(user, disabled) do
-      {:ok, _} -> {:noreply, assign(socket, disabled_builtins: disabled)}
-      {:error, _} -> {:noreply, put_flash(socket, :error, "Failed to update")}
+    if Accounts.sudo_mode?(user) do
+      disabled = Enum.reject(socket.assigns.disabled_builtins, &(&1 == name))
+
+      case Accounts.update_user_disabled_builtins(user, disabled) do
+        {:ok, _} -> {:noreply, assign(socket, disabled_builtins: disabled)}
+        {:error, _} -> {:noreply, put_flash(socket, :error, "Failed to update")}
+      end
+    else
+      {:noreply,
+       socket
+       |> put_flash(:error, "Session expired. Please re-authenticate.")
+       |> push_navigate(to: ~p"/users/log-in")}
     end
   end
 

@@ -110,7 +110,8 @@ defmodule AgentEx.HttpTool do
       method = parse_method(config.method)
 
       url_params = extract_template_params(config.url_template)
-      body_args = Map.drop(args, url_params)
+      header_params = extract_header_params(config.headers)
+      body_args = Map.drop(args, url_params ++ header_params)
 
       req_opts = [method: method, url: url, headers: headers, receive_timeout: 10_000]
 
@@ -123,7 +124,7 @@ defmodule AgentEx.HttpTool do
 
       case Req.request(req_opts) do
         {:ok, %{status: status, body: body}} when status in 200..299 ->
-          {:ok, extract_response(body, config.response_path)}
+          {:ok, extract_by_type(body, config.response_type, config.response_path)}
 
         {:ok, %{status: status, body: body}} ->
           {:error, "HTTP #{status}: #{inspect(body)}"}
@@ -197,6 +198,15 @@ defmodule AgentEx.HttpTool do
   end
 
   defp extract_template_params(_), do: []
+
+  defp extract_header_params(headers) when is_map(headers) do
+    Enum.flat_map(headers, fn {_k, v} -> extract_template_params(v) end)
+  end
+
+  defp extract_header_params(_), do: []
+
+  defp extract_by_type(body, "raw_text", _path), do: format_body(body)
+  defp extract_by_type(body, _type, path), do: extract_response(body, path)
 
   defp extract_response(body, nil), do: format_body(body)
   defp extract_response(body, ""), do: format_body(body)
