@@ -109,7 +109,7 @@ defmodule AgentEx.AgentBridge do
 
   @doc """
   Build the list of non-delegate tools available to agents in a project.
-  Includes plugin tools (via ToolAssembler) and HTTP API tools.
+  Returns HTTP API tools configured for the project.
   """
   def available_tools(user_id, project_id) do
     http_api_tools(user_id, project_id)

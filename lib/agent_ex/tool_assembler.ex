@@ -108,7 +108,8 @@ defmodule AgentEx.ToolAssembler do
             "mode" => %{
               "type" => "string",
               "enum" => ["overwrite", "append"],
-              "description" => "Write mode: overwrite replaces file, append adds to end (default: overwrite)"
+              "description" =>
+                "Write mode: overwrite replaces file, append adds to end (default: overwrite)"
             }
           },
           "required" => ["filename", "content"]
@@ -119,18 +120,25 @@ defmodule AgentEx.ToolAssembler do
           content = Map.fetch!(args, "content")
           mode = Map.get(args, "mode", "overwrite")
 
-          with :ok <- validate_md_filename(filename) do
-            File.mkdir_p!(memory_dir)
+          with :ok <- validate_md_filename(filename),
+               :ok <- File.mkdir_p(memory_dir) do
             file_path = Path.join(memory_dir, filename)
 
-            case mode do
-              "append" ->
-                File.write!(file_path, content, [:append])
+            write_result =
+              case mode do
+                "append" -> File.write(file_path, content, [:append])
+                _ -> File.write(file_path, content)
+              end
+
+            case write_result do
+              :ok when mode == "append" ->
                 {:ok, "Appended to .memory/#{filename}"}
 
-              _ ->
-                File.write!(file_path, content)
+              :ok ->
                 {:ok, "Saved .memory/#{filename}"}
+
+              {:error, reason} ->
+                {:error, "Failed to write .memory/#{filename}: #{inspect(reason)}"}
             end
           end
         end
@@ -253,11 +261,10 @@ defmodule AgentEx.ToolAssembler do
       {name, _type, _desc, opts} = normalize_param(param)
       key = Atom.to_string(name)
       optional = Keyword.get(opts, :optional, false)
+      default = Keyword.get(opts, :default)
 
-      # Only fill in defaults for missing optional fields
-      # Required fields must come from base_config or be skipped
-      if optional and not Map.has_key?(acc, key) do
-        acc
+      if optional and not Map.has_key?(acc, key) and not is_nil(default) do
+        Map.put(acc, key, default)
       else
         acc
       end

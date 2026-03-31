@@ -182,10 +182,12 @@ defmodule AgentEx.EventLoop do
     :ok
   end
 
-  defp maybe_promote_on_completion(memory_opts, model_client, _result) do
+  defp maybe_promote_on_completion(
+         %{user_id: uid, project_id: pid, agent_id: aid, session_id: sid},
+         model_client,
+         _result
+       ) do
     # Agent: full promotion (session summary → Tier 3, skill reflection → Tier 4)
-    %{user_id: uid, project_id: pid, agent_id: aid, session_id: sid} = memory_opts
-
     Task.Supervisor.start_child(AgentEx.TaskSupervisor, fn ->
       try do
         Memory.Promotion.close_session_with_summary(uid, pid, aid, sid, model_client)
@@ -193,8 +195,11 @@ defmodule AgentEx.EventLoop do
         e -> Logger.warning("EventLoop: promotion failed: #{Exception.message(e)}")
       end
     end)
-  rescue
-    _ -> :ok
+  end
+
+  defp maybe_promote_on_completion(_memory_opts, _model_client, _result) do
+    Logger.debug("EventLoop: skipping promotion, memory_opts incomplete")
+    :ok
   end
 
   defp final_content(generated) do

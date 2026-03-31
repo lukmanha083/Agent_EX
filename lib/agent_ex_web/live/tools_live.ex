@@ -495,21 +495,28 @@ defmodule AgentExWeb.ToolsLive do
       end)
 
     case mod.init(config) do
-      {:ok, tools} -> {:ok, tools}
-      {:stateful, tools, _} -> {:ok, tools}
-      _ -> :config_required
+      {:ok, tools} ->
+        {:ok, tools}
+
+      {:stateful, tools, state} ->
+        if is_pid(state), do: Process.exit(state, :normal)
+        {:ok, tools}
+
+      _ ->
+        :config_required
     end
   rescue
-    _ -> :config_required
+    error ->
+      Logger.debug("Plugin #{inspect(mod)} init failed during tool discovery: #{inspect(error)}")
+      :config_required
   end
 
   defp normalize_plugin_param({name, type, desc}), do: {name, type, desc, []}
   defp normalize_plugin_param({name, type, desc, opts}), do: {name, type, desc, opts}
 
-  defp placeholder_value(:string), do: System.tmp_dir!()
+  defp placeholder_value(:string), do: "/nonexistent_probe_path"
   defp placeholder_value(:integer), do: 0
   defp placeholder_value(:boolean), do: false
   defp placeholder_value({:array, _}), do: []
   defp placeholder_value(_), do: ""
-
 end

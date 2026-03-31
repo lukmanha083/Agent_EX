@@ -350,9 +350,13 @@ defmodule AgentEx.Memory do
       try do
         WorkingMemory.Server.to_context_messages({user_id, project_id, agent_id}, session_id)
       rescue
-        _ -> []
+        e ->
+          Logger.warning("Failed to fetch orchestrator history: #{inspect(e)}")
+          []
       catch
-        :exit, _ -> []
+        :exit, reason ->
+          Logger.warning("WorkingMemory.Server exited: #{inspect(reason)}")
+          []
       end
 
     # Truncate to conversation zone budget
