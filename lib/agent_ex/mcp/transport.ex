@@ -85,15 +85,21 @@ defmodule AgentEx.MCP.Transport do
 
     @impl true
     def send_request(%__MODULE__{url: url} = state, request) do
-      case Req.post(url, json: request) do
-        {:ok, %{status: 200, body: body}} ->
-          {:ok, body, state}
-
-        {:ok, %{status: status, body: body}} ->
-          {:error, {:http_error, status, body}}
-
+      case AgentEx.NetworkPolicy.validate(url) do
         {:error, reason} ->
-          {:error, reason}
+          {:error, {:ssrf_blocked, reason}}
+
+        :ok ->
+          case Req.post(url, json: request) do
+            {:ok, %{status: 200, body: body}} ->
+              {:ok, body, state}
+
+            {:ok, %{status: status, body: body}} ->
+              {:error, {:http_error, status, body}}
+
+            {:error, reason} ->
+              {:error, reason}
+          end
       end
     end
 

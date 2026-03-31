@@ -85,9 +85,8 @@ defmodule AgentEx.HttpTool do
 
   @doc "Update an existing HTTP tool config."
   def update(%__MODULE__{} = config, attrs) when is_map(attrs) do
-    config
-    |> Map.merge(Map.take(attrs, @updatable_fields))
-    |> Map.put(:updated_at, DateTime.utc_now())
+    updates = Map.take(attrs, @updatable_fields) |> Map.put(:updated_at, DateTime.utc_now())
+    struct(config, updates)
   end
 
   @doc "Convert to a runtime `AgentEx.Tool` with a Req-based execution function."

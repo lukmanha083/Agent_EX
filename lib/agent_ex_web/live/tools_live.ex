@@ -36,6 +36,7 @@ defmodule AgentExWeb.ToolsLive do
        http_test_result: nil,
        http_test_loading: false,
        http_test_ref: nil,
+       http_test_pid: nil,
        active_tab: "builtin"
      )}
   end
@@ -154,6 +155,7 @@ defmodule AgentExWeb.ToolsLive do
   end
 
   def handle_event("close_http_editor", _params, socket) do
+    socket = cancel_http_test(socket)
     {:noreply, assign(socket, show_http_editor: false, http_test_result: nil)}
   end
 
@@ -216,10 +218,16 @@ defmodule AgentExWeb.ToolsLive do
     if url_template == "" do
       {:noreply, put_flash(socket, :error, "URL template is required for testing")}
     else
-      task = Task.async(fn -> run_http_test(form) end)
+      socket = cancel_http_test(socket)
+      task = Task.Supervisor.async_nolink(AgentEx.TaskSupervisor, fn -> run_http_test(form) end)
 
       {:noreply,
-       assign(socket, http_test_loading: true, http_test_result: nil, http_test_ref: task.ref)}
+       assign(socket,
+         http_test_loading: true,
+         http_test_result: nil,
+         http_test_ref: task.ref,
+         http_test_pid: task.pid
+       )}
     end
   end
 
@@ -229,7 +237,12 @@ defmodule AgentExWeb.ToolsLive do
       Process.demonitor(ref, [:flush])
 
       {:noreply,
-       assign(socket, http_test_result: result, http_test_loading: false, http_test_ref: nil)}
+       assign(socket,
+         http_test_result: result,
+         http_test_loading: false,
+         http_test_ref: nil,
+         http_test_pid: nil
+       )}
     else
       {:noreply, socket}
     end
@@ -241,10 +254,21 @@ defmodule AgentExWeb.ToolsLive do
        assign(socket,
          http_test_result: "Test failed: #{inspect(reason)}",
          http_test_loading: false,
-         http_test_ref: nil
+         http_test_ref: nil,
+         http_test_pid: nil
        )}
     else
       {:noreply, socket}
+    end
+  end
+
+  defp cancel_http_test(socket) do
+    if pid = socket.assigns[:http_test_pid] do
+      Process.demonitor(socket.assigns[:http_test_ref], [:flush])
+      Process.exit(pid, :kill)
+      assign(socket, http_test_ref: nil, http_test_pid: nil, http_test_loading: false)
+    else
+      socket
     end
   end
 

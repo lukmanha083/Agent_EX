@@ -25,6 +25,9 @@ defmodule AgentEx.NetworkPolicy do
       %URI{host: nil} ->
         {:error, "URL has no host"}
 
+      %URI{scheme: scheme} when scheme not in ["http", "https"] ->
+        {:error, "unsupported scheme: #{scheme || "none"} (only http/https allowed)"}
+
       %URI{host: host} ->
         check_host(host)
     end
@@ -54,18 +57,31 @@ defmodule AgentEx.NetworkPolicy do
 
   defp resolve_and_check(host) do
     charlist = String.to_charlist(host)
+    ipv4s = resolve_addrs(charlist, :inet)
+    ipv6s = resolve_addrs(charlist, :inet6)
 
-    case :inet.getaddr(charlist, :inet) do
-      {:ok, ip} ->
-        check_ip(ip)
-
-      {:error, _} ->
-        # Try IPv6
-        case :inet.getaddr(charlist, :inet6) do
-          {:ok, ip6} -> check_ip6(ip6)
-          {:error, _} -> {:error, "cannot resolve host: #{host}"}
-        end
+    if ipv4s == [] and ipv6s == [] do
+      {:error, "cannot resolve host: #{host}"}
+    else
+      check_all_ips(ipv4s, ipv6s)
     end
+  end
+
+  defp resolve_addrs(charlist, family) do
+    case :inet.getaddrs(charlist, family) do
+      {:ok, addrs} -> addrs
+      {:error, _} -> []
+    end
+  end
+
+  defp check_all_ips(ipv4s, ipv6s) do
+    results =
+      Enum.map(ipv4s, &check_ip/1) ++ Enum.map(ipv6s, &check_ip6/1)
+
+    Enum.find(results, :ok, fn
+      {:error, _} -> true
+      :ok -> false
+    end)
   end
 
   # IPv4 checks
