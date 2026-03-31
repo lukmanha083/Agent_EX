@@ -6,7 +6,13 @@ defmodule AgentExWeb.AgentsLive do
   import AgentExWeb.AgentComponents
 
   import AgentExWeb.ProviderHelpers,
-    only: [default_model_for: 1, provider_options: 0, models_for_provider: 1]
+    only: [
+      default_model_for: 1,
+      provider_options: 0,
+      models_for_provider: 1,
+      context_window_for: 1,
+      format_context_window: 1
+    ]
 
   @impl true
   def mount(_params, _session, socket) do
@@ -27,6 +33,7 @@ defmodule AgentExWeb.AgentsLive do
 
       agents = AgentStore.list(user.id, project.id)
       default_provider = "openai"
+      default_model = default_model_for(default_provider)
 
       {:ok,
        assign(socket,
@@ -40,7 +47,8 @@ defmodule AgentExWeb.AgentsLive do
          disabled_builtins: [],
          selected_provider: default_provider,
          provider_options: provider_options(),
-         model_options: model_select_options(default_provider)
+         model_options: model_select_options(default_provider),
+         context_window_display: format_context_window(context_window_for(default_model))
        )}
     end
   end
@@ -50,6 +58,7 @@ defmodule AgentExWeb.AgentsLive do
   @impl true
   def handle_event("new_agent", _params, socket) do
     default_provider = "openai"
+    default_model = default_model_for(default_provider)
 
     {:noreply,
      assign(socket,
@@ -60,7 +69,8 @@ defmodule AgentExWeb.AgentsLive do
        sandbox: %{},
        disabled_builtins: [],
        selected_provider: default_provider,
-       model_options: model_select_options(default_provider)
+       model_options: model_select_options(default_provider),
+       context_window_display: format_context_window(context_window_for(default_model))
      )}
   end
 
@@ -79,7 +89,8 @@ defmodule AgentExWeb.AgentsLive do
            sandbox: agent.sandbox || %{},
            disabled_builtins: agent.disabled_builtins || [],
            selected_provider: agent.provider,
-           model_options: model_select_options(agent.provider)
+           model_options: model_select_options(agent.provider),
+           context_window_display: format_context_window(context_window_for(agent.model))
          )}
 
       :not_found ->
@@ -97,6 +108,11 @@ defmodule AgentExWeb.AgentsLive do
 
     form = merge_form_params(socket.assigns.form, params, new_provider, provider_changed?)
 
+    current_model =
+      if provider_changed?,
+        do: default_model_for(new_provider),
+        else: params["model"] || form["model"] || ""
+
     socket =
       if provider_changed? do
         assign(socket,
@@ -108,7 +124,11 @@ defmodule AgentExWeb.AgentsLive do
         socket
       end
 
-    {:noreply, assign(socket, form: form)}
+    {:noreply,
+     assign(socket,
+       form: form,
+       context_window_display: format_context_window(context_window_for(current_model))
+     )}
   end
 
   def handle_event("save_agent", params, socket) do
@@ -313,6 +333,8 @@ defmodule AgentExWeb.AgentsLive do
       system_prompt: blank_to_nil(params["system_prompt"]),
       provider: params["provider"] || "openai",
       model: params["model"] || default_model_for(params["provider"] || "openai"),
+      context_window:
+        context_window_for(params["model"] || default_model_for(params["provider"] || "openai")),
       disabled_builtins: disabled_builtins,
       tool_ids: [],
       intervention_pipeline: intervention_pipeline,

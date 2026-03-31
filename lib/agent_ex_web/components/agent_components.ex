@@ -111,6 +111,7 @@ defmodule AgentExWeb.AgentComponents do
   attr(:show, :boolean, default: false)
   attr(:provider_options, :list, required: true)
   attr(:model_options, :list, required: true)
+  attr(:context_window_display, :string, default: nil)
   attr(:intervention_pipeline, :list, default: [])
   attr(:sandbox, :map, default: %{})
   attr(:project_root_path, :string, default: nil)
@@ -184,6 +185,11 @@ defmodule AgentExWeb.AgentComponents do
               <div class="grid grid-cols-2 gap-3 mt-3">
                 <.input type="select" name="provider" value={@form["provider"]} label="Provider" options={@provider_options} />
                 <.input type="select" name="model" value={@form["model"]} label="Model" options={@model_options} />
+              </div>
+              <div :if={@context_window_display} class="flex items-center gap-2 rounded-md bg-gray-800/50 border border-gray-700 px-3 py-2 mt-3">
+                <span class="text-xs text-gray-400">Context window:</span>
+                <span class="text-xs font-mono text-white">{@context_window_display}</span>
+                <span class="text-xs text-gray-500">tokens</span>
               </div>
             </fieldset>
 
