@@ -24,9 +24,10 @@ defmodule AgentExWeb.ChatLive do
        |> redirect(to: ~p"/projects")}
     else
       agents = AgentStore.list(user.id, project.id)
-      active_agent = List.first(agents)
 
-      {provider, model} = load_provider_model(active_agent, user)
+      # Orchestrator always uses the user's profile provider/model setting
+      provider = user.provider || "anthropic"
+      model = user.model || default_model_for(provider)
       system_prompt = ToolAssembler.orchestrator_prompt(user.id, project.id)
       conversations = Chat.list_conversations(user.id, project.id)
 
@@ -41,7 +42,6 @@ defmodule AgentExWeb.ChatLive do
          provider: provider,
          model: model,
          system_prompt: system_prompt,
-         active_agent: active_agent,
          agents: agents,
          agent_id: project_agent_id(user, project),
          project: project,
@@ -670,16 +670,6 @@ defmodule AgentExWeb.ChatLive do
   defp internal_message?(_), do: false
 
   defp project_agent_id(user, project), do: "u#{user.id}_p#{project.id}_chat"
-
-  defp load_provider_model(nil, user) do
-    provider = user.provider || "openai"
-    model = user.model || default_model_for(provider)
-    {provider, model}
-  end
-
-  defp load_provider_model(agent, _user) do
-    {agent.provider, agent.model}
-  end
 
   # Only enable reasoning_first for models that can reliably distinguish
   # text reasoning from tool calls. Smaller models (Haiku, mini, nano)
