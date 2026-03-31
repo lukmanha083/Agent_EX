@@ -21,7 +21,8 @@ defmodule AgentEx.ProviderTools do
   @type builtin_spec :: %{
           name: String.t(),
           type: String.t(),
-          description: String.t()
+          description: String.t(),
+          kind: :read | :write
         }
 
   # Anthropic Messages API builtins — all work with our ModelClient
@@ -30,17 +31,20 @@ defmodule AgentEx.ProviderTools do
     %{
       name: "web_search",
       type: "web_search_20250305",
-      description: "Search the web for current information"
+      description: "Search the web for current information",
+      kind: :read
     },
     %{
       name: "code_execution",
       type: "code_execution_20250522",
-      description: "Execute Python code in a sandboxed environment"
+      description: "Execute Python code in a sandboxed environment",
+      kind: :write
     },
     %{
       name: "text_editor",
       type: "text_editor_20250429",
-      description: "View and edit text files with find-and-replace"
+      description: "View and edit text files with find-and-replace",
+      kind: :write
     }
   ]
 
@@ -53,7 +57,8 @@ defmodule AgentEx.ProviderTools do
     %{
       name: "$web_search",
       type: "builtin_function",
-      description: "Search the web using Moonshot's built-in search"
+      description: "Search the web using Moonshot's built-in search",
+      kind: :read
     }
   ]
 
@@ -85,6 +90,22 @@ defmodule AgentEx.ProviderTools do
 
     list(provider)
     |> Enum.reject(fn spec -> MapSet.member?(disabled, spec.name) end)
+    |> Enum.map(fn spec ->
+      Tool.builtin(spec.name, type: spec.type, description: spec.description)
+    end)
+  end
+
+  @doc """
+  Build `%Tool{}` structs for read-only builtins (for orchestrator use).
+  Only includes tools classified as `:read` kind.
+  """
+  @spec read_only_tools(String.t(), [String.t()]) :: [Tool.t()]
+  def read_only_tools(provider, disabled_builtins \\ []) do
+    disabled = MapSet.new(disabled_builtins)
+
+    list(provider)
+    |> Enum.reject(fn spec -> MapSet.member?(disabled, spec.name) end)
+    |> Enum.filter(fn spec -> spec.kind == :read end)
     |> Enum.map(fn spec ->
       Tool.builtin(spec.name, type: spec.type, description: spec.description)
     end)

@@ -1641,51 +1641,113 @@ the form guides them through each concern.
 
 ### Core Insight
 
-**Every agent is a tool. Every tool source is equal. The LLM reasons about
-which pattern to use.** The chat model doesn't just answer questions — it's an
-orchestrator that decomposes tasks, delegates to specialist agents, and
-composes results. The pattern (sequential, parallel, swarm) emerges from the
-LLM's reasoning, not from hardcoded logic.
+**The orchestrator is a stateless planner — it observes, plans, delegates, and
+synthesizes. It never acts directly.** Specialist agents are the hands that do
+the work. This enforces a clean separation: the orchestrator reasons about WHAT
+to do, agents execute HOW to do it.
+
+**Revised (post-implementation):** The original plan gave the orchestrator flat
+access to ALL tools. The implemented design restricts the orchestrator to:
+- `:read` plugin tools only (search, grep, read files, file_info, datetime...)
+- `:read` provider builtins only (web_search — not code_execution/text_editor)
+- `delegate_to_*` tools (dispatch to specialist agents)
+- `save_note` (write to `.memory/*.md` — its only write capability)
+
+This means the orchestrator can **observe the codebase** to make better plans
+but cannot modify anything directly. All mutations happen through agents.
 
 ```text
 User: "Research AAPL and write me an investment report"
                     │
                     ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  CHAT ORCHESTRATOR (LLM reasoning)                          │
+│  ORCHESTRATOR (stateless planner)                           │
 │                                                             │
-│  System: "You are a task orchestrator. You have specialist  │
-│  agents and tools available. Decompose complex tasks into   │
-│  steps. Delegate to the right specialist. For independent   │
-│  work, call multiple tools in one turn (parallel). For      │
-│  sequential work, chain results from one to the next."      │
+│  Starts with: 0 context window (no memory injection)        │
+│  First action: read .memory/ for previous plans/progress    │
 │                                                             │
-│  Tools (auto-assembled):                                    │
-│  ├─ delegate_to_researcher    ← AgentStore → delegate_tool  │
-│  ├─ delegate_to_analyst       ← AgentStore → delegate_tool  │
-│  ├─ delegate_to_writer        ← AgentStore → delegate_tool  │
-│  ├─ stock_api.get_quote       ← REST API tool (HTTP)        │
-│  ├─ mcp.sqlite.query          ← MCP server tool             │
-│  ├─ filesystem.read_file      ← Plugin tool                 │
-│  └─ get_current_time          ← Local function tool         │
+│  Tools (filtered by access):                                │
+│  ├─ search.find_files         ← :read plugin (observe)      │
+│  ├─ search.grep               ← :read plugin (observe)      │
+│  ├─ editor.read               ← :read plugin (observe)      │
+│  ├─ system.datetime           ← :read plugin (observe)      │
+│  ├─ web_search (Anthropic)    ← :read provider builtin      │
+│  ├─ save_note                 ← :write to .memory/*.md ONLY  │
+│  ├─ delegate_to_researcher    ← dispatch to agent            │
+│  ├─ delegate_to_analyst       ← dispatch to agent            │
+│  └─ delegate_to_writer        ← dispatch to agent            │
+│                                                             │
+│  CANNOT use:                                                │
+│  ├─ editor.edit/insert/append ← :write (agents only)        │
+│  ├─ shell.run_command         ← :write (agents only)        │
+│  ├─ code_execution (Anthropic)← :write provider builtin     │
+│  └─ text_editor (Anthropic)   ← :write provider builtin     │
 └─────────────────────────────────────────────────────────────┘
         │
-        ▼ LLM reasons: "I need research first, then analysis, then writing"
+        ▼ Reads .memory/plan.md → understands previous progress
         │
-        ▼ Step 1: calls delegate_to_researcher("Find recent AAPL news")
-        │          └─ Researcher runs its own ToolCallerLoop with its own tools
-        │          └─ Returns research summary
+        ▼ Uses search.grep to understand codebase → better planning
         │
-        ▼ Step 2: calls delegate_to_analyst(research_summary + "Analyze fundamentals")
-        │          └─ Analyst runs with stock_api tools
-        │          └─ Returns analysis
+        ▼ Step 1: delegate_to_researcher("Find recent AAPL news")
+        │          └─ Researcher has full tools + 4-tier memory injection
+        │          └─ Returns result + Agent Memory Report
         │
-        ▼ Step 3: calls delegate_to_writer(analysis + "Write investment report")
-        │          └─ Writer runs with no tools (pure LLM)
-        │          └─ Returns final report
+        ▼ save_note("progress.md", "Step 1 done: research complete")
         │
-        ▼ Chat returns report to user
+        ▼ Step 2: delegate_to_analyst(research + "Analyze fundamentals")
+        │          └─ Analyst has stock_api tools + own memory
+        │          └─ Returns analysis + Agent Memory Report
+        │
+        ▼ Step 3: delegate_to_writer(analysis + "Write investment report")
+        │          └─ Writer returns final report
+        │
+        ▼ save_note("progress.md", "All steps complete")
+        ▼ Synthesizes results → responds to user
 ```
+
+### Orchestrator Memory Model
+
+The orchestrator does NOT use the 4-tier memory system. Instead:
+
+```text
+Session 1 (fresh project):
+  Start → 0 context window, .memory/ empty
+  → delegates to agents, accumulates reports
+  → saves plan.md, progress.md, decisions.md incrementally
+  → session ends
+
+Session 2 (continue project):
+  Start → 0 context window
+  → reads .memory/plan.md → "here's where we left off"
+  → reads .memory/progress.md → "tasks 1-3 done, 4-5 pending"
+  → delegates remaining work, updates progress.md
+  → session ends
+
+Key: always fresh reasoning, deliberate retrieval, human-inspectable .md files
+```
+
+### Memory Reports from Specialist Agents
+
+When a delegate tool returns, the result is enriched with a memory report from
+the agent's accumulated Tier 1-4 + KG context. The orchestrator sees:
+
+```text
+Result: "AAPL Q4 earnings beat expectations by 3%. Revenue $94.9B..."
+
+---
+## Agent Memory Report
+### Key Facts
+- AAPL fiscal year ends September
+- Last checked: revenue growth 8% YoY
+
+### Learned Skills
+- financial_analysis (confidence: 85%): Cross-reference 10-K filing with...
+
+### Session Activity
+12 messages in session (4 user, 8 assistant)
+```
+
+This gives the orchestrator richer context for planning next steps.
 
 ### Problem
 
@@ -1831,46 +1893,62 @@ end
 
 #### 5b-C: Chat Orchestrator
 
-Rewires `ChatLive.send_message/3` to assemble **all tool sources** into a unified
-tool list, with agents as delegate tools and an orchestrator system prompt:
+Rewires `ChatLive.send_message/3` to assemble tools with **access-level filtering**
+— the orchestrator gets a restricted view, specialist agents get the full set.
 
 ```text
-┌───────────────────────────────────────────────────────┐
-│  Tool Assembly (on each message send)                  │
-│                                                        │
-│  1. Utility tools (get_current_time, etc.)             │
-│  2. REST API tools (HttpTool.list → Tool)              │
-│  3. MCP tools (connected servers → ToolAdapter)        │
-│  4. Plugin tools (attached plugins → tools)            │
-│  5. Agent delegate tools (AgentBridge.delegate_tools)  │
-│                                                        │
-│  ALL → flat [%Tool{}] list → ToolAgent → EventLoop     │
-└───────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────┐
+│  Tool Assembly — Two Pools (on each message send)              │
+│                                                                │
+│  AVAILABLE POOL (for specialist agents via tool_ids):          │
+│  ├─ Plugin :read tools (search, grep, read, file_info, etc.)  │
+│  ├─ Plugin :write tools (edit, insert, append, shell, etc.)   │
+│  ├─ HTTP API tools (HttpTool.list → Tool)                     │
+│  └─ (Future: MCP tools, user plugins)                         │
+│                                                                │
+│  ORCHESTRATOR TOOLS (filtered from available):                 │
+│  ├─ :read plugin tools ONLY (observe, not act)                │
+│  ├─ :read provider builtins (web_search — not code_execution) │
+│  ├─ delegate_to_* tools (dispatch to agents)                  │
+│  └─ save_note (write .memory/*.md — only write capability)    │
+│                                                                │
+│  Orchestrator → restricted tools → EventLoop (memory: nil)    │
+│  Agents → full available pool → ToolCallerLoop (4-tier memory) │
+└───────────────────────────────────────────────────────────────┘
 ```
 
-The chat model gets an orchestrator system prompt that teaches it to reason:
+The orchestrator system prompt teaches it the plan→delegate→synthesize pattern:
 
 ```elixir
-@orchestrator_prompt """
-You are an AI assistant with access to specialist agents and tools.
+# Generated by ToolAssembler.orchestrator_prompt/2
+"""
+You are an AI orchestrator. You plan, delegate, and synthesize — you do not act directly.
 
-## How to work:
-- For simple questions, answer directly using your knowledge.
-- For tasks requiring specific tools, use them directly.
-- For complex tasks, decompose into steps and delegate to specialist agents.
-- When delegating, pass clear task descriptions to each agent.
-- Each specialist runs independently with its own tools and returns a result.
-- You can call multiple agents in one turn if their work is independent.
+## Session startup
+1. Check .memory/ for previous plans and progress (use search.find_files or editor.read)
+2. If files exist, read plan.md and progress.md to understand where you left off
+3. If no files exist, this is a fresh project — start planning from scratch
+
+## Workflow
+1. Observe: Use read-only tools to understand the codebase, search files, read docs
+2. Plan: Break the task into steps, decide which specialist handles each step
+3. Delegate: Dispatch tasks to specialist agents — they have full tool access
+4. Synthesize: Review agent results (including their memory reports), reason over them
+5. Save progress: After each delegation round, update .memory/ files incrementally
+
+## Memory files (.memory/)
+- plan.md — current task breakdown and strategy
+- progress.md — what's done, what's pending, blockers
+- decisions.md — key decisions and reasoning
 
 ## Available specialists:
 {{agent_descriptions}}
 
-## Pattern selection:
-- **Direct**: Simple questions → answer without tools
-- **Tool use**: Specific data needed → call the relevant tool
-- **Sequential delegation**: Task A's output feeds Task B → delegate one at a time
-- **Parallel delegation**: Independent subtasks → call multiple delegates in one turn
-- **Conversation**: Agent needs context → use transfer/handoff tools
+## Rules:
+- You CANNOT modify files, run commands, or execute code directly
+- You CAN read files, search the codebase, and fetch web content for planning
+- You CAN save notes to .memory/*.md files
+- All modifications happen through specialist agents
 """
 ```
 
@@ -1881,15 +1959,16 @@ which pattern fits:
 
 | User task | LLM reasoning | Pattern that emerges |
 |---|---|---|
-| "What time is it?" | "I can answer directly" | Direct (no tools) |
-| "What's AAPL stock price?" | "I need the stock API tool" | Single tool call |
+| "What time is it?" | "I can answer directly (or read system.datetime)" | Direct / read tool |
 | "Research AAPL and write a report" | "Step 1: research, Step 2: write using research" | Sequential delegation |
 | "Compare AAPL and GOOGL stocks" | "Both analyses are independent" | Parallel delegation (2 tool calls in 1 turn) |
-| "Help me debug this code" | "This needs back-and-forth with the coder agent" | Single delegation with follow-ups |
+| "Help me debug this code" | "Let me read the code first, then delegate to coder" | Observe → delegate |
+| "Continue where we left off" | "Read .memory/progress.md to see what's pending" | File-based memory retrieval |
 
-The key insight: **Pipeline = sequential delegate calls. Fan-out = parallel
+**Key insight:** Pipeline = sequential delegate calls. Fan-out = parallel
 delegate calls in one LLM turn. Swarm = agents with transfer_to_* tools routing
-themselves.** All three patterns emerge from the same tool-calling mechanism.
+themselves. **The orchestrator never directly uses :write tools — that's the
+agents' job.** Observation patterns emerge because the orchestrator CAN read.
 
 ### Design Decisions
 
@@ -1901,8 +1980,12 @@ themselves.** All three patterns emerge from the same tool-calling mechanism.
 | D4 | Agent delegate tools regenerated per message send | Agent configs may change between messages. Small cost for correctness. |
 | D5 | Orchestrator prompt is dynamic, lists available agents | LLM needs to know what specialists exist to reason about delegation. |
 | D6 | No explicit Pipeline/Swarm selection in UI | The LLM reasons about patterns. Users define agents and tools; orchestration is emergent. |
-| D7 | All tool sources flattened into single `[Tool]` list | LLM can't distinguish tool sources — they're all just callable functions. Unified is simpler. |
+| D7 | Orchestrator gets `:read` tools only; agents get full pool | Enforces plan→delegate→report pattern. Orchestrator observes, agents act. |
 | D8 | `AgentBridge` is stateless module, not GenServer | No state to manage — it reads AgentStore and builds tools on demand. |
+| D9 | Orchestrator starts with 0 memory (no tier injection) | Fresh reasoning each session. Context from `.memory/*.md` files and agent reports. |
+| D10 | Delegate results enriched with memory reports | Orchestrator sees agent's key facts, skills, and session context for better synthesis. |
+| D11 | Provider builtins classified as `:read`/`:write` | `web_search` = `:read` (orchestrator can use), `code_execution` = `:write` (agents only). |
+| D12 | `save_note` is orchestrator's only `:write` tool | Persists plans/progress/decisions to `.memory/*.md` across sessions. |
 
 ### Files
 
@@ -1940,122 +2023,82 @@ themselves.** All three patterns emerge from the same tool-calling mechanism.
   └─ EventLoop.run receives full unified tool list
 ```
 
-### ToolAssembler — The Unification Layer
+### ToolAssembler — Access-Filtered Assembly
+
+**Implemented** — see `lib/agent_ex/tool_assembler.ex`.
+
+Two assembly modes:
+1. `assemble/4` — for orchestrator: `:read` tools + provider read builtins + delegates + `save_note`
+2. `available_tools/3` — full pool for specialist agent assignment via `tool_ids`
 
 ```elixir
-defmodule AgentEx.ToolAssembler do
-  @moduledoc """
-  Assembles all tool sources into a unified [Tool] list for a user.
-  Called on each message send to get the freshest tool set.
+# Orchestrator assembly (restricted):
+def assemble(user_id, project_id, model_client, opts) do
+  available = available_tools(user_id, project_id, root_path)
+  read_tools = Enum.filter(available, &Tool.read?/1)           # :read only
+  provider_read = ProviderTools.read_only_tools(provider, disabled) # web_search, not code_execution
+  delegate_tools = AgentBridge.delegate_tools(...)              # dispatch to agents
+  memory_tool = orchestrator_memory_tool(root_path)             # save_note (.memory/*.md)
 
-  Sources:
-  1. Built-in utility tools (time, system info)
-  2. HTTP API tools (from HttpToolStore)
-  3. MCP server tools (from connected MCP clients)
-  4. Plugin tools (from PluginRegistry)
-  5. Agent delegate tools (from AgentBridge)
-  """
+  read_tools ++ provider_read ++ delegate_tools ++ memory_tool
+end
 
-  alias AgentEx.{AgentBridge, HttpToolStore, Tool}
-
-  def assemble(user_id, model_client, opts \\ []) do
-    builtin = builtin_tools()
-    http_tools = http_api_tools(user_id)
-    # mcp_tools = mcp_connected_tools(user_id)   # future
-    # plugin_tools = plugin_attached_tools(user_id)  # future
-
-    available = builtin ++ http_tools
-
-    delegate_tools =
-      AgentBridge.delegate_tools(user_id, model_client,
-        available_tools: available
-      )
-
-    available ++ delegate_tools
-  end
-
-  def orchestrator_prompt(user_id) do
-    agents = AgentEx.AgentStore.list(user_id)
-
-    agent_descriptions =
-      Enum.map_join(agents, "\n", fn a ->
-        "- **#{a.name}**: #{a.description || a.system_prompt}"
-      end)
-
-    if agents == [] do
-      "You are a helpful AI assistant."
-    else
-      \"\"\"
-      You are an AI assistant with access to specialist agents and tools.
-
-      For simple questions, answer directly. For complex tasks, decompose
-      into steps and delegate to the right specialist. Each specialist runs
-      independently and returns a result. You can call multiple specialists
-      in one turn if their work is independent.
-
-      Available specialists:
-      #{agent_descriptions}
-      \"\"\"
-    end
-  end
-
-  defp builtin_tools do
-    [
-      Tool.new(
-        name: "get_current_time",
-        description: "Get the current date and time",
-        parameters: %{"type" => "object", "properties" => %{}, "required" => []},
-        kind: :read,
-        function: fn _args -> {:ok, DateTime.utc_now() |> DateTime.to_string()} end
-      )
-    ]
-  end
-
-  defp http_api_tools(user_id) do
-    HttpToolStore.list(user_id)
-    |> Enum.map(&AgentEx.HttpTool.to_tool/1)
-  end
+# Full pool (for specialist agents):
+def available_tools(user_id, project_id, root_path) do
+  init_builtin_plugins(root_path) ++ AgentBridge.http_api_tools(user_id, project_id)
 end
 ```
+
+### Built-in Plugin Tools (7 plugins, 16 tools)
+
+| Plugin | Tools | Kind |
+|---|---|---|
+| `filesystem` | read_file, list_dir, write_file | read + write |
+| `shell` | run_command | write |
+| `search` | find_files, grep, file_info | read |
+| `editor` | read, edit, insert, append | read + write |
+| `web` | fetch_url, fetch_json | read |
+| `system` | env_var, cwd, datetime, disk_usage | read |
+| `diff` | compare_files, compare_text | read |
 
 ### How Chat Changes
 
 ```elixir
-# Before (Phase 5):
-tools = default_tools()  # hardcoded 3 demo tools
-system_prompt = "You are a helpful AI assistant."
+# Before (Phase 5): all tools flat to orchestrator
+tools = ToolAssembler.assemble(user.id, client)  # everything
+EventLoop.run(..., memory: memory_opts)           # memory injected
 
-# After (Phase 5b):
-tools = ToolAssembler.assemble(user.id, client)
-system_prompt = ToolAssembler.orchestrator_prompt(user.id)
-# tools now includes: builtins + HTTP API tools + delegate_to_* for each agent
-# system_prompt dynamically lists available specialists
+# After (revised): orchestrator restricted, no memory injection
+agent_memory_opts = %{user_id: ..., session_id: ...}  # for agents only
+tools = ToolAssembler.assemble(user.id, project.id, client,
+  memory: agent_memory_opts,  # passed to delegate tools, not orchestrator
+  root_path: project.root_path
+)
+EventLoop.run(..., memory: nil)  # orchestrator starts fresh
 ```
 
-### How an Agent's Own Tools Work
-
-Each agent has `tool_ids` in its config. When the chat orchestrator delegates
-to an agent via `delegate_to_researcher("Find AAPL news")`, the `AgentBridge`
-resolves the agent's own tools:
+### How Agent Delegation Works
 
 ```text
-Chat Orchestrator
-  tools: [delegate_to_researcher, delegate_to_analyst, stock_api.get_quote, ...]
+Orchestrator (restricted tools, 0 memory)
+  ├─ search.grep("def handle_event") → reads codebase for planning
+  ├─ editor.read("lib/my_app.ex") → understands code structure
   │
-  ▼ calls delegate_to_researcher("Find AAPL news")
-  │
-  ▼ AgentBridge builds Pipe.Agent with researcher's own tools:
-    ┌─────────────────────────────────┐
-    │ Researcher Agent                │
-    │ system: "You are a researcher"  │
-    │ tools: [web_search, web_fetch]  │  ← agent's own tool_ids resolved
-    │ intervention: [LogHandler]      │
-    │                                 │
-    │ Runs Pipe.through() → isolated  │
-    │ ToolCallerLoop with own tools   │
-    └─────────────────────────────────┘
+  ▼ delegates to researcher:
+    ┌──────────────────────────────────────────────────────┐
+    │ Researcher Agent                                      │
+    │ system: "You are a researcher..."                     │
+    │ tools: ALL available (read + write, via tool_ids)     │
+    │ memory: 4-tier injection (Tier 1-4 + KG)             │
+    │ intervention: [LogHandler, PermissionHandler]         │
+    │                                                       │
+    │ Runs Pipe.through() → isolated ToolCallerLoop         │
+    └──────────────────────────────────────────────────────┘
     │
-    ▼ Returns research summary to orchestrator
+    ▼ Returns: result text + Agent Memory Report
+      (key facts, learned skills, session activity)
+    │
+Orchestrator accumulates report, updates progress.md, delegates next
 ```
 
 ---
@@ -2509,6 +2552,14 @@ Currently Pipe/Swarm composition and execution are code-only.
 | Termination node | `termination: {:handoff, "user"}` |
 | Intervention gates | Handler pipeline between nodes |
 
+### Implementation Note (post-Phase 5b revision)
+
+Triggered orchestrator flows should follow the same pattern as chat:
+- Orchestrator starts with `memory: nil` (fresh context)
+- Reads `.memory/` files for previous state
+- Gets `:read` tools only + delegates + `save_note`
+- Updates `.memory/progress.md` incrementally
+
 ### Trigger System
 
 `EventLoop.run/6` doesn't care who calls it — triggers are adapters that
@@ -2618,6 +2669,18 @@ the viewer for automated runs triggered by cron/webhook/etc.
 
 **Memory Inspector** — per-agent memory browser across all tiers with knowledge
 graph visualization.
+
+### Implementation Note (post-Phase 5b revision)
+
+The Run View should account for the revised orchestrator model:
+- **Delegate results** now include `## Agent Memory Report` sections (key facts,
+  learned skills, session activity). The trace view should render these as
+  collapsible panels, not raw text.
+- **Orchestrator has no tier-based memory.** The Memory Inspector should add an
+  "Orchestrator Notes" tab showing `.memory/*.md` files (plan, progress, decisions)
+  instead of Tier 1-4 for the orchestrator agent.
+- **Read-only tool calls** by the orchestrator (search, grep, read) should be
+  visually distinguished from delegate calls in the execution trace.
 
 ### Design — Run View
 

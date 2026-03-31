@@ -33,7 +33,7 @@ defmodule AgentEx.Pipe do
       |> Pipe.merge(lead_researcher, client)
   """
 
-  alias AgentEx.{Message, ModelClient, Sensing, Tool, ToolAgent}
+  alias AgentEx.{Memory, Message, ModelClient, Sensing, Tool, ToolAgent}
 
   require Logger
 
@@ -210,9 +210,26 @@ defmodule AgentEx.Pipe do
       },
       function: fn %{"task" => task} ->
         result = through(task, agent, model_client, opts)
-        {:ok, result}
+        report = build_memory_report(name, opts)
+        {:ok, result <> report}
       end
     )
+  end
+
+  defp build_memory_report(agent_name, opts) do
+    case opts[:memory] do
+      %{user_id: uid, project_id: pid, session_id: sid} ->
+        agent_id = "u#{uid}_p#{pid}_#{agent_name}"
+
+        Memory.ContextBuilder.build_report(uid, pid, agent_id, sid,
+          semantic_query: ""
+        )
+
+      _ ->
+        ""
+    end
+  rescue
+    _ -> ""
   end
 
   # -- Private: loop execution --
@@ -272,12 +289,14 @@ defmodule AgentEx.Pipe do
 
   defp maybe_inject_memory(messages, nil), do: messages
 
-  defp maybe_inject_memory(messages, %{
-         user_id: user_id,
-         project_id: project_id,
-         agent_id: agent_id,
-         session_id: session_id
-       }) do
-    AgentEx.Memory.inject_memory_context(messages, user_id, project_id, agent_id, session_id)
+  defp maybe_inject_memory(messages, memory_opts) do
+    %{user_id: user_id, project_id: project_id, agent_id: agent_id, session_id: session_id} =
+      memory_opts
+
+    context_window = Map.get(memory_opts, :context_window)
+
+    Memory.inject_memory_context(messages, user_id, project_id, agent_id, session_id,
+      context_window: context_window
+    )
   end
 end

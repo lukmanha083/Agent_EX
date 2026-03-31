@@ -9,21 +9,25 @@ defmodule AgentEx.Memory.ContextBuilder do
     PersistentMemory,
     ProceduralMemory,
     SemanticMemory,
+    TokenBudget,
     WorkingMemory
   }
 
-  @default_budgets %{
-    persistent: 500,
-    knowledge_graph: 1000,
-    semantic: 500,
-    procedural: 800,
-    conversation: 4000,
-    total: 8000
-  }
+  @doc """
+  Build context messages from all memory tiers.
 
+  ## Options
+  - `:semantic_query` — query string for vector search (default: "")
+  - `:budgets` — override calculated budgets (map)
+  - `:context_window` — model context window size (used to calculate budgets dynamically)
+  """
   def build(user_id, project_id, agent_id, session_id, opts \\ []) do
     semantic_query = opts[:semantic_query] || ""
-    budgets = Map.merge(@default_budgets, opts[:budgets] || %{})
+    context_window = opts[:context_window]
+
+    budgets =
+      TokenBudget.calculate(context_window)
+      |> Map.merge(opts[:budgets] || %{})
     scope = {user_id, project_id, agent_id}
 
     tasks = [
@@ -54,6 +58,68 @@ defmodule AgentEx.Memory.ContextBuilder do
 
     conversation_messages = truncate_conversation(conversation, budgets.conversation)
     system_message ++ conversation_messages
+  end
+
+  @doc """
+  Build a compact memory report for the orchestrator.
+
+  Unlike `build/5` which injects full context into the LLM prompt,
+  this returns a structured text summary of what an agent knows —
+  key facts, relevant skills, and related entities. The orchestrator
+  sees this as part of the delegate tool result.
+
+  Returns `""` if the agent has no accumulated memory.
+  """
+  def build_report(user_id, project_id, agent_id, session_id, opts \\ []) do
+    semantic_query = opts[:semantic_query] || ""
+    scope = {user_id, project_id, agent_id}
+
+    tasks = [
+      Task.async(fn -> gather_persistent(scope) end),
+      Task.async(fn -> gather_knowledge_graph(scope, semantic_query) end),
+      Task.async(fn -> gather_procedural(scope) end),
+      Task.async(fn -> summarize_session(scope, session_id) end)
+    ]
+
+    [persistent, kg, procedural, session_summary] = Task.await_many(tasks, 15_000)
+
+    sections =
+      [
+        format_report_section("Key Facts", persistent, 300),
+        format_report_section("Known Entities", kg, 400),
+        format_report_section("Learned Skills", procedural, 300),
+        format_report_section("Session Activity", session_summary, 200)
+      ]
+      |> Enum.reject(&is_nil/1)
+
+    case sections do
+      [] -> ""
+      parts -> "\n\n---\n## Agent Memory Report\n" <> Enum.join(parts, "\n")
+    end
+  end
+
+  defp format_report_section(_title, "", _budget), do: nil
+  defp format_report_section(_title, nil, _budget), do: nil
+
+  defp format_report_section(title, content, budget) do
+    truncated = truncate_section(content, budget)
+    if truncated == "", do: nil, else: "### #{title}\n#{truncated}"
+  end
+
+  defp summarize_session(scope, session_id) do
+    messages = gather_conversation(scope, session_id)
+
+    case messages do
+      [] ->
+        ""
+
+      msgs ->
+        count = length(msgs)
+        roles = Enum.frequencies_by(msgs, & &1[:role])
+        user_count = Map.get(roles, "user", 0)
+        assistant_count = Map.get(roles, "assistant", 0)
+        "#{count} messages in session (#{user_count} user, #{assistant_count} assistant)"
+    end
   end
 
   defp gather_persistent(scope) do

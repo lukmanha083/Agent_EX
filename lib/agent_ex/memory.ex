@@ -298,13 +298,17 @@ defmodule AgentEx.Memory do
   Inserts system-level context (Tier 2/3/KG) after existing system messages,
   then conversation history (Tier 1) before the current user messages.
   """
-  def inject_memory_context(messages, user_id, project_id, agent_id, session_id) do
+  def inject_memory_context(messages, user_id, project_id, agent_id, session_id, opts \\ []) do
     alias AgentEx.Message
 
     semantic_query = last_user_content(messages)
+    context_window = Keyword.get(opts, :context_window)
 
     context_messages =
-      build_context(user_id, project_id, agent_id, session_id, semantic_query: semantic_query)
+      build_context(user_id, project_id, agent_id, session_id,
+        semantic_query: semantic_query,
+        context_window: context_window
+      )
 
     {system_ctx, conversation_ctx} =
       Enum.split_with(context_messages, &(&1.role == "system"))
@@ -317,12 +321,55 @@ defmodule AgentEx.Memory do
 
         case role do
           "user" -> Message.user(msg.content)
+          "task" -> Message.user(msg.content)
           "assistant" -> Message.assistant(msg.content)
-          other -> %Message{role: String.to_existing_atom(other), content: msg.content}
+          _other -> Message.user(msg.content)
         end
       end)
 
     {system_msgs, rest} = Enum.split_while(messages, &(&1.role == :system))
     system_msgs ++ memory_system_msgs ++ memory_conversation_msgs ++ rest
+  end
+
+  @doc """
+  Inject orchestrator conversation history only (Tier 1).
+
+  Unlike `inject_memory_context/6` which injects all tiers (2/3/4/KG + conversation),
+  this only injects Tier 1 working memory — the orchestrator's previous turns.
+  The orchestrator retrieves other context via read tools (.memory/ files).
+  """
+  def inject_orchestrator_history(messages, user_id, project_id, agent_id, session_id, opts \\ []) do
+    alias AgentEx.Memory.{OrchestratorContext, WorkingMemory}
+    alias AgentEx.Message
+
+    context_window = Keyword.get(opts, :context_window)
+    budgets = OrchestratorContext.calculate_zones(context_window)
+
+    # Only gather Tier 1 conversation history
+    conversation =
+      try do
+        WorkingMemory.Server.to_context_messages({user_id, project_id, agent_id}, session_id)
+      rescue
+        _ -> []
+      catch
+        :exit, _ -> []
+      end
+
+    # Truncate to conversation zone budget
+    truncated = OrchestratorContext.truncate_conversation(conversation, budgets)
+
+    history_msgs =
+      Enum.map(truncated, fn msg ->
+        role = if is_atom(msg.role), do: Atom.to_string(msg.role), else: msg.role
+
+        case role do
+          "user" -> Message.user(msg.content)
+          "assistant" -> Message.assistant(msg.content)
+          _ -> Message.user(msg.content)
+        end
+      end)
+
+    {system_msgs, rest} = Enum.split_while(messages, &(&1.role == :system))
+    system_msgs ++ history_msgs ++ rest
   end
 end

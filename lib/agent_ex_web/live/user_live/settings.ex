@@ -55,6 +55,11 @@ defmodule AgentExWeb.UserLive.Settings do
                 label="Model"
                 options={Enum.map(models_for_provider(@selected_provider), fn m -> {m, m} end)}
               />
+              <div class="flex items-center gap-2 rounded-md bg-gray-800/50 border border-gray-700 px-3 py-2">
+                <span class="text-xs text-gray-400">Context window:</span>
+                <span class="text-xs font-mono text-white">{format_context_window(context_window_for(@selected_model))}</span>
+                <span class="text-xs text-gray-500">tokens</span>
+              </div>
               <p class="text-xs text-muted-foreground">API key configuration coming in a future update. Keys are currently read from server environment.</p>
               <.button phx-disable-with="Saving..." class="bg-indigo-600 hover:bg-indigo-500 text-white">
                 Update provider
@@ -174,6 +179,7 @@ defmodule AgentExWeb.UserLive.Settings do
       |> assign(:timezone_options, AgentEx.Timezone.select_options())
       |> assign(:provider_form, to_form(provider_changeset))
       |> assign(:selected_provider, user.provider || "openai")
+      |> assign(:selected_model, user.model || default_model_for(user.provider || "openai"))
       |> assign(:disabled_builtins, user.disabled_builtins || [])
       |> assign(:password_form, to_form(password_changeset))
       |> assign(:trigger_submit, false)
@@ -234,7 +240,14 @@ defmodule AgentExWeb.UserLive.Settings do
       |> Map.put(:action, :validate)
       |> to_form()
 
-    {:noreply, assign(socket, provider_form: provider_form, selected_provider: new_provider)}
+    new_model = user_params["model"] || default_model_for(new_provider)
+
+    {:noreply,
+     assign(socket,
+       provider_form: provider_form,
+       selected_provider: new_provider,
+       selected_model: new_model
+     )}
   end
 
   def handle_event("update_provider", params, socket) do

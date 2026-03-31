@@ -40,6 +40,9 @@ defmodule AgentEx.AgentBridge do
         intervention: resolve_intervention(config)
       )
 
+    # Resolve context_window from agent's own model
+    agent_context_window = AgentEx.ProviderHelpers.context_window_for(config.model)
+
     memory_opts =
       case opts[:memory] do
         %{session_id: sid} ->
@@ -47,7 +50,8 @@ defmodule AgentEx.AgentBridge do
             user_id: user_id,
             project_id: project_id,
             agent_id: "u#{user_id}_p#{project_id}_#{config.id}",
-            session_id: sid
+            session_id: sid,
+            context_window: agent_context_window
           }
 
         _ ->
@@ -105,49 +109,16 @@ defmodule AgentEx.AgentBridge do
 
   @doc """
   Build the list of non-delegate tools available to agents in a project.
-  These are the tools that agents can be assigned via tool_ids.
+  Includes plugin tools (via ToolAssembler) and HTTP API tools.
   """
   def available_tools(user_id, project_id) do
-    builtin_tools() ++ http_api_tools(user_id, project_id)
+    http_api_tools(user_id, project_id)
   end
 
-  defp builtin_tools do
-    [
-      Tool.new(
-        name: "get_current_time",
-        description: "Get the current date and time",
-        parameters: %{"type" => "object", "properties" => %{}, "required" => []},
-        kind: :read,
-        function: fn _args -> {:ok, DateTime.utc_now() |> DateTime.to_string()} end
-      ),
-      Tool.new(
-        name: "get_system_info",
-        description: "Get OS name, kernel version, and architecture",
-        parameters: %{"type" => "object", "properties" => %{}, "required" => []},
-        kind: :read,
-        function: fn _args ->
-          case System.cmd("uname", ["-srm"], stderr_to_stdout: true) do
-            {output, 0} -> {:ok, String.trim(output)}
-            {output, code} -> {:error, "uname failed (exit #{code}): #{String.trim(output)}"}
-          end
-        end
-      ),
-      Tool.new(
-        name: "get_disk_usage",
-        description: "Get disk space usage for all mounted filesystems",
-        parameters: %{"type" => "object", "properties" => %{}, "required" => []},
-        kind: :read,
-        function: fn _args ->
-          case System.cmd("df", ["-h"], stderr_to_stdout: true) do
-            {output, 0} -> {:ok, output}
-            {output, code} -> {:error, "df failed (exit #{code}): #{String.trim(output)}"}
-          end
-        end
-      )
-    ]
-  end
-
-  defp http_api_tools(user_id, project_id) do
+  @doc """
+  Build the list of HTTP API tools for a project.
+  """
+  def http_api_tools(user_id, project_id) do
     HttpToolStore.list(user_id, project_id)
     |> Enum.map(&HttpTool.to_tool/1)
   end

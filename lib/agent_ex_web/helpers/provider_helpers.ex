@@ -9,4 +9,6 @@ defmodule AgentExWeb.ProviderHelpers do
   defdelegate provider_to_atom(provider), to: AgentEx.ProviderHelpers
   defdelegate provider_options, to: AgentEx.ProviderHelpers
   defdelegate default_model_for(provider), to: AgentEx.ProviderHelpers
+  defdelegate context_window_for(model), to: AgentEx.ProviderHelpers
+  defdelegate format_context_window(tokens), to: AgentEx.ProviderHelpers
 end

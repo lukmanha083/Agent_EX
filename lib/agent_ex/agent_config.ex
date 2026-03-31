@@ -52,6 +52,7 @@ defmodule AgentEx.AgentConfig do
     # -- Provider/Model --
     provider: "openai",
     model: "gpt-4o-mini",
+    context_window: nil,
     disabled_builtins: [],
 
     # -- Safety --
@@ -102,6 +103,7 @@ defmodule AgentEx.AgentConfig do
           system_prompt: String.t() | nil,
           provider: String.t(),
           model: String.t(),
+          context_window: pos_integer() | nil,
           disabled_builtins: [String.t()],
           intervention_pipeline: [handler_entry()],
           sandbox: sandbox(),
@@ -128,6 +130,7 @@ defmodule AgentEx.AgentConfig do
     :system_prompt,
     :provider,
     :model,
+    :context_window,
     :disabled_builtins,
     :intervention_pipeline,
     :sandbox,

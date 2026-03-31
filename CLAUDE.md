@@ -43,6 +43,11 @@ Companion to the Python learning project at `../agent/`.
 | Agent-as-tool bridge | `AgentEx.AgentBridge` (agents → delegate tools) |
 | Tool assembly | `AgentEx.ToolAssembler` (unified tool list per user/project) |
 | Provider builtins | `AgentEx.ProviderTools` (hardcoded registry, toggle via `disabled_builtins`) |
+| File search tools | `AgentEx.Plugins.CodeSearch` (find_files, grep, file_info) |
+| Text editing tools | `AgentEx.Plugins.TextEditor` (read, edit, insert, append) |
+| HTTP fetch tools | `AgentEx.Plugins.WebFetch` (fetch_url, fetch_json + SSRF protection) |
+| System introspection | `AgentEx.Plugins.SystemInfo` (env_var, cwd, datetime, disk_usage) |
+| Diff/compare tools | `AgentEx.Plugins.Diff` (compare_files, compare_text) |
 
 ## Documentation
 - `docs/overview.md` — Project overview, motivation, and quick start
@@ -74,6 +79,11 @@ Companion to the Python learning project at `../agent/`.
 - `lib/agent_ex/plugin_registry.ex` — Plugin lifecycle manager (attach/detach/list)
 - `lib/agent_ex/plugins/file_system.ex` — Built-in sandboxed file operations plugin
 - `lib/agent_ex/plugins/shell_exec.ex` — Built-in sandboxed shell execution plugin
+- `lib/agent_ex/plugins/code_search.ex` — Built-in file finding + content search plugin (glob, grep, file_info)
+- `lib/agent_ex/plugins/text_editor.ex` — Built-in precise text editing plugin (read with lines, edit, insert, append)
+- `lib/agent_ex/plugins/web_fetch.ex` — Built-in HTTP fetch plugin with SSRF protection (fetch_url, fetch_json)
+- `lib/agent_ex/plugins/system_info.ex` — Built-in system introspection plugin (env_var, cwd, datetime, disk_usage)
+- `lib/agent_ex/plugins/diff.ex` — Built-in file/text comparison plugin (compare_files, compare_text)
 - `lib/agent_ex/mcp/client.ex` — MCP JSON-RPC 2.0 client GenServer
 - `lib/agent_ex/mcp/transport.ex` — Stdio and HTTP transport adapters for MCP
 - `lib/agent_ex/mcp/tool_adapter.ex` — Convert MCP tools ↔ AgentEx tools
