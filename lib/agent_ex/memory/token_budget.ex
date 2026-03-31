@@ -99,9 +99,16 @@ defmodule AgentEx.Memory.TokenBudget do
   @doc """
   Estimate token count from text using the ~4 chars/token heuristic.
   """
-  @spec estimate_tokens(String.t() | nil) :: non_neg_integer()
+  @spec estimate_tokens(String.t() | list() | nil) :: non_neg_integer()
   def estimate_tokens(nil), do: 0
   def estimate_tokens(text) when is_binary(text), do: div(String.length(text), 4)
+
+  def estimate_tokens(content) when is_list(content) do
+    Enum.reduce(content, 0, fn
+      %{content: c} when is_binary(c) -> div(String.length(c), 4)
+      _ -> 0
+    end)
+  end
 
   @doc """
   Estimate total tokens in a list of messages.
@@ -109,7 +116,7 @@ defmodule AgentEx.Memory.TokenBudget do
   @spec estimate_messages_tokens([map()]) :: non_neg_integer()
   def estimate_messages_tokens(messages) when is_list(messages) do
     Enum.reduce(messages, 0, fn msg, acc ->
-      content = msg[:content] || msg.content
+      content = Map.get(msg, :content) || Map.get(msg, "content")
       acc + estimate_tokens(content) + 4
     end)
   end

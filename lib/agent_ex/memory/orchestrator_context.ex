@@ -132,7 +132,7 @@ defmodule AgentEx.Memory.OrchestratorContext do
     messages
     |> Enum.reverse()
     |> Enum.reduce_while({[], 0}, fn msg, {acc, tokens} ->
-      msg_tokens = TokenBudget.estimate_tokens(msg.content) + 4
+      msg_tokens = TokenBudget.estimate_tokens(extract_result_content(msg)) + 4
 
       if tokens + msg_tokens <= budgets.conversation_zone do
         {:cont, {[msg | acc], tokens + msg_tokens}}
@@ -253,8 +253,11 @@ defmodule AgentEx.Memory.OrchestratorContext do
 
   defp delegation_call?(_), do: false
 
-  defp extract_agent_name(%{tool_calls: [%{name: name} | _]}) do
-    String.replace_prefix(name, "delegate_to_", "")
+  defp extract_agent_name(%{tool_calls: calls}) when is_list(calls) do
+    Enum.find_value(calls, "unknown", fn
+      %{name: "delegate_to_" <> agent} -> agent
+      _ -> nil
+    end)
   end
 
   defp extract_agent_name(_), do: "unknown"

@@ -183,6 +183,8 @@ defmodule AgentEx.ToolCallerLoop do
 
   # -- Mid-run compression --
 
+  defp maybe_compress(input_messages, generated, nil), do: {input_messages, generated}
+
   defp maybe_compress(input_messages, generated, context_window) do
     all_messages = input_messages ++ generated
     total_tokens = Memory.TokenBudget.estimate_messages_tokens(all_messages)
@@ -227,7 +229,8 @@ defmodule AgentEx.ToolCallerLoop do
   defp compress_generated(input_messages, generated) do
     # Keep the most recent 20% of generated messages (at least 4)
     keep_count = max(4, trunc(length(generated) * 0.2))
-    {old, recent} = Enum.split(generated, length(generated) - keep_count)
+    split_at = max(0, length(generated) - keep_count)
+    {old, recent} = Enum.split(generated, split_at)
 
     if old == [] do
       {input_messages, generated}
@@ -251,8 +254,8 @@ defmodule AgentEx.ToolCallerLoop do
   defp summarize_messages(messages) do
     messages
     |> Enum.map_join("\n", fn msg ->
-      role = msg.role || "unknown"
-      content = msg.content || ""
+      role = if msg.role, do: to_string(msg.role), else: "unknown"
+      content = if is_binary(msg.content), do: msg.content, else: ""
       preview = String.slice(content, 0, 200)
       "#{role}: #{preview}"
     end)

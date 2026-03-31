@@ -216,20 +216,18 @@ defmodule AgentEx.Pipe do
     )
   end
 
-  defp build_memory_report(agent_name, opts) do
+  defp build_memory_report(_agent_name, opts) do
     case opts[:memory] do
-      %{user_id: uid, project_id: pid, session_id: sid} ->
-        agent_id = "u#{uid}_p#{pid}_#{agent_name}"
-
-        Memory.ContextBuilder.build_report(uid, pid, agent_id, sid,
-          semantic_query: ""
-        )
+      %{user_id: uid, project_id: pid, agent_id: aid, session_id: sid} ->
+        Memory.ContextBuilder.build_report(uid, pid, aid, sid, semantic_query: "")
 
       _ ->
         ""
     end
   rescue
-    _ -> ""
+    error ->
+      Logger.warning("Pipe: build_memory_report failed: #{inspect(error)}")
+      ""
   end
 
   # -- Private: loop execution --

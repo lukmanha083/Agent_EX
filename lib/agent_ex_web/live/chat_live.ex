@@ -421,9 +421,14 @@ defmodule AgentExWeb.ChatLive do
     agent_id = socket.assigns.agent_id
 
     case Memory.start_session(user.id, project.id, agent_id, session_id) do
-      {:ok, _} -> :ok
-      {:error, {:already_started, _}} -> :ok
-      {:error, reason} -> Logger.warning("Failed to start orchestrator session: #{inspect(reason)}")
+      {:ok, _} ->
+        :ok
+
+      {:error, {:already_started, _}} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("Failed to start orchestrator session: #{inspect(reason)}")
     end
 
     assign(socket,
@@ -484,7 +489,9 @@ defmodule AgentExWeb.ChatLive do
       end
     end
   rescue
-    _ -> :ok
+    e ->
+      Logger.warning("Failed to auto-save orchestrator state: #{inspect(e)}")
+      :ok
   end
 
   defp save_orchestrator_session_summary(socket, user_id, project_id, agent_id, session_id) do
@@ -505,7 +512,9 @@ defmodule AgentExWeb.ChatLive do
       })
     end
   rescue
-    _ -> :ok
+    e ->
+      Logger.warning("Failed to save orchestrator session summary: #{inspect(e)}")
+      :ok
   end
 
   defp build_memory_opts(socket, user, project, session_id) do
@@ -532,9 +541,14 @@ defmodule AgentExWeb.ChatLive do
 
   defp ensure_orchestrator_session(user_id, project_id, agent_id, session_id) do
     case Memory.start_session(user_id, project_id, agent_id, session_id) do
-      {:ok, _} -> :ok
-      {:error, {:already_started, _}} -> :ok
-      {:error, reason} -> Logger.warning("Failed to start orchestrator session: #{inspect(reason)}")
+      {:ok, _} ->
+        :ok
+
+      {:error, {:already_started, _}} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("Failed to start orchestrator session: #{inspect(reason)}")
     end
   end
 
@@ -578,17 +592,24 @@ defmodule AgentExWeb.ChatLive do
     delegations = extract_delegations(tool_calls)
 
     metadata = %{"type" => "run_result"}
-    metadata = if tool_calls != [], do: Map.put(metadata, "tool_calls", tool_calls), else: metadata
-    metadata = if delegations != [], do: Map.put(metadata, "delegations", delegations), else: metadata
-    metadata = if stages != [], do: Map.put(metadata, "stages", format_stages(stages)), else: metadata
+
+    metadata =
+      if tool_calls != [], do: Map.put(metadata, "tool_calls", tool_calls), else: metadata
+
+    metadata =
+      if delegations != [], do: Map.put(metadata, "delegations", delegations), else: metadata
+
+    metadata =
+      if stages != [], do: Map.put(metadata, "stages", format_stages(stages)), else: metadata
+
     metadata
   end
 
   defp extract_tool_calls(events) do
     events
     |> Enum.filter(fn e -> e.type in [:tool_call, :tool_result] end)
-    |> Enum.chunk_by(fn e -> e.data[:call_id] end)
-    |> Enum.map(&format_tool_call_chunk/1)
+    |> Enum.group_by(fn e -> e.data[:call_id] end)
+    |> Enum.map(fn {_call_id, chunk} -> format_tool_call_chunk(chunk) end)
   end
 
   defp format_tool_call_chunk(chunk) do

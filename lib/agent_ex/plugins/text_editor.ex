@@ -124,7 +124,8 @@ defmodule AgentEx.Plugins.TextEditor do
           },
           "old_string" => %{
             "type" => "string",
-            "description" => "Exact text to find (must be unique in the file unless replace_all is true)"
+            "description" =>
+              "Exact text to find (must be unique in the file unless replace_all is true)"
           },
           "new_string" => %{
             "type" => "string",
@@ -146,7 +147,8 @@ defmodule AgentEx.Plugins.TextEditor do
 
         with {:ok, full_path} <- safe_path(root, path),
              {:ok, content} <- read_file_for_edit(full_path, path),
-             {:ok, new_content, count} <- do_replace(content, old_string, new_string, replace_all, path) do
+             {:ok, new_content, count} <-
+               do_replace(content, old_string, new_string, replace_all, path) do
           case File.write(full_path, new_content) do
             :ok -> {:ok, "Replaced #{count} occurrence(s) in #{path}"}
             {:error, reason} -> {:error, "Cannot write #{path}: #{reason}"}
@@ -224,14 +226,17 @@ defmodule AgentEx.Plugins.TextEditor do
         path = Map.fetch!(args, "path")
         text = Map.fetch!(args, "text")
 
-        with {:ok, full_path} <- safe_path(root, path) do
-          :ok = File.mkdir_p(Path.dirname(full_path))
-
+        with {:ok, full_path} <- safe_path(root, path),
+             :ok <- File.mkdir_p(Path.dirname(full_path)) do
           case File.open(full_path, [:append, :utf8]) do
             {:ok, file} ->
-              IO.write(file, text)
+              result = IO.write(file, text)
               File.close(file)
-              {:ok, "Appended to #{path}"}
+
+              case result do
+                :ok -> {:ok, "Appended to #{path}"}
+                {:error, reason} -> {:error, "Write failed for #{path}: #{reason}"}
+              end
 
             {:error, reason} ->
               {:error, "Cannot append to #{path}: #{reason}"}
@@ -303,8 +308,8 @@ defmodule AgentEx.Plugins.TextEditor do
 
   defp resolve_insert_position(line, total) do
     cond do
-      line <= 0 -> 0
       line == -1 -> total
+      line <= 0 -> 0
       line > total -> total
       true -> line - 1
     end

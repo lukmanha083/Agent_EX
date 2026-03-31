@@ -3,7 +3,7 @@ defmodule AgentEx.Plugins.Diff do
   Built-in plugin for comparing files and text.
 
   Provides unified diff output for comparing two files or two text strings.
-  Uses Elixir's built-in `String.myers_difference/2` for pure-Elixir diffing.
+  Uses Elixir's built-in `List.myers_difference/2` for pure-Elixir line-level diffing.
 
   ## Config
 
@@ -96,8 +96,7 @@ defmodule AgentEx.Plugins.Diff do
   defp compare_text_tool(context_lines) do
     Tool.new(
       name: "compare_text",
-      description:
-        "Compare two text strings and show differences in unified diff format.",
+      description: "Compare two text strings and show differences in unified diff format.",
       parameters: %{
         "type" => "object",
         "properties" => %{
@@ -207,7 +206,7 @@ defmodule AgentEx.Plugins.Diff do
         {:ins, _}, {a, b} -> {a, b + 1}
       end)
 
-    prefix = Enum.slice(edits, 0..max(0, hunk_start - 1))
+    prefix = if hunk_start == 0, do: [], else: Enum.slice(edits, 0..(hunk_start - 1))
 
     %{
       a_start: Enum.count(prefix, fn {op, _} -> op in [:eq, :del] end) + 1,
