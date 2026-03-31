@@ -265,7 +265,7 @@ defmodule AgentExWeb.ToolsLive do
   defp cancel_http_test(socket) do
     if pid = socket.assigns[:http_test_pid] do
       Process.demonitor(socket.assigns[:http_test_ref], [:flush])
-      Process.exit(pid, :kill)
+      Process.exit(pid, :shutdown)
       assign(socket, http_test_ref: nil, http_test_pid: nil, http_test_loading: false)
     else
       socket

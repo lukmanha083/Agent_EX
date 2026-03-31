@@ -94,6 +94,18 @@ defmodule AgentEx.NetworkPolicy do
   defp check_ip({192, 168, _, _}), do: blocked("private network (192.168.0.0/16)")
   defp check_ip({169, 254, _, _}), do: blocked("link-local / metadata (169.254.0.0/16)")
   defp check_ip({0, 0, 0, 0}), do: blocked("unspecified address (0.0.0.0)")
+
+  defp check_ip({100, b, _, _}) when b >= 64 and b <= 127,
+    do: blocked("CGN shared address (100.64.0.0/10)")
+
+  defp check_ip({192, 0, 0, _}), do: blocked("IETF protocol (192.0.0.0/24)")
+  defp check_ip({192, 0, 2, _}), do: blocked("documentation (192.0.2.0/24)")
+  defp check_ip({198, 51, 100, _}), do: blocked("documentation (198.51.100.0/24)")
+  defp check_ip({203, 0, 113, _}), do: blocked("documentation (203.0.113.0/24)")
+
+  defp check_ip({198, b, _, _}) when b in [18, 19],
+    do: blocked("benchmarking (198.18.0.0/15)")
+
   defp check_ip(_), do: :ok
 
   # IPv6 checks

@@ -121,7 +121,13 @@ defmodule AgentEx.HttpTool do
     header_params = extract_header_params(config.headers)
     body_args = Map.drop(args, url_params ++ header_params)
 
-    req_opts = [method: method, url: url, headers: headers, receive_timeout: 10_000]
+    req_opts = [
+      method: method,
+      url: url,
+      headers: headers,
+      receive_timeout: 10_000,
+      redirect: false
+    ]
 
     req_opts =
       if method in [:post, :put, :patch] do
