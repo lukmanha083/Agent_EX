@@ -1,7 +1,7 @@
 defmodule AgentExWeb.ChatLive do
   use AgentExWeb, :live_view
 
-  alias AgentEx.{AgentConfig, AgentStore, Chat, EventLoop, Memory}
+  alias AgentEx.{AgentStore, Chat, EventLoop, Memory, ToolAssembler}
   alias AgentEx.EventLoop.Event
 
   import AgentExWeb.ChatComponents
@@ -26,7 +26,8 @@ defmodule AgentExWeb.ChatLive do
       agents = AgentStore.list(user.id, project.id)
       active_agent = List.first(agents)
 
-      {provider, model, tools, system_prompt} = load_from_agent(active_agent, user)
+      {provider, model} = load_provider_model(active_agent, user)
+      system_prompt = ToolAssembler.orchestrator_prompt(user.id, project.id)
       conversations = Chat.list_conversations(user.id, project.id)
 
       {:ok,
@@ -39,7 +40,6 @@ defmodule AgentExWeb.ChatLive do
          input: "",
          provider: provider,
          model: model,
-         tools: tools,
          system_prompt: system_prompt,
          active_agent: active_agent,
          agents: agents,
@@ -315,24 +315,33 @@ defmodule AgentExWeb.ChatLive do
     run_id = "run-#{System.unique_integer([:positive])}"
     EventLoop.subscribe(run_id)
 
-    tools = socket.assigns.tools
     session_id = "conversation-#{conversation.id}"
+    user_id = socket.assigns.current_scope.user.id
+    project_id = socket.assigns.project.id
+    client = build_model_client(socket.assigns.provider, socket.assigns.model)
+
+    memory_opts = %{
+      user_id: user_id,
+      project_id: project_id,
+      agent_id: socket.assigns.agent_id,
+      session_id: session_id
+    }
+
+    user = socket.assigns.current_scope.user
+
+    tools =
+      ToolAssembler.assemble(user_id, project_id, client,
+        memory: memory_opts,
+        provider: socket.assigns.provider,
+        disabled_builtins: user.disabled_builtins || []
+      )
 
     case AgentEx.ToolAgent.start_link(tools: tools) do
       {:ok, tool_agent} ->
-        client = build_model_client(socket.assigns.provider, socket.assigns.model)
-
         input_messages = [
           AgentEx.Message.system(socket.assigns.system_prompt),
           AgentEx.Message.user(message)
         ]
-
-        memory_opts = %{
-          user_id: socket.assigns.current_scope.user.id,
-          project_id: socket.assigns.project.id,
-          agent_id: socket.assigns.agent_id,
-          session_id: session_id
-        }
 
         EventLoop.run(run_id, tool_agent, client, input_messages, tools,
           memory: memory_opts,
@@ -500,56 +509,13 @@ defmodule AgentExWeb.ChatLive do
 
   defp project_agent_id(user, project), do: "u#{user.id}_p#{project.id}_chat"
 
-  defp load_from_agent(nil, user) do
+  defp load_provider_model(nil, user) do
     provider = user.provider || "openai"
     model = user.model || default_model_for(provider)
-    {provider, model, default_tools(), "You are a helpful AI assistant."}
+    {provider, model}
   end
 
-  defp load_from_agent(agent, _user) do
-    system_prompt = AgentConfig.build_system_messages(agent)
-
-    prompt =
-      if system_prompt in [nil, ""], do: "You are a helpful AI assistant.", else: system_prompt
-
-    {agent.provider, agent.model, default_tools(), prompt}
-  end
-
-  defp default_tools do
-    [
-      AgentEx.Tool.new(
-        name: "get_system_info",
-        description: "Get OS name, kernel version, and architecture",
-        parameters: %{"type" => "object", "properties" => %{}, "required" => []},
-        kind: :read,
-        function: fn _args ->
-          case System.cmd("uname", ["-srm"], stderr_to_stdout: true) do
-            {output, 0} -> {:ok, String.trim(output)}
-            {output, code} -> {:error, "uname failed (exit #{code}): #{String.trim(output)}"}
-          end
-        end
-      ),
-      AgentEx.Tool.new(
-        name: "get_disk_usage",
-        description: "Get disk space usage for all mounted filesystems",
-        parameters: %{"type" => "object", "properties" => %{}, "required" => []},
-        kind: :read,
-        function: fn _args ->
-          case System.cmd("df", ["-h"], stderr_to_stdout: true) do
-            {output, 0} -> {:ok, output}
-            {output, code} -> {:error, "df failed (exit #{code}): #{String.trim(output)}"}
-          end
-        end
-      ),
-      AgentEx.Tool.new(
-        name: "get_current_time",
-        description: "Get the current date and time with timezone",
-        parameters: %{"type" => "object", "properties" => %{}, "required" => []},
-        kind: :read,
-        function: fn _args ->
-          {:ok, DateTime.utc_now() |> DateTime.to_string()}
-        end
-      )
-    ]
+  defp load_provider_model(agent, _user) do
+    {agent.provider, agent.model}
   end
 end

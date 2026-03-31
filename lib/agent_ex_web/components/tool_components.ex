@@ -7,6 +7,7 @@ defmodule AgentExWeb.ToolComponents do
   use AgentExWeb, :html
 
   import AgentExWeb.CoreComponents, except: [button: 1]
+  import AgentExWeb.HttpToolComponents
   import SaladUI.Button
   import SaladUI.Tabs
 
@@ -19,6 +20,7 @@ defmodule AgentExWeb.ToolComponents do
   attr(:mcp_servers, :list, default: [])
   attr(:custom_tools, :list, default: [])
   attr(:attached_sources, :any, default: nil)
+  attr(:http_tools, :list, default: [])
 
   def tool_tabs(assigns) do
     ~H"""
@@ -26,6 +28,9 @@ defmodule AgentExWeb.ToolComponents do
       <.tabs_list class="bg-gray-800/50 border border-gray-700 mb-4">
         <.tabs_trigger value="builtin" class="data-[state=active]:bg-gray-700 text-gray-300 data-[state=active]:text-white">
           Built-in
+        </.tabs_trigger>
+        <.tabs_trigger value="http" class="data-[state=active]:bg-gray-700 text-gray-300 data-[state=active]:text-white">
+          HTTP API
         </.tabs_trigger>
         <.tabs_trigger value="plugins" class="data-[state=active]:bg-gray-700 text-gray-300 data-[state=active]:text-white">
           Plugins
@@ -40,6 +45,10 @@ defmodule AgentExWeb.ToolComponents do
 
       <.tabs_content value="builtin">
         <.builtin_tools_panel plugins={@builtin_plugins} attached_sources={@attached_sources} />
+      </.tabs_content>
+
+      <.tabs_content value="http">
+        <.http_tool_grid tools={@http_tools} />
       </.tabs_content>
 
       <.tabs_content value="plugins">

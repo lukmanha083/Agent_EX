@@ -39,6 +39,10 @@ Companion to the Python learning project at `../agent/`.
 | Pipeline composition | `AgentEx.Pipe` (through/fan_out/merge/route/delegate_tool) |
 | Memory promotion | `AgentEx.Memory.Promotion` (session summaries + save_memory tool) |
 | Agent config/builder | `AgentEx.AgentConfig` + `AgentEx.AgentStore` (ETS/DETS) |
+| HTTP Request tools | `AgentEx.HttpTool` + `AgentEx.HttpToolStore` (ETS/DETS) |
+| Agent-as-tool bridge | `AgentEx.AgentBridge` (agents → delegate tools) |
+| Tool assembly | `AgentEx.ToolAssembler` (unified tool list per user/project) |
+| Provider builtins | `AgentEx.ProviderTools` (hardcoded registry, toggle via `disabled_builtins`) |
 
 ## Documentation
 - `docs/overview.md` — Project overview, motivation, and quick start
@@ -75,6 +79,12 @@ Companion to the Python learning project at `../agent/`.
 - `lib/agent_ex/mcp/tool_adapter.ex` — Convert MCP tools ↔ AgentEx tools
 - `lib/agent_ex/agent_config.ex` — Agent definition struct (name, prompt, model, tools, memory, intervention)
 - `lib/agent_ex/agent_store.ex` — ETS/DETS persistence for agent configs
+- `lib/agent_ex/http_tool.ex` — HTTP API tool definition struct + `to_tool/1` runtime conversion
+- `lib/agent_ex/http_tool_store.ex` — ETS/DETS persistence for HTTP tool configs
+- `lib/agent_ex/agent_bridge.ex` — Convert AgentStore agents → delegate tools for orchestrator
+- `lib/agent_ex/tool_assembler.ex` — Assemble all tool sources into unified `[Tool]` list per user/project
+- `lib/agent_ex/provider_tools.ex` — Hardcoded registry of provider built-in tools (Anthropic, OpenAI, Moonshot)
+- `lib/agent_ex/network_policy.ex` — SSRF protection: blocks requests to loopback, private, link-local, Fly.io internal
 - `lib/agent_ex/example.ex` — Usage example
 
 ### 4-Tier Memory System + Knowledge Graph (`AgentEx.Memory`)

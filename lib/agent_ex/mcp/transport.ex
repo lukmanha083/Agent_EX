@@ -75,22 +75,31 @@ defmodule AgentEx.MCP.Transport do
     defstruct [:url]
 
     @doc "Open an HTTP transport to the given URL."
-    @spec open(String.t()) :: {:ok, %__MODULE__{}}
+    @spec open(String.t()) :: {:ok, %__MODULE__{}} | {:error, String.t()}
     def open(url) when is_binary(url) do
-      {:ok, %__MODULE__{url: url}}
+      case AgentEx.NetworkPolicy.validate(url) do
+        :ok -> {:ok, %__MODULE__{url: url}}
+        {:error, reason} -> {:error, "SSRF blocked: #{reason}"}
+      end
     end
 
     @impl true
     def send_request(%__MODULE__{url: url} = state, request) do
-      case Req.post(url, json: request) do
-        {:ok, %{status: 200, body: body}} ->
-          {:ok, body, state}
-
-        {:ok, %{status: status, body: body}} ->
-          {:error, {:http_error, status, body}}
-
+      case AgentEx.NetworkPolicy.validate(url) do
         {:error, reason} ->
-          {:error, reason}
+          {:error, {:ssrf_blocked, reason}}
+
+        :ok ->
+          case Req.post(url, json: request) do
+            {:ok, %{status: 200, body: body}} ->
+              {:ok, body, state}
+
+            {:ok, %{status: status, body: body}} ->
+              {:error, {:http_error, status, body}}
+
+            {:error, reason} ->
+              {:error, reason}
+          end
       end
     end
 

@@ -11,23 +11,32 @@ defmodule AgentExWeb.AgentsLive do
   @impl true
   def mount(_params, _session, socket) do
     user = socket.assigns.current_scope.user
-    project = socket.assigns.current_project
-    agents = AgentStore.list(user.id, project.id)
-    default_provider = "openai"
+    project = socket.assigns[:current_project]
 
-    {:ok,
-     assign(socket,
-       project: project,
-       agents: agents,
-       editing: nil,
-       show_editor: false,
-       form: empty_form(),
-       intervention_pipeline: [],
-       sandbox: %{},
-       selected_provider: default_provider,
-       provider_options: provider_options(),
-       model_options: model_select_options(default_provider)
-     )}
+    if is_nil(project) do
+      {:ok,
+       socket
+       |> put_flash(:error, "No project available. Please create one first.")
+       |> redirect(to: ~p"/projects")}
+    else
+      agents = AgentStore.list(user.id, project.id)
+      default_provider = "openai"
+
+      {:ok,
+       assign(socket,
+         project: project,
+         agents: agents,
+         editing: nil,
+         show_editor: false,
+         form: empty_form(),
+         intervention_pipeline: [],
+         sandbox: %{},
+         disabled_builtins: [],
+         selected_provider: default_provider,
+         provider_options: provider_options(),
+         model_options: model_select_options(default_provider)
+       )}
+    end
   end
 
   # -- Agent CRUD events --
@@ -43,6 +52,7 @@ defmodule AgentExWeb.AgentsLive do
        form: empty_form(),
        intervention_pipeline: [],
        sandbox: %{},
+       disabled_builtins: [],
        selected_provider: default_provider,
        model_options: model_select_options(default_provider)
      )}
@@ -61,6 +71,7 @@ defmodule AgentExWeb.AgentsLive do
            form: agent_to_form(agent),
            intervention_pipeline: agent.intervention_pipeline || [],
            sandbox: agent.sandbox || %{},
+           disabled_builtins: agent.disabled_builtins || [],
            selected_provider: agent.provider,
            model_options: model_select_options(agent.provider)
          )}
@@ -84,7 +95,8 @@ defmodule AgentExWeb.AgentsLive do
       if provider_changed? do
         assign(socket,
           selected_provider: new_provider,
-          model_options: model_select_options(new_provider)
+          model_options: model_select_options(new_provider),
+          disabled_builtins: []
         )
       else
         socket
@@ -98,7 +110,12 @@ defmodule AgentExWeb.AgentsLive do
     project = socket.assigns.project
 
     attrs =
-      form_to_attrs(params, socket.assigns.intervention_pipeline, socket.assigns.sandbox)
+      form_to_attrs(
+        params,
+        socket.assigns.intervention_pipeline,
+        socket.assigns.sandbox,
+        socket.assigns.disabled_builtins
+      )
 
     config =
       if socket.assigns.editing do
@@ -228,6 +245,18 @@ defmodule AgentExWeb.AgentsLive do
     {:noreply, assign(socket, sandbox: sandbox)}
   end
 
+  # -- Builtin tool toggle events --
+
+  def handle_event("disable_builtin", %{"name" => name}, socket) do
+    disabled = Enum.uniq([name | socket.assigns.disabled_builtins])
+    {:noreply, assign(socket, disabled_builtins: disabled)}
+  end
+
+  def handle_event("enable_builtin", %{"name" => name}, socket) do
+    disabled = Enum.reject(socket.assigns.disabled_builtins, &(&1 == name))
+    {:noreply, assign(socket, disabled_builtins: disabled)}
+  end
+
   # -- Private helpers --
 
   defp update_write_gate(pipeline, update_fn) do
@@ -261,7 +290,7 @@ defmodule AgentExWeb.AgentsLive do
     })
   end
 
-  defp form_to_attrs(params, intervention_pipeline, sandbox) do
+  defp form_to_attrs(params, intervention_pipeline, sandbox, disabled_builtins) do
     %{
       name: String.trim(params["name"] || ""),
       description: blank_to_nil(params["description"]),
@@ -278,6 +307,7 @@ defmodule AgentExWeb.AgentsLive do
       system_prompt: blank_to_nil(params["system_prompt"]),
       provider: params["provider"] || "openai",
       model: params["model"] || default_model_for(params["provider"] || "openai"),
+      disabled_builtins: disabled_builtins,
       tool_ids: [],
       intervention_pipeline: intervention_pipeline,
       sandbox: sandbox

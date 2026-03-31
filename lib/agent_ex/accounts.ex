@@ -156,6 +156,14 @@ defmodule AgentEx.Accounts do
     |> Repo.update()
   end
 
+  @doc "Update just the user's disabled_builtins list."
+  def update_user_disabled_builtins(%User{} = user, disabled_builtins)
+      when is_list(disabled_builtins) do
+    user
+    |> Ecto.Changeset.change(disabled_builtins: disabled_builtins)
+    |> Repo.update()
+  end
+
   ## Settings
 
   @doc """

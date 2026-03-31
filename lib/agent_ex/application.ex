@@ -25,6 +25,9 @@ defmodule AgentEx.Application do
       # Agent config store (ETS/DETS for agent definitions)
       AgentEx.AgentStore,
 
+      # HTTP tool config store (ETS/DETS for REST API tool definitions)
+      AgentEx.HttpToolStore,
+
       # EventLoop: ETS-based run tracking
       AgentEx.EventLoop.RunRegistry,
 

@@ -7,6 +7,8 @@ defmodule AgentExWeb.AgentComponents do
 
   use AgentExWeb, :html
 
+  alias AgentEx.ProviderTools
+
   import AgentExWeb.CoreComponents, except: [button: 1]
   import AgentExWeb.InterventionComponents
   import SaladUI.Button
@@ -92,6 +94,9 @@ defmodule AgentExWeb.AgentComponents do
         <.badge :if={(@agent.intervention_pipeline || []) != []} variant="outline" class="text-[10px]">
           {length(@agent.intervention_pipeline || [])} handlers
         </.badge>
+        <.badge :if={has_enabled_builtins?(@agent)} variant="outline" class="text-[10px] text-cyan-400 border-cyan-500/30">
+          {enabled_builtin_count(@agent)} builtins
+        </.badge>
         <.badge :if={sandbox_configured?(@agent, @project_root_path)} variant="outline" class="text-[10px] text-amber-400 border-amber-500/30">
           sandboxed
         </.badge>
@@ -109,6 +114,7 @@ defmodule AgentExWeb.AgentComponents do
   attr(:intervention_pipeline, :list, default: [])
   attr(:sandbox, :map, default: %{})
   attr(:project_root_path, :string, default: nil)
+  attr(:disabled_builtins, :list, default: [])
 
   def agent_editor_dialog(assigns) do
     ~H"""
@@ -181,6 +187,12 @@ defmodule AgentExWeb.AgentComponents do
               </div>
             </fieldset>
 
+            <%!-- Section: Provider Built-in Tools --%>
+            <.builtin_tools_section
+              provider={@form["provider"] || "openai"}
+              disabled_builtins={@disabled_builtins}
+            />
+
             <%!-- Sandbox boundary section --%>
             <div class="border-t border-gray-800 pt-4">
               <.sandbox_section sandbox={@sandbox} project_root_path={@project_root_path} />
@@ -204,6 +216,74 @@ defmodule AgentExWeb.AgentComponents do
       </div>
     </div>
     """
+  end
+
+  attr(:provider, :string, required: true)
+  attr(:disabled_builtins, :list, default: [])
+
+  defp builtin_tools_section(assigns) do
+    builtins = ProviderTools.list(assigns.provider)
+    assigns = assign(assigns, :builtins, builtins)
+
+    ~H"""
+    <div :if={@builtins != []} class="border-t border-gray-800 pt-4">
+      <fieldset class="space-y-3">
+        <legend class="text-xs font-medium text-gray-500 uppercase tracking-wider">Provider Tools</legend>
+        <p class="text-xs text-gray-400">
+          Built-in tools provided by the API. Enabled by default — toggle off to disable.
+        </p>
+        <div class="space-y-2">
+          <div :for={spec <- @builtins} class="flex items-center justify-between rounded-md border border-gray-800 bg-gray-800/50 px-3 py-2">
+            <div>
+              <span class="text-sm font-medium text-white">{spec.name}</span>
+              <p class="text-xs text-gray-400">{spec.description}</p>
+            </div>
+            <button
+              type="button"
+              phx-click={toggle_event(spec.name, @disabled_builtins)}
+              phx-value-name={spec.name}
+              class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+              style={toggle_bg(spec.name, @disabled_builtins)}
+              role="switch"
+              aria-checked={to_string(spec.name not in @disabled_builtins)}
+              aria-label={"Toggle #{spec.name}"}
+            >
+              <span
+                class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition-transform"
+                style={toggle_knob(spec.name, @disabled_builtins)}
+              />
+            </button>
+          </div>
+        </div>
+      </fieldset>
+    </div>
+    """
+  end
+
+  defp toggle_event(name, disabled_builtins) do
+    if name in disabled_builtins, do: "enable_builtin", else: "disable_builtin"
+  end
+
+  defp toggle_bg(name, disabled_builtins) do
+    if name in disabled_builtins,
+      do: "background-color: rgb(55, 65, 81)",
+      else: "background-color: rgb(79, 70, 229)"
+  end
+
+  defp toggle_knob(name, disabled_builtins) do
+    if name in disabled_builtins,
+      do: "transform: translateX(0)",
+      else: "transform: translateX(1rem)"
+  end
+
+  defp has_enabled_builtins?(agent) do
+    enabled_builtin_count(agent) > 0
+  end
+
+  defp enabled_builtin_count(agent) do
+    total = length(ProviderTools.list(agent.provider || "openai"))
+    disabled = length(agent.disabled_builtins || [])
+    max(total - disabled, 0)
   end
 
   defp sandbox_configured?(%{sandbox: sandbox}, project_root_path) when is_map(sandbox) do
