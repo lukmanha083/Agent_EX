@@ -20,7 +20,11 @@ defmodule AgentExWeb.AgentsLive do
        |> redirect(to: ~p"/projects")}
     else
       available = ToolAssembler.available_tools(user.id, project.id, project.root_path)
-      ToolAssembler.ensure_default_agent(user.id, project.id, available, provider: user.provider || "anthropic")
+
+      ToolAssembler.ensure_default_agent(user.id, project.id, available,
+        provider: user.provider || "anthropic"
+      )
+
       agents = AgentStore.list(user.id, project.id)
       default_provider = "openai"
 

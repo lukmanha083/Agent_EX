@@ -393,7 +393,10 @@ defmodule AgentEx.ToolAssembler do
           })
 
         AgentStore.save(config)
-        Logger.info("ToolAssembler: created default agent '#{config.name}' for project #{project_id}")
+
+        Logger.info(
+          "ToolAssembler: created default agent '#{config.name}' for project #{project_id}"
+        )
 
       _agents ->
         :ok
