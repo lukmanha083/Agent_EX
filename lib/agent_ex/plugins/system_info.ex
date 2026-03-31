@@ -47,8 +47,14 @@ defmodule AgentEx.Plugins.SystemInfo do
   defp env_var_tool(allowed_env_vars) do
     description =
       case allowed_env_vars do
-        nil -> "Read an environment variable."
-        vars -> "Read an environment variable. Allowed: #{Enum.join(vars, ", ")}"
+        nil ->
+          "Read an environment variable. No variables are currently allowed (configure allowed_env_vars)."
+
+        [] ->
+          "Read an environment variable. No variables are currently allowed (configure allowed_env_vars)."
+
+        vars ->
+          "Read an environment variable. Allowed: #{Enum.join(vars, ", ")}"
       end
 
     Tool.new(
@@ -96,8 +102,7 @@ defmodule AgentEx.Plugins.SystemInfo do
   defp datetime_tool do
     Tool.new(
       name: "datetime",
-      description:
-        "Get the current date and time in UTC, with optional timezone conversion.",
+      description: "Get the current date and time in UTC.",
       parameters: %{
         "type" => "object",
         "properties" => %{
@@ -131,8 +136,7 @@ defmodule AgentEx.Plugins.SystemInfo do
   defp disk_usage_tool do
     Tool.new(
       name: "disk_usage",
-      description:
-        "Get disk space usage for a path. Returns total, free, and used space.",
+      description: "Get disk space usage for a path. Returns total, free, and used space.",
       parameters: %{
         "type" => "object",
         "properties" => %{
@@ -153,7 +157,8 @@ defmodule AgentEx.Plugins.SystemInfo do
 
   # --- Helpers ---
 
-  defp check_env_allowed(_name, nil), do: :ok
+  defp check_env_allowed(_name, nil),
+    do: {:error, "No environment variables are allowed (configure allowed_env_vars)"}
 
   defp check_env_allowed(name, allowed) do
     if name in allowed do
@@ -164,9 +169,20 @@ defmodule AgentEx.Plugins.SystemInfo do
   end
 
   defp disk_usage_via_df(path) do
-    case System.cmd("df", ["-B1", path], stderr_to_stdout: true) do
-      {output, 0} -> parse_df_output(output, path)
-      {error, _} -> {:error, "df command failed: #{error}"}
+    if File.exists?(path) do
+      df_args =
+        case :os.type() do
+          {:unix, :darwin} -> ["-k", path]
+          {:unix, _} -> ["-B1", path]
+          _ -> [path]
+        end
+
+      case System.cmd("df", df_args, stderr_to_stdout: true) do
+        {output, 0} -> parse_df_output(output, path)
+        {error, _} -> {:error, "df command failed: #{error}"}
+      end
+    else
+      {:error, "Path does not exist: #{path}"}
     end
   end
 

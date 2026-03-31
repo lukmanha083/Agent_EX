@@ -30,7 +30,7 @@ defmodule AgentEx.Plugins.SystemInfoTest do
 
   describe "env_var tool" do
     test "reads existing env var" do
-      {:ok, tools} = SystemInfo.init(%{})
+      {:ok, tools} = SystemInfo.init(%{"allowed_env_vars" => ["PATH"]})
       env = Enum.find(tools, &(&1.name == "env_var"))
 
       # PATH should always exist
@@ -40,7 +40,9 @@ defmodule AgentEx.Plugins.SystemInfoTest do
     end
 
     test "returns 'Not set' for missing env var" do
-      {:ok, tools} = SystemInfo.init(%{})
+      {:ok, tools} =
+        SystemInfo.init(%{"allowed_env_vars" => ["AGENT_EX_NONEXISTENT_VAR_XYZ_123"]})
+
       env = Enum.find(tools, &(&1.name == "env_var"))
 
       assert {:ok, "Not set"} =

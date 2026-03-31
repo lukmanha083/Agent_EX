@@ -18,6 +18,8 @@ defmodule AgentEx.Plugins.WebFetch do
 
   @default_timeout 15_000
   @default_max_body_size 1_048_576
+  @max_redirects 5
+  @valid_methods ~w[get post put delete patch head]a
 
   @impl true
   def manifest do
@@ -79,11 +81,11 @@ defmodule AgentEx.Plugins.WebFetch do
       kind: :read,
       function: fn args ->
         url = Map.fetch!(args, "url")
-        method = Map.get(args, "method", "GET") |> String.downcase() |> String.to_atom()
         headers = Map.get(args, "headers", %{})
         body = Map.get(args, "body")
 
-        with :ok <- validate_url(url, allowed_domains),
+        with {:ok, method} <- validate_method(Map.get(args, "method", "GET")),
+             :ok <- validate_url(url, allowed_domains),
              {:ok, response} <- do_request(method, url, headers, body, timeout, max_body_size) do
           result = %{
             "status" => response.status,
@@ -129,18 +131,19 @@ defmodule AgentEx.Plugins.WebFetch do
       kind: :read,
       function: fn args ->
         url = Map.fetch!(args, "url")
-        method = Map.get(args, "method", "GET") |> String.downcase() |> String.to_atom()
         headers = Map.get(args, "headers", %{}) |> Map.put("accept", "application/json")
         body = Map.get(args, "body")
 
-        with :ok <- validate_url(url, allowed_domains),
+        with {:ok, method} <- validate_method(Map.get(args, "method", "GET")),
+             :ok <- validate_url(url, allowed_domains),
              {:ok, response} <- do_request(method, url, headers, body, timeout, max_body_size) do
           case Jason.decode(response.body) do
             {:ok, json} ->
               {:ok, Jason.encode!(%{"status" => response.status, "data" => json}, pretty: true)}
 
             {:error, _} ->
-              {:error, "Response is not valid JSON (status #{response.status}): #{truncate_body(response.body, 500)}"}
+              {:error,
+               "Response is not valid JSON (status #{response.status}): #{truncate_body(response.body, 500)}"}
           end
         end
       end
@@ -154,6 +157,19 @@ defmodule AgentEx.Plugins.WebFetch do
          :ok <- validate_domain(url, allowed_domains) do
       AgentEx.NetworkPolicy.validate(url)
     end
+  end
+
+  defp validate_method(method_str) do
+    method = String.downcase(method_str)
+
+    if String.to_existing_atom(method) in @valid_methods do
+      {:ok, String.to_existing_atom(method)}
+    else
+      {:error, "Invalid HTTP method: #{method_str}. Allowed: #{Enum.join(@valid_methods, ", ")}"}
+    end
+  rescue
+    ArgumentError ->
+      {:error, "Invalid HTTP method: #{method_str}. Allowed: #{Enum.join(@valid_methods, ", ")}"}
   end
 
   defp validate_scheme(url) do
@@ -182,7 +198,7 @@ defmodule AgentEx.Plugins.WebFetch do
   end
 
   defp do_request(method, url, headers, body, timeout, _max_body_size) do
-    header_list = Enum.map(headers, fn {k, v} -> {String.to_atom(k), v} end)
+    header_list = Enum.map(headers, fn {k, v} -> {to_string(k), to_string(v)} end)
 
     req_opts = [
       method: method,
@@ -190,14 +206,24 @@ defmodule AgentEx.Plugins.WebFetch do
       headers: header_list,
       receive_timeout: timeout,
       connect_options: [timeout: timeout],
-      redirect: true,
-      max_redirects: 5,
+      redirect: false,
       retry: false
     ]
 
     req_opts = if body, do: Keyword.put(req_opts, :body, body), else: req_opts
 
+    do_request_with_redirects(req_opts, @max_redirects)
+  end
+
+  defp do_request_with_redirects(_req_opts, remaining) when remaining < 0 do
+    {:error, "Too many redirects"}
+  end
+
+  defp do_request_with_redirects(req_opts, remaining) do
     case Req.request(req_opts) do
+      {:ok, %{status: status} = response} when status in [301, 302, 303, 307, 308] ->
+        follow_redirect(response, req_opts, remaining)
+
       {:ok, response} ->
         {:ok, response}
 
@@ -209,9 +235,53 @@ defmodule AgentEx.Plugins.WebFetch do
     end
   end
 
+  defp follow_redirect(response, req_opts, remaining) do
+    case get_redirect_location(response) do
+      nil ->
+        {:ok, response}
+
+      location ->
+        redirect_url = resolve_redirect_url(Keyword.fetch!(req_opts, :url), location)
+
+        case AgentEx.NetworkPolicy.validate(redirect_url) do
+          :ok ->
+            new_opts = Keyword.put(req_opts, :url, redirect_url)
+            do_request_with_redirects(new_opts, remaining - 1)
+
+          {:error, reason} ->
+            {:error, "Redirect to #{redirect_url} blocked: #{reason}"}
+        end
+    end
+  end
+
+  defp get_redirect_location(%{headers: headers}) do
+    Enum.find_value(headers, fn
+      {"location", value} -> value
+      {key, value} when is_binary(key) -> if String.downcase(key) == "location", do: value
+      _ -> nil
+    end)
+  end
+
+  defp resolve_redirect_url(base_url, location) do
+    case URI.parse(location) do
+      %{scheme: nil} -> URI.merge(base_url, location) |> to_string()
+      _ -> location
+    end
+  end
+
   defp truncate_body(body, max_size) when is_binary(body) do
     if byte_size(body) > max_size do
-      String.slice(body, 0, max_size) <> "\n... [truncated at #{max_size} bytes]"
+      truncated = binary_part(body, 0, max_size)
+
+      # Ensure valid UTF-8 by trimming broken trailing bytes
+      truncated =
+        case :unicode.characters_to_binary(truncated) do
+          {:incomplete, valid, _} -> valid
+          {:error, valid, _} -> valid
+          valid when is_binary(valid) -> valid
+        end
+
+      truncated <> "\n... [truncated at #{max_size} bytes]"
     else
       body
     end
