@@ -352,7 +352,7 @@ defmodule AgentExWeb.ChatLive do
           memory: orchestrator_memory,
           context_window: orchestrator_memory.context_window,
           tool_timeout: 120_000,
-          reasoning_first: true,
+          reasoning_first: reasoning_capable?(socket.assigns.model),
           metadata: %{user_id: user.id}
         )
 
@@ -680,4 +680,19 @@ defmodule AgentExWeb.ChatLive do
   defp load_provider_model(agent, _user) do
     {agent.provider, agent.model}
   end
+
+  # Only enable reasoning_first for models that can reliably distinguish
+  # text reasoning from tool calls. Smaller models (Haiku, mini, nano)
+  # tend to hallucinate XML tool calls as text when tools are unavailable.
+  @reasoning_capable_patterns ~w[opus sonnet gpt-5.4 o3 o4 kimi-k2]
+  defp reasoning_capable?(model) when is_binary(model) do
+    model_lower = String.downcase(model)
+
+    Enum.any?(@reasoning_capable_patterns, fn pattern ->
+      String.contains?(model_lower, pattern)
+    end) and not String.contains?(model_lower, "mini") and
+      not String.contains?(model_lower, "nano")
+  end
+
+  defp reasoning_capable?(_), do: false
 end
