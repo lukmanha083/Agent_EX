@@ -18,7 +18,6 @@ defmodule AgentExWeb.ToolComponents do
   attr(:builtin_plugins, :list, default: [])
   attr(:available_plugins, :list, default: [])
   attr(:mcp_servers, :list, default: [])
-  attr(:custom_tools, :list, default: [])
   attr(:attached_sources, :any, default: nil)
   attr(:http_tools, :list, default: [])
 
@@ -38,13 +37,10 @@ defmodule AgentExWeb.ToolComponents do
         <.tabs_trigger value="mcp" class="data-[state=active]:bg-gray-700 text-gray-300 data-[state=active]:text-white">
           MCP Servers
         </.tabs_trigger>
-        <.tabs_trigger value="custom" class="data-[state=active]:bg-gray-700 text-gray-300 data-[state=active]:text-white">
-          Custom
-        </.tabs_trigger>
       </.tabs_list>
 
       <.tabs_content value="builtin">
-        <.builtin_tools_panel plugins={@builtin_plugins} attached_sources={@attached_sources} />
+        <.builtin_tools_panel plugins={@builtin_plugins} />
       </.tabs_content>
 
       <.tabs_content value="http">
@@ -59,9 +55,6 @@ defmodule AgentExWeb.ToolComponents do
         <.mcp_panel servers={@mcp_servers} />
       </.tabs_content>
 
-      <.tabs_content value="custom">
-        <.custom_tools_panel tools={@custom_tools} />
-      </.tabs_content>
     </.tabs>
     """
   end
@@ -69,25 +62,23 @@ defmodule AgentExWeb.ToolComponents do
   # --- Built-in tools (FileSystem, ShellExec) ---
 
   attr(:plugins, :list, default: [])
-  attr(:attached_sources, :any, default: nil)
 
   defp builtin_tools_panel(assigns) do
     ~H"""
     <div class="space-y-3">
       <p class="text-sm text-gray-400 mb-4">
-        Built-in tool plugins that ship with AgentEx.
+        Built-in tool plugins that ship with AgentEx. These are always available to specialist agents.
       </p>
       <%= if @plugins == [] do %>
-        <.empty_state icon="wrench" message="No built-in plugins attached" />
+        <.empty_state icon="wrench" message="No built-in plugins" />
       <% else %>
-        <.tool_source_card
+        <.builtin_source_card
           :for={plugin <- @plugins}
           name={plugin.name}
           description={plugin.description}
           version={plugin.version}
           tool_count={length(plugin.tool_names)}
-          source="built-in"
-          attached={@attached_sources && MapSet.member?(@attached_sources, {"built-in", plugin.name})}
+          tool_names={plugin.tool_names}
         />
       <% end %>
     </div>
@@ -103,17 +94,13 @@ defmodule AgentExWeb.ToolComponents do
     ~H"""
     <div class="space-y-3">
       <div class="flex items-center justify-between mb-4">
-        <p class="text-sm text-gray-400">Available tool plugins</p>
-        <button
-          type="button"
-          phx-click="refresh_plugins"
-          class="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
-        >
-          Refresh
-        </button>
+        <p class="text-sm text-gray-400">
+          User-installable tool plugins with custom configuration.
+          Unlike built-in plugins, these can be attached/detached per project.
+        </p>
       </div>
       <%= if @plugins == [] do %>
-        <.empty_state icon="puzzle" message="No plugins available. Add plugins to your project and register them here." />
+        <.empty_state icon="puzzle" message="No user plugins installed yet. Plugin marketplace coming soon." />
       <% else %>
         <.tool_source_card
           :for={plugin <- @plugins}
@@ -168,41 +155,46 @@ defmodule AgentExWeb.ToolComponents do
     """
   end
 
-  # --- Custom tools ---
+  # --- Shared components ---
 
-  attr(:tools, :list, default: [])
+  @doc "Renders a read-only built-in plugin card (no attach/detach)."
+  attr(:name, :string, required: true)
+  attr(:description, :string, default: "")
+  attr(:version, :string, default: "")
+  attr(:tool_count, :integer, default: 0)
+  attr(:tool_names, :list, default: [])
 
-  defp custom_tools_panel(assigns) do
+  def builtin_source_card(assigns) do
     ~H"""
-    <div class="space-y-4">
-      <div class="flex items-center justify-between mb-2">
-        <p class="text-sm text-gray-400">User-defined tools</p>
-        <button
-          type="button"
-          phx-click="new_custom_tool"
-          class="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 transition-colors"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-3.5 h-3.5">
-            <path d="M8.75 3.75a.75.75 0 0 0-1.5 0v3.5h-3.5a.75.75 0 0 0 0 1.5h3.5v3.5a.75.75 0 0 0 1.5 0v-3.5h3.5a.75.75 0 0 0 0-1.5h-3.5v-3.5Z" />
-          </svg>
-          New Tool
-        </button>
-      </div>
-
-      <%= if @tools == [] do %>
-        <.empty_state icon="code" message="No custom tools defined yet" />
-      <% else %>
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <.tool_card :for={tool <- @tools} tool={tool} />
+    <div class="rounded-lg border border-gray-800 bg-gray-900 px-4 py-3">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class="flex h-8 w-8 items-center justify-center rounded-md bg-emerald-600/20 text-emerald-400">
+            <.source_icon source="built-in" />
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="text-sm font-medium text-white">{@name}</span>
+              <span :if={@version != ""} class="text-[10px] text-gray-500">{@version}</span>
+            </div>
+            <p :if={@description != ""} class="text-xs text-gray-400">{@description}</p>
+          </div>
         </div>
-      <% end %>
+        <.badge variant="secondary" class="text-[10px]">{@tool_count} tools</.badge>
+      </div>
+      <div :if={@tool_names != []} class="mt-2 ml-11 flex flex-wrap gap-1.5">
+        <span
+          :for={tool_name <- @tool_names}
+          class="inline-flex items-center rounded-md bg-gray-800 px-2 py-0.5 text-[10px] font-mono text-gray-400"
+        >
+          {tool_name}
+        </span>
+      </div>
     </div>
     """
   end
 
-  # --- Shared components ---
-
-  @doc "Renders a tool source card (plugin, MCP server, etc.)."
+  @doc "Renders a tool source card (plugin, MCP server, etc.) with attach/detach."
   attr(:name, :string, required: true)
   attr(:display_name, :string, default: nil)
   attr(:description, :string, default: "")

@@ -52,7 +52,8 @@ defmodule AgentEx.Tool do
     by an `AgentEx.Intervention` handler.
   """
   def new(opts) do
-    struct!(__MODULE__, opts)
+    tool = struct!(__MODULE__, opts)
+    %{tool | name: sanitize_name(tool.name), parameters: sanitize_parameters(tool.parameters)}
   end
 
   @doc """
@@ -68,7 +69,7 @@ defmodule AgentEx.Tool do
       description: Keyword.get(opts, :description),
       parameters: nil,
       function: nil,
-      kind: :builtin,
+      kind: Keyword.get(opts, :kind, :builtin),
       type: Keyword.get(opts, :type)
     }
   end
@@ -114,7 +115,7 @@ defmodule AgentEx.Tool do
     %{
       "name" => tool.name,
       "description" => tool.description,
-      "input_schema" => tool.parameters
+      "input_schema" => ensure_valid_schema(tool.parameters)
     }
   end
 
@@ -130,4 +131,49 @@ defmodule AgentEx.Tool do
   rescue
     e -> {:error, Exception.message(e)}
   end
+
+  # Ensure input_schema is a valid JSON Schema object for the API.
+  defp ensure_valid_schema(nil), do: %{"type" => "object", "properties" => %{}}
+
+  defp ensure_valid_schema(schema) when is_map(schema) do
+    Map.put_new(schema, "type", "object")
+  end
+
+  defp ensure_valid_schema(_), do: %{"type" => "object", "properties" => %{}}
+
+  # Ensure tool names match API constraints: ^[a-zA-Z0-9_-]{1,128}$
+  defp sanitize_name(name) when is_binary(name) do
+    name
+    |> String.replace(~r/[^a-zA-Z0-9_-]/, "_")
+    |> String.slice(0, 128)
+  end
+
+  defp sanitize_name(name), do: name
+
+  # Ensure parameter property keys match API constraints: ^[a-zA-Z0-9_.-]{1,64}$
+  # Sanitizes keys in "properties" and "required" to stay consistent.
+  defp sanitize_parameters(%{"properties" => props} = schema) when is_map(props) do
+    sanitized_props =
+      Map.new(props, fn {key, val} -> {sanitize_property_key(key), val} end)
+
+    schema
+    |> Map.put("properties", sanitized_props)
+    |> update_required_keys()
+  end
+
+  defp sanitize_parameters(params), do: params
+
+  defp sanitize_property_key(key) when is_binary(key) do
+    key
+    |> String.replace(~r/[^a-zA-Z0-9_.-]/, "_")
+    |> String.slice(0, 64)
+  end
+
+  defp sanitize_property_key(key), do: key
+
+  defp update_required_keys(%{"required" => required} = schema) when is_list(required) do
+    Map.put(schema, "required", Enum.map(required, &sanitize_property_key/1))
+  end
+
+  defp update_required_keys(schema), do: schema
 end

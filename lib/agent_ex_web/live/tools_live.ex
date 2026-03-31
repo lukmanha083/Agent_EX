@@ -25,7 +25,6 @@ defmodule AgentExWeb.ToolsLive do
        builtin_plugins: builtin,
        available_plugins: [],
        mcp_servers: [],
-       custom_tools: list_demo_tools(),
        attached_sources: attached,
        show_mcp_form: false,
        mcp_form: %{name: "", transport: "stdio", command: ""},
@@ -79,10 +78,6 @@ defmodule AgentExWeb.ToolsLive do
 
   def handle_event("refresh_plugins", _params, socket) do
     {:noreply, assign(socket, available_plugins: [])}
-  end
-
-  def handle_event("new_custom_tool", _params, socket) do
-    {:noreply, put_flash(socket, :info, "Custom tool editor coming in a future update")}
   end
 
   def handle_event("detach_source", %{"name" => name, "source" => source}, socket) do
@@ -458,39 +453,70 @@ defmodule AgentExWeb.ToolsLive do
   defp update_mcp_attached(socket, _source, _name, _value), do: socket
 
   defp list_builtin_plugins do
-    [
+    Enum.map(AgentEx.ToolAssembler.builtin_plugin_modules(), fn mod ->
+      manifest = mod.manifest()
+
       %{
-        name: "filesystem",
-        description: "Sandboxed file system operations (read, write, list)",
-        version: "1.0.0",
-        tool_names: ["filesystem.read_file", "filesystem.write_file", "filesystem.list_dir"]
-      },
-      %{
-        name: "shell_exec",
-        description: "Sandboxed shell command execution with allowlist",
-        version: "1.0.0",
-        tool_names: ["shell_exec.run"]
+        name: manifest.name,
+        description: manifest.description,
+        version: manifest.version,
+        tool_names: list_plugin_tool_names(mod, manifest)
       }
-    ]
+    end)
   end
 
-  defp list_demo_tools do
-    [
-      %{
-        name: "get_system_info",
-        description: "Get OS name, kernel version, and architecture",
-        kind: :read
-      },
-      %{
-        name: "get_disk_usage",
-        description: "Get disk space usage for all mounted filesystems",
-        kind: :read
-      },
-      %{
-        name: "get_current_time",
-        description: "Get the current date and time with timezone",
-        kind: :read
-      }
-    ]
+  defp list_plugin_tool_names(mod, manifest) do
+    # Try to init with minimal config to discover tool names
+    # Fall back to just showing the plugin name if init requires config
+    case safe_plugin_init(mod) do
+      {:ok, tools} ->
+        Enum.map(tools, &"#{manifest.name}.#{&1.name}")
+
+      :config_required ->
+        ["#{manifest.name}.*"]
+    end
   end
+
+  defp safe_plugin_init(mod) do
+    schema = mod.manifest().config_schema
+
+    # Build a minimal config with placeholder values for required fields
+    config =
+      Enum.reduce(schema, %{}, fn param, acc ->
+        {name, type, _desc, opts} = normalize_plugin_param(param)
+        key = Atom.to_string(name)
+        optional = Keyword.get(opts, :optional, false)
+
+        if optional do
+          acc
+        else
+          Map.put(acc, key, placeholder_value(type))
+        end
+      end)
+
+    case mod.init(config) do
+      {:ok, tools} ->
+        {:ok, tools}
+
+      {:stateful, tools, state} ->
+        if is_pid(state), do: Process.exit(state, :normal)
+        {:ok, tools}
+
+      _ ->
+        :config_required
+    end
+  rescue
+    error ->
+      Logger.debug("Plugin #{inspect(mod)} init failed during tool discovery: #{inspect(error)}")
+      :config_required
+  end
+
+  defp normalize_plugin_param({name, type, desc}), do: {name, type, desc, []}
+  defp normalize_plugin_param({name, type, desc, opts}), do: {name, type, desc, opts}
+
+  defp placeholder_value(:string), do: "/nonexistent_probe_path"
+  defp placeholder_value(:integer), do: 0
+  defp placeholder_value(:boolean), do: false
+  defp placeholder_value({:array, _}), do: []
+  defp placeholder_value(_), do: ""
 end

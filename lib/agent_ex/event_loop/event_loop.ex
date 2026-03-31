@@ -16,7 +16,7 @@ defmodule AgentEx.EventLoop do
   """
 
   alias AgentEx.EventLoop.{BroadcastHandler, Event, RunRegistry}
-  alias AgentEx.{ModelClient, ToolCallerLoop}
+  alias AgentEx.{Memory, ModelClient, ToolCallerLoop}
 
   require Logger
 
@@ -85,9 +85,14 @@ defmodule AgentEx.EventLoop do
     # Store a placeholder so cancel/1 knows the run is starting
     RunRegistry.mark_starting(run_id)
 
+    memory_opts = Keyword.get(opts, :memory)
+
     task =
       Task.Supervisor.async_nolink(AgentEx.TaskSupervisor, fn ->
         result = ToolCallerLoop.run(tool_agent, model_client, messages, tools, loop_opts)
+
+        # Always attempt promotion/reflection — even on error
+        maybe_promote_on_completion(memory_opts, model_client, result)
 
         case result do
           {:ok, generated} ->
@@ -166,6 +171,44 @@ defmodule AgentEx.EventLoop do
   defp preview(nil), do: nil
   defp preview(content) when is_binary(content), do: String.slice(content, 0, 200)
   defp preview(_), do: nil
+
+  defp maybe_promote_on_completion(nil, _model_client, _result), do: :ok
+
+  defp maybe_promote_on_completion(%{orchestrator: true}, _model_client, _result) do
+    # Orchestrator: no Tier 3 promotion. State is persisted via:
+    # - Tier 1 conversation buffer (within session)
+    # - .memory/*.md files (cross-session, written by save_note tool)
+    # - PostgreSQL session summary (written by stop_current_session)
+    :ok
+  end
+
+  defp maybe_promote_on_completion(
+         %{user_id: uid, project_id: pid, agent_id: aid, session_id: sid},
+         model_client,
+         _result
+       ) do
+    # Agent: full promotion (session summary → Tier 3, skill reflection → Tier 4)
+    case Task.Supervisor.start_child(AgentEx.TaskSupervisor, fn ->
+           try do
+             Memory.Promotion.close_session_with_summary(uid, pid, aid, sid, model_client)
+           rescue
+             e -> Logger.warning("EventLoop: promotion failed: #{Exception.message(e)}")
+           end
+         end) do
+      {:ok, _pid} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "EventLoop: failed to start promotion task for agent=#{aid}: #{inspect(reason)}"
+        )
+    end
+  end
+
+  defp maybe_promote_on_completion(_memory_opts, _model_client, _result) do
+    Logger.debug("EventLoop: skipping promotion, memory_opts incomplete")
+    :ok
+  end
 
   defp final_content(generated) do
     generated

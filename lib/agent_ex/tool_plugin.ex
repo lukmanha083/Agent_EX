@@ -6,7 +6,7 @@ defmodule AgentEx.ToolPlugin do
   that returns tools. Simple plugins stay simple — stateful ones can declare
   a child_spec for supervised processes.
 
-  Tool names are prefixed with the plugin name (e.g., `"filesystem.read_file"`)
+  Tool names are prefixed with the plugin name (e.g., `"filesystem_read_file"`)
   to avoid collisions across plugins.
 
   ## Example
@@ -88,11 +88,11 @@ defmodule AgentEx.ToolPlugin do
 
   defp valid_type?(_value, _type), do: true
 
-  @doc "Prefix tool names with the plugin name."
+  @doc "Prefix tool names with the plugin name (underscore separator for API compatibility)."
   @spec prefix_tools(String.t(), [AgentEx.Tool.t()]) :: [AgentEx.Tool.t()]
   def prefix_tools(plugin_name, tools) do
     Enum.map(tools, fn tool ->
-      %{tool | name: "#{plugin_name}.#{tool.name}"}
+      %{tool | name: "#{plugin_name}_#{tool.name}"}
     end)
   end
 

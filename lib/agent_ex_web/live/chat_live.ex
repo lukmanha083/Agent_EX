@@ -241,12 +241,15 @@ defmodule AgentExWeb.ChatLive do
     content = event.data[:final_content] || "No response."
     messages = socket.assigns.messages ++ [%{role: :assistant, content: content}]
 
-    # Save assistant message to DB
+    # Save assistant message to DB with execution metadata
     if socket.assigns.conversation do
+      metadata = build_run_metadata(socket.assigns.events, socket.assigns.stages)
+
       case Chat.create_message(%{
              conversation_id: socket.assigns.conversation.id,
              role: "assistant",
-             content: content
+             content: content,
+             metadata: metadata
            }) do
         {:ok, _} ->
           :ok
@@ -316,36 +319,41 @@ defmodule AgentExWeb.ChatLive do
     EventLoop.subscribe(run_id)
 
     session_id = "conversation-#{conversation.id}"
-    user_id = socket.assigns.current_scope.user.id
-    project_id = socket.assigns.project.id
+    user = socket.assigns.current_scope.user
+    project = socket.assigns.project
     client = build_model_client(socket.assigns.provider, socket.assigns.model)
 
-    memory_opts = %{
-      user_id: user_id,
-      project_id: project_id,
-      agent_id: socket.assigns.agent_id,
-      session_id: session_id
-    }
+    {orchestrator_memory, agent_memory_opts} =
+      build_memory_opts(socket, user, project, session_id)
 
-    user = socket.assigns.current_scope.user
+    ensure_orchestrator_session(user.id, project.id, socket.assigns.agent_id, session_id)
 
     tools =
-      ToolAssembler.assemble(user_id, project_id, client,
-        memory: memory_opts,
+      ToolAssembler.assemble(user.id, project.id, client,
+        memory: agent_memory_opts,
         provider: socket.assigns.provider,
-        disabled_builtins: user.disabled_builtins || []
+        disabled_builtins: user.disabled_builtins || [],
+        root_path: project.root_path
       )
+
+    # Refresh agents/prompt — assemble may have auto-created a default agent
+    agents = AgentStore.list(user.id, project.id)
+    system_prompt = ToolAssembler.orchestrator_prompt(user.id, project.id)
+    socket = assign(socket, agents: agents, system_prompt: system_prompt)
 
     case AgentEx.ToolAgent.start_link(tools: tools) do
       {:ok, tool_agent} ->
         input_messages = [
-          AgentEx.Message.system(socket.assigns.system_prompt),
+          AgentEx.Message.system(system_prompt),
           AgentEx.Message.user(message)
         ]
 
         EventLoop.run(run_id, tool_agent, client, input_messages, tools,
-          memory: memory_opts,
-          metadata: %{user_id: socket.assigns.current_scope.user.id}
+          memory: orchestrator_memory,
+          context_window: orchestrator_memory.context_window,
+          tool_timeout: 120_000,
+          reasoning_first: true,
+          metadata: %{user_id: user.id}
         )
 
         {:noreply,
@@ -403,14 +411,19 @@ defmodule AgentExWeb.ChatLive do
     socket = cancel_active_run(socket)
     stop_current_session(socket)
 
-    # Load messages from Postgres
+    # Load messages from Postgres (display-only for UI)
+    # Filter out session summaries and other internal system messages
     db_messages =
       Chat.list_messages(conversation.id)
+      |> Enum.reject(&internal_message?/1)
       |> Enum.map(fn msg ->
-        %{role: role_atom(msg.role), content: msg.content}
+        base = %{role: role_atom(msg.role), content: msg.content}
+        if msg.metadata, do: Map.put(base, :metadata, msg.metadata), else: base
       end)
 
-    # Hydrate Tier 1 working memory
+    # Start fresh Tier 1 session for orchestrator
+    # Orchestrator gets conversation-only memory (no Tier 2/3/4 injection)
+    # Cross-session context comes from .memory/ files and PostgreSQL summaries
     session_id = "conversation-#{conversation.id}"
     user = socket.assigns.current_scope.user
     project = socket.assigns.project
@@ -418,13 +431,13 @@ defmodule AgentExWeb.ChatLive do
 
     case Memory.start_session(user.id, project.id, agent_id, session_id) do
       {:ok, _} ->
-        hydrate_working_memory(user.id, project.id, agent_id, session_id, db_messages)
+        :ok
 
       {:error, {:already_started, _}} ->
         :ok
 
       {:error, reason} ->
-        Logger.warning("Failed to start memory session: #{inspect(reason)}")
+        Logger.warning("Failed to start orchestrator session: #{inspect(reason)}")
     end
 
     assign(socket,
@@ -452,26 +465,116 @@ defmodule AgentExWeb.ChatLive do
          %{current_scope: %{user: %{id: user_id}}} <- socket.assigns,
          %{project: %{id: project_id}} <- socket.assigns,
          %{agent_id: agent_id} <- socket.assigns do
-      Memory.stop_session(user_id, project_id, agent_id, "conversation-#{convo_id}")
+      session_id = "conversation-#{convo_id}"
+
+      # Auto-save orchestrator state before closing session
+      auto_save_orchestrator_state(socket, user_id, project_id, agent_id, session_id)
+
+      # Save session summary to PostgreSQL
+      save_orchestrator_session_summary(socket, user_id, project_id, agent_id, session_id)
+
+      Memory.stop_session(user_id, project_id, agent_id, session_id)
     else
       _ -> :ok
     end
   end
 
-  defp hydrate_working_memory(user_id, project_id, agent_id, session_id, messages) do
-    Enum.each(messages, fn msg ->
-      Memory.add_message(
-        user_id,
-        project_id,
-        agent_id,
-        session_id,
-        to_string(msg.role),
-        msg.content
-      )
-    end)
+  defp auto_save_orchestrator_state(socket, user_id, project_id, agent_id, session_id) do
+    messages = Memory.get_messages(user_id, project_id, agent_id, session_id)
+    root_path = socket.assigns[:project] && socket.assigns.project.root_path
+
+    if (messages != [] and root_path) && root_path != "" do
+      write_progress_file(root_path, messages)
+    end
   rescue
     e ->
-      Logger.warning("Failed to hydrate working memory: #{inspect(e)}")
+      Logger.warning("Failed to auto-save orchestrator state: #{inspect(e)}")
+      :ok
+  end
+
+  defp write_progress_file(root_path, messages) do
+    memory_dir = Path.join(root_path, ".memory")
+    progress_path = Path.join(memory_dir, "progress.md")
+    timestamp = DateTime.utc_now() |> DateTime.to_iso8601()
+    msg_count = length(messages)
+    summary = "---\nSession closed at #{timestamp} (#{msg_count} messages)\n"
+
+    case File.mkdir_p(memory_dir) do
+      :ok ->
+        case File.write(progress_path, summary, [:append]) do
+          :ok -> :ok
+          {:error, reason} -> Logger.warning("Failed to write progress file: #{inspect(reason)}")
+        end
+
+      {:error, reason} ->
+        Logger.warning("Failed to create .memory dir: #{inspect(reason)}")
+    end
+  end
+
+  defp save_orchestrator_session_summary(socket, user_id, project_id, agent_id, session_id) do
+    conversation = socket.assigns[:conversation]
+    messages = Memory.get_messages(user_id, project_id, agent_id, session_id)
+
+    if conversation && messages != [] do
+      summary = build_session_summary(messages)
+
+      Chat.create_message(%{
+        conversation_id: conversation.id,
+        role: "system",
+        content: summary,
+        metadata: %{"type" => "session_summary", "message_count" => length(messages)}
+      })
+    end
+  rescue
+    e ->
+      Logger.warning("Failed to save orchestrator session summary: #{inspect(e)}")
+      :ok
+  end
+
+  defp build_session_summary(messages) do
+    messages
+    |> Enum.take(-10)
+    |> Enum.map_join("\n", fn msg ->
+      content_text =
+        if is_binary(msg.content), do: String.slice(msg.content, 0, 200), else: ""
+
+      "#{msg.role}: #{content_text}"
+    end)
+  end
+
+  defp build_memory_opts(socket, user, project, session_id) do
+    context_window = AgentEx.ProviderHelpers.context_window_for(socket.assigns.model)
+
+    orchestrator = %{
+      user_id: user.id,
+      project_id: project.id,
+      agent_id: socket.assigns.agent_id,
+      session_id: session_id,
+      context_window: context_window,
+      orchestrator: true
+    }
+
+    agent = %{
+      user_id: user.id,
+      project_id: project.id,
+      agent_id: socket.assigns.agent_id,
+      session_id: session_id
+    }
+
+    {orchestrator, agent}
+  end
+
+  defp ensure_orchestrator_session(user_id, project_id, agent_id, session_id) do
+    case Memory.start_session(user_id, project_id, agent_id, session_id) do
+      {:ok, _} ->
+        :ok
+
+      {:error, {:already_started, _}} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("Failed to start orchestrator session: #{inspect(reason)}")
+    end
   end
 
   defp build_model_client(provider, model) do
@@ -505,7 +608,66 @@ defmodule AgentExWeb.ChatLive do
   defp role_atom("user"), do: :user
   defp role_atom("assistant"), do: :assistant
   defp role_atom("system"), do: :system
+  defp role_atom("orchestrator"), do: :assistant
+  defp role_atom("agent"), do: :assistant
   defp role_atom(_other), do: :user
+
+  defp build_run_metadata(events, stages) do
+    tool_calls = extract_tool_calls(events)
+    delegations = extract_delegations(tool_calls)
+
+    metadata = %{"type" => "run_result"}
+
+    metadata =
+      if tool_calls != [], do: Map.put(metadata, "tool_calls", tool_calls), else: metadata
+
+    metadata =
+      if delegations != [], do: Map.put(metadata, "delegations", delegations), else: metadata
+
+    metadata =
+      if stages != [], do: Map.put(metadata, "stages", format_stages(stages)), else: metadata
+
+    metadata
+  end
+
+  defp extract_tool_calls(events) do
+    events
+    |> Enum.filter(fn e -> e.type in [:tool_call, :tool_result] end)
+    |> Enum.group_by(fn e -> e.data[:call_id] end)
+    |> Enum.map(fn {_call_id, chunk} -> format_tool_call_chunk(chunk) end)
+  end
+
+  defp format_tool_call_chunk(chunk) do
+    call = Enum.find(chunk, &(&1.type == :tool_call))
+    result = Enum.find(chunk, &(&1.type == :tool_result))
+
+    entry = %{"call_id" => call && call.data[:call_id]}
+    entry = if call, do: Map.put(entry, "tool_name", call.data[:tool_name]), else: entry
+    if result, do: Map.put(entry, "result_preview", preview_result(result)), else: entry
+  end
+
+  defp preview_result(result) do
+    raw = result.data[:content] || result.data[:result]
+    if is_binary(raw), do: String.slice(raw, 0, 500), else: inspect(raw)
+  end
+
+  defp extract_delegations(tool_calls) do
+    tool_calls
+    |> Enum.filter(fn tc -> String.starts_with?(tc["tool_name"] || "", "delegate_to_") end)
+    |> Enum.map(fn tc ->
+      agent_name = String.replace_prefix(tc["tool_name"] || "", "delegate_to_", "")
+      %{"agent" => agent_name, "call_id" => tc["call_id"]}
+    end)
+  end
+
+  defp format_stages(stages) do
+    Enum.map(stages, fn s ->
+      %{"name" => s.name, "status" => to_string(s.status)}
+    end)
+  end
+
+  defp internal_message?(%{role: "system"}), do: true
+  defp internal_message?(_), do: false
 
   defp project_agent_id(user, project), do: "u#{user.id}_p#{project.id}_chat"
 
