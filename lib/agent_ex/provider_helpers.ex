@@ -6,40 +6,58 @@ defmodule AgentEx.ProviderHelpers do
 
   @models_by_provider %{
     "openai" => [
-      "gpt-4o",
-      "gpt-4o-mini",
       "gpt-5.4",
       "gpt-5.4-mini",
       "gpt-5.4-nano",
-      "gpt-5.4-pro",
-      "o3-mini"
+      "o3",
+      "o3-pro",
+      "o3-mini",
+      "o4-mini",
+      "gpt-4o",
+      "gpt-4o-mini"
     ],
     "anthropic" => [
+      "claude-opus-4-6",
+      "claude-sonnet-4-6",
       "claude-sonnet-4-5-20250514",
       "claude-haiku-4-5-20251001",
       "claude-opus-4-20250514"
     ],
-    "moonshot" => ["moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"]
+    "moonshot" => [
+      "kimi-k2.5",
+      "kimi-k2-thinking",
+      "kimi-k2-thinking-turbo",
+      "moonshot-v1-128k",
+      "moonshot-v1-32k",
+      "moonshot-v1-8k"
+    ]
   }
 
   # Context window sizes per model (in tokens)
   @context_windows %{
     # OpenAI
+    "gpt-5.4" => 1_050_000,
+    "gpt-5.4-mini" => 400_000,
+    "gpt-5.4-nano" => 400_000,
+    "o3" => 200_000,
+    "o3-pro" => 200_000,
+    "o3-mini" => 200_000,
+    "o4-mini" => 200_000,
     "gpt-4o" => 128_000,
     "gpt-4o-mini" => 128_000,
-    "gpt-5.4" => 256_000,
-    "gpt-5.4-mini" => 256_000,
-    "gpt-5.4-nano" => 128_000,
-    "gpt-5.4-pro" => 256_000,
-    "o3-mini" => 200_000,
     # Anthropic
+    "claude-opus-4-6" => 1_000_000,
+    "claude-sonnet-4-6" => 1_000_000,
     "claude-sonnet-4-5-20250514" => 200_000,
     "claude-haiku-4-5-20251001" => 200_000,
     "claude-opus-4-20250514" => 200_000,
     # Moonshot
-    "moonshot-v1-8k" => 8_000,
+    "kimi-k2.5" => 256_000,
+    "kimi-k2-thinking" => 256_000,
+    "kimi-k2-thinking-turbo" => 256_000,
+    "moonshot-v1-128k" => 128_000,
     "moonshot-v1-32k" => 32_000,
-    "moonshot-v1-128k" => 128_000
+    "moonshot-v1-8k" => 8_000
   }
 
   @default_context_window 32_000
@@ -93,8 +111,8 @@ defmodule AgentEx.ProviderHelpers do
 
   def format_context_window(tokens), do: "#{tokens}"
 
-  def default_model_for("openai"), do: "gpt-4o-mini"
-  def default_model_for("anthropic"), do: "claude-haiku-4-5-20251001"
-  def default_model_for("moonshot"), do: "moonshot-v1-8k"
-  def default_model_for(_), do: "gpt-4o-mini"
+  def default_model_for("openai"), do: "gpt-5.4-mini"
+  def default_model_for("anthropic"), do: "claude-sonnet-4-6"
+  def default_model_for("moonshot"), do: "kimi-k2.5"
+  def default_model_for(_), do: "gpt-5.4-mini"
 end
