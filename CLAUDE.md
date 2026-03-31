@@ -79,7 +79,7 @@ Companion to the Python learning project at `../agent/`.
 - `lib/agent_ex/plugin_registry.ex` — Plugin lifecycle manager (attach/detach/list)
 - `lib/agent_ex/plugins/file_system.ex` — Built-in sandboxed file operations plugin
 - `lib/agent_ex/plugins/shell_exec.ex` — Built-in sandboxed shell execution plugin
-- `lib/agent_ex/plugins/code_search.ex` — Built-in file finding + content search plugin (glob, grep, file_info)
+- `lib/agent_ex/plugins/code_search.ex` — Built-in file finding + content search plugin (find_files, grep, file_info)
 - `lib/agent_ex/plugins/text_editor.ex` — Built-in precise text editing plugin (read with lines, edit, insert, append)
 - `lib/agent_ex/plugins/web_fetch.ex` — Built-in HTTP fetch plugin with SSRF protection (fetch_url, fetch_json)
 - `lib/agent_ex/plugins/system_info.ex` — Built-in system introspection plugin (env_var, cwd, datetime, disk_usage)

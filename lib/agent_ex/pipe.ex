@@ -86,11 +86,23 @@ defmodule AgentEx.Pipe do
 
     memory_opts =
       case opts[:memory] do
-        %{user_id: uid, project_id: pid, agent_id: aid, session_id: sid} ->
-          %{user_id: uid, project_id: pid, agent_id: aid, session_id: sid}
+        %{user_id: uid, project_id: pid, agent_id: aid, session_id: sid} = mem ->
+          %{
+            user_id: uid,
+            project_id: pid,
+            agent_id: aid,
+            session_id: sid,
+            context_window: Map.get(mem, :context_window)
+          }
 
-        %{user_id: uid, project_id: pid, session_id: sid} ->
-          %{user_id: uid, project_id: pid, agent_id: agent.name, session_id: sid}
+        %{user_id: uid, project_id: pid, session_id: sid} = mem ->
+          %{
+            user_id: uid,
+            project_id: pid,
+            agent_id: agent.name,
+            session_id: sid,
+            context_window: Map.get(mem, :context_window)
+          }
 
         _ ->
           nil
@@ -219,7 +231,8 @@ defmodule AgentEx.Pipe do
   defp build_memory_report(_agent_name, opts) do
     case opts[:memory] do
       %{user_id: uid, project_id: pid, agent_id: aid, session_id: sid} ->
-        Memory.ContextBuilder.build_report(uid, pid, aid, sid, semantic_query: "")
+        semantic_query = opts[:semantic_query] || ""
+        Memory.ContextBuilder.build_report(uid, pid, aid, sid, semantic_query: semantic_query)
 
       _ ->
         ""

@@ -472,21 +472,10 @@ defmodule AgentExWeb.ChatLive do
 
   defp auto_save_orchestrator_state(socket, user_id, project_id, agent_id, session_id) do
     messages = Memory.get_messages(user_id, project_id, agent_id, session_id)
+    root_path = socket.assigns[:project] && socket.assigns.project.root_path
 
-    if messages != [] do
-      root_path = socket.assigns[:project] && socket.assigns.project.root_path
-
-      if root_path && root_path != "" do
-        memory_dir = Path.join(root_path, ".memory")
-        File.mkdir_p(memory_dir)
-        progress_path = Path.join(memory_dir, "progress.md")
-
-        timestamp = DateTime.utc_now() |> DateTime.to_iso8601()
-        msg_count = length(messages)
-        summary = "---\nSession closed at #{timestamp} (#{msg_count} messages)\n"
-
-        File.write(progress_path, summary, [:append])
-      end
+    if (messages != [] and root_path) && root_path != "" do
+      write_progress_file(root_path, messages)
     end
   rescue
     e ->
@@ -494,15 +483,31 @@ defmodule AgentExWeb.ChatLive do
       :ok
   end
 
+  defp write_progress_file(root_path, messages) do
+    memory_dir = Path.join(root_path, ".memory")
+    progress_path = Path.join(memory_dir, "progress.md")
+    timestamp = DateTime.utc_now() |> DateTime.to_iso8601()
+    msg_count = length(messages)
+    summary = "---\nSession closed at #{timestamp} (#{msg_count} messages)\n"
+
+    case File.mkdir_p(memory_dir) do
+      :ok ->
+        case File.write(progress_path, summary, [:append]) do
+          :ok -> :ok
+          {:error, reason} -> Logger.warning("Failed to write progress file: #{inspect(reason)}")
+        end
+
+      {:error, reason} ->
+        Logger.warning("Failed to create .memory dir: #{inspect(reason)}")
+    end
+  end
+
   defp save_orchestrator_session_summary(socket, user_id, project_id, agent_id, session_id) do
     conversation = socket.assigns[:conversation]
     messages = Memory.get_messages(user_id, project_id, agent_id, session_id)
 
     if conversation && messages != [] do
-      summary =
-        messages
-        |> Enum.take(-10)
-        |> Enum.map_join("\n", fn msg -> "#{msg.role}: #{String.slice(msg.content, 0, 200)}" end)
+      summary = build_session_summary(messages)
 
       Chat.create_message(%{
         conversation_id: conversation.id,
@@ -515,6 +520,17 @@ defmodule AgentExWeb.ChatLive do
     e ->
       Logger.warning("Failed to save orchestrator session summary: #{inspect(e)}")
       :ok
+  end
+
+  defp build_session_summary(messages) do
+    messages
+    |> Enum.take(-10)
+    |> Enum.map_join("\n", fn msg ->
+      content_text =
+        if is_binary(msg.content), do: String.slice(msg.content, 0, 200), else: ""
+
+      "#{msg.role}: #{content_text}"
+    end)
   end
 
   defp build_memory_opts(socket, user, project, session_id) do

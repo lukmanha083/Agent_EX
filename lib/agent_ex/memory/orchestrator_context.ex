@@ -200,9 +200,7 @@ defmodule AgentEx.Memory.OrchestratorContext do
   end
 
   defp identify_delegation_rounds(messages) do
-    messages
-    |> Enum.with_index()
-    |> Enum.reduce({[], nil, 0}, fn {msg, _idx}, {rounds, current_round, round_num} ->
+    Enum.reduce(messages, {[], nil, 0}, fn msg, {rounds, current_round, round_num} ->
       cond do
         # Detect delegation tool call
         delegation_call?(msg) ->

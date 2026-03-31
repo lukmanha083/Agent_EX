@@ -80,7 +80,7 @@ defmodule AgentEx.Plugins.TextEditor do
       function: fn args ->
         path = Map.fetch!(args, "path")
         offset = Map.get(args, "offset", 1) |> max(1)
-        limit = Map.get(args, "limit", max_read_lines) |> min(max_read_lines)
+        limit = Map.get(args, "limit", max_read_lines) |> min(max_read_lines) |> max(1)
 
         with {:ok, full_path} <- safe_path(root, path) do
           case File.read(full_path) do
@@ -145,13 +145,17 @@ defmodule AgentEx.Plugins.TextEditor do
         new_string = Map.fetch!(args, "new_string")
         replace_all = Map.get(args, "replace_all", false)
 
-        with {:ok, full_path} <- safe_path(root, path),
-             {:ok, content} <- read_file_for_edit(full_path, path),
-             {:ok, new_content, count} <-
-               do_replace(content, old_string, new_string, replace_all, path) do
-          case File.write(full_path, new_content) do
-            :ok -> {:ok, "Replaced #{count} occurrence(s) in #{path}"}
-            {:error, reason} -> {:error, "Cannot write #{path}: #{reason}"}
+        if old_string == "" do
+          {:error, "old_string cannot be empty"}
+        else
+          with {:ok, full_path} <- safe_path(root, path),
+               {:ok, content} <- read_file_for_edit(full_path, path),
+               {:ok, new_content, count} <-
+                 do_replace(content, old_string, new_string, replace_all, path) do
+            case File.write(full_path, new_content) do
+              :ok -> {:ok, "Replaced #{count} occurrence(s) in #{path}"}
+              {:error, reason} -> {:error, "Cannot write #{path}: #{reason}"}
+            end
           end
         end
       end

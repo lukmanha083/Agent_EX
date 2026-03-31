@@ -105,8 +105,8 @@ defmodule AgentEx.Memory.TokenBudget do
 
   def estimate_tokens(content) when is_list(content) do
     Enum.reduce(content, 0, fn
-      %{content: c} when is_binary(c) -> div(String.length(c), 4)
-      _ -> 0
+      %{content: c}, acc when is_binary(c) -> acc + div(String.length(c), 4)
+      _, acc -> acc
     end)
   end
 

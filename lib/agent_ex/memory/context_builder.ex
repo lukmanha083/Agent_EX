@@ -78,16 +78,18 @@ defmodule AgentEx.Memory.ContextBuilder do
     tasks = [
       Task.async(fn -> gather_persistent(scope) end),
       Task.async(fn -> gather_knowledge_graph(scope, semantic_query) end),
+      Task.async(fn -> gather_semantic(scope, semantic_query) end),
       Task.async(fn -> gather_procedural(scope) end),
       Task.async(fn -> summarize_session(scope, session_id) end)
     ]
 
-    [persistent, kg, procedural, session_summary] = Task.await_many(tasks, 15_000)
+    [persistent, kg, semantic, procedural, session_summary] = Task.await_many(tasks, 15_000)
 
     sections =
       [
         format_report_section("Key Facts", persistent, 300),
         format_report_section("Known Entities", kg, 400),
+        format_report_section("Semantic Memory", semantic, 400),
         format_report_section("Learned Skills", procedural, 300),
         format_report_section("Session Activity", session_summary, 200)
       ]

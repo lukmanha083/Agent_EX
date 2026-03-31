@@ -26,10 +26,10 @@ defmodule AgentEx.Plugins.WebFetchTest do
       assert tool.kind == :read
     end
 
-    test "fetch_json is :read kind" do
+    test "fetch_json is :write kind (allows mutating methods)" do
       {:ok, tools} = WebFetch.init(%{})
       tool = Enum.find(tools, &(&1.name == "fetch_json"))
-      assert tool.kind == :read
+      assert tool.kind == :write
     end
   end
 
@@ -55,6 +55,30 @@ defmodule AgentEx.Plugins.WebFetchTest do
 
       assert {:error, _msg} =
                AgentEx.Tool.execute(fetch, %{"url" => "http://192.168.1.1/admin"})
+    end
+  end
+
+  describe "SSRF redirect protection" do
+    test "redirect validation blocks loopback — initial request to loopback is also blocked" do
+      {:ok, tools} = WebFetch.init(%{})
+      fetch = Enum.find(tools, &(&1.name == "fetch_url"))
+
+      # Even without redirect, loopback is blocked at the initial validate step
+      assert {:error, msg} =
+               AgentEx.Tool.execute(fetch, %{"url" => "http://127.0.0.1:9999/redirect"})
+
+      assert msg =~ "loopback" or msg =~ "private" or msg =~ "blocked"
+    end
+
+    test "redirect validation blocks link-local metadata endpoints" do
+      {:ok, tools} = WebFetch.init(%{})
+      fetch = Enum.find(tools, &(&1.name == "fetch_url"))
+
+      # Cloud metadata endpoint (169.254.169.254) is blocked
+      assert {:error, msg} =
+               AgentEx.Tool.execute(fetch, %{"url" => "http://169.254.169.254/latest/meta-data/"})
+
+      assert msg =~ "link-local" or msg =~ "private" or msg =~ "blocked"
     end
   end
 

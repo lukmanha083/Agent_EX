@@ -64,8 +64,9 @@ defmodule AgentEx.Plugins.WebFetch do
           },
           "method" => %{
             "type" => "string",
-            "enum" => ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"],
-            "description" => "HTTP method (default: GET)"
+            "enum" => ["GET", "HEAD"],
+            "description" =>
+              "HTTP method (default: GET). Only safe methods allowed for read tool."
           },
           "headers" => %{
             "type" => "object",
@@ -86,7 +87,8 @@ defmodule AgentEx.Plugins.WebFetch do
 
         with {:ok, method} <- validate_method(Map.get(args, "method", "GET")),
              :ok <- validate_url(url, allowed_domains),
-             {:ok, response} <- do_request(method, url, headers, body, timeout, max_body_size) do
+             {:ok, response} <-
+               do_request(method, url, headers, body, timeout, max_body_size, allowed_domains) do
           result = %{
             "status" => response.status,
             "body" => truncate_body(response.body, max_body_size),
@@ -128,7 +130,7 @@ defmodule AgentEx.Plugins.WebFetch do
         },
         "required" => ["url"]
       },
-      kind: :read,
+      kind: :write,
       function: fn args ->
         url = Map.fetch!(args, "url")
         headers = Map.get(args, "headers", %{}) |> Map.put("accept", "application/json")
@@ -136,7 +138,8 @@ defmodule AgentEx.Plugins.WebFetch do
 
         with {:ok, method} <- validate_method(Map.get(args, "method", "GET")),
              :ok <- validate_url(url, allowed_domains),
-             {:ok, response} <- do_request(method, url, headers, body, timeout, max_body_size) do
+             {:ok, response} <-
+               do_request(method, url, headers, body, timeout, max_body_size, allowed_domains) do
           case Jason.decode(response.body) do
             {:ok, json} ->
               {:ok, Jason.encode!(%{"status" => response.status, "data" => json}, pretty: true)}
@@ -197,7 +200,7 @@ defmodule AgentEx.Plugins.WebFetch do
     end
   end
 
-  defp do_request(method, url, headers, body, timeout, _max_body_size) do
+  defp do_request(method, url, headers, body, timeout, max_body_size, allowed_domains) do
     header_list = Enum.map(headers, fn {k, v} -> {to_string(k), to_string(v)} end)
 
     req_opts = [
@@ -207,7 +210,9 @@ defmodule AgentEx.Plugins.WebFetch do
       receive_timeout: timeout,
       connect_options: [timeout: timeout],
       redirect: false,
-      retry: false
+      retry: false,
+      max_body_size: max_body_size,
+      allowed_domains: allowed_domains
     ]
 
     req_opts = if body, do: Keyword.put(req_opts, :body, body), else: req_opts
@@ -242,12 +247,13 @@ defmodule AgentEx.Plugins.WebFetch do
 
       location ->
         redirect_url = resolve_redirect_url(Keyword.fetch!(req_opts, :url), location)
+        allowed_domains = Keyword.get(req_opts, :allowed_domains)
 
-        case AgentEx.NetworkPolicy.validate(redirect_url) do
-          :ok ->
-            new_opts = Keyword.put(req_opts, :url, redirect_url)
-            do_request_with_redirects(new_opts, remaining - 1)
-
+        with :ok <- AgentEx.NetworkPolicy.validate(redirect_url),
+             :ok <- validate_domain(redirect_url, allowed_domains) do
+          new_opts = Keyword.put(req_opts, :url, redirect_url)
+          do_request_with_redirects(new_opts, remaining - 1)
+        else
           {:error, reason} ->
             {:error, "Redirect to #{redirect_url} blocked: #{reason}"}
         end

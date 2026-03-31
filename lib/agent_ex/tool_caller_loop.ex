@@ -86,14 +86,22 @@ defmodule AgentEx.ToolCallerLoop do
     # context_window can come from opts directly (orchestrator) or from memory_opts (agent)
     context_window = Keyword.get(opts, :context_window) || get_context_window(memory_opts)
 
+    # Thread resolved context_window into memory_opts so injection sees it
+    memory_opts =
+      if memory_opts && context_window do
+        Map.put_new(memory_opts, :context_window, context_window)
+      else
+        memory_opts
+      end
+
     tools_map = Map.new(tools, fn %Tool{name: name} = tool -> {name, tool} end)
 
-    # Store incoming task messages BEFORE injecting context (avoids re-storing history)
-    # For specialist agents, these are orchestrator delegation tasks, not human messages
-    maybe_store_input_messages(input_messages, memory_opts)
-
-    # Inject agent-scoped context (Tier 2/3/KG system msgs + Tier 1 conversation)
+    # Inject agent-scoped context BEFORE storing, so stored messages don't
+    # duplicate when inject_orchestrator_history reads them back
     input_messages = maybe_inject_memory_context(input_messages, memory_opts)
+
+    # Store incoming task messages AFTER injecting context
+    maybe_store_input_messages(input_messages, memory_opts)
 
     context = %{
       tool_agent: tool_agent,
@@ -247,7 +255,14 @@ defmodule AgentEx.ToolCallerLoop do
         content: "[Context compressed] Previous conversation summary:\n#{summary}"
       }
 
-      {input_messages ++ [summary_message], recent}
+      # Remove any prior compressed summaries before appending the new one
+      clean_input =
+        Enum.reject(input_messages, fn msg ->
+          msg.role == :system and is_binary(msg.content) and
+            String.starts_with?(msg.content, "[Context compressed]")
+        end)
+
+      {clean_input ++ [summary_message], recent}
     end
   end
 

@@ -7,7 +7,7 @@ defmodule AgentEx.Plugins.SystemInfo do
 
   ## Config
 
-  - `"allowed_env_vars"` — list of env var names the agent can read (optional, allows all if omitted)
+  - `"allowed_env_vars"` — list of env var names the agent can read (deny-all if omitted)
   - `"working_dir"` — working directory to report (optional, default: cwd)
   """
 
@@ -170,15 +170,15 @@ defmodule AgentEx.Plugins.SystemInfo do
 
   defp disk_usage_via_df(path) do
     if File.exists?(path) do
-      df_args =
+      {df_args, block_size} =
         case :os.type() do
-          {:unix, :darwin} -> ["-k", path]
-          {:unix, _} -> ["-B1", path]
-          _ -> [path]
+          {:unix, :darwin} -> {["-k", path], 1024}
+          {:unix, _} -> {["-B1", path], 1}
+          _ -> {[path], 1}
         end
 
       case System.cmd("df", df_args, stderr_to_stdout: true) do
-        {output, 0} -> parse_df_output(output, path)
+        {output, 0} -> parse_df_output(output, path, block_size)
         {error, _} -> {:error, "df command failed: #{error}"}
       end
     else
@@ -186,14 +186,14 @@ defmodule AgentEx.Plugins.SystemInfo do
     end
   end
 
-  defp parse_df_output(output, path) do
+  defp parse_df_output(output, path, block_size) do
     with [_header, data | _] <- String.split(output, "\n", trim: true),
          [_fs, total, used, free, pct | _] <- String.split(data, ~r/\s+/) do
       info = %{
         "mount" => path,
-        "total" => format_bytes(parse_int(total)),
-        "used" => format_bytes(parse_int(used)),
-        "free" => format_bytes(parse_int(free)),
+        "total" => format_bytes(parse_int(total) * block_size),
+        "used" => format_bytes(parse_int(used) * block_size),
+        "free" => format_bytes(parse_int(free) * block_size),
         "percent_used" => String.replace(pct, "%", "") |> parse_int()
       }
 

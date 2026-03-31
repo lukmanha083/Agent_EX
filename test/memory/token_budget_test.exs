@@ -84,6 +84,37 @@ defmodule AgentEx.Memory.TokenBudgetTest do
     test "handles empty list" do
       assert TokenBudget.estimate_messages_tokens([]) == 0
     end
+
+    test "handles Message structs with binary content" do
+      messages = [
+        %AgentEx.Message{role: :user, content: String.duplicate("a", 100)},
+        %AgentEx.Message{role: :assistant, content: String.duplicate("b", 200)}
+      ]
+
+      # 100/4 + 4 overhead + 200/4 + 4 overhead = 25 + 4 + 50 + 4 = 83
+      assert TokenBudget.estimate_messages_tokens(messages) == 83
+    end
+
+    test "handles Message structs with list content (tool results)" do
+      messages = [
+        %AgentEx.Message{
+          role: :tool,
+          content: [
+            %{content: String.duplicate("a", 100)},
+            %{content: String.duplicate("b", 200)}
+          ]
+        }
+      ]
+
+      # list content: 100/4 + 200/4 = 25 + 50 = 75 + 4 overhead = 79
+      assert TokenBudget.estimate_messages_tokens(messages) == 79
+    end
+
+    test "handles Message structs with nil content" do
+      messages = [%AgentEx.Message{role: :assistant, content: nil}]
+      # nil content = 0 tokens + 4 overhead = 4
+      assert TokenBudget.estimate_messages_tokens(messages) == 4
+    end
   end
 
   describe "needs_compression?/2" do

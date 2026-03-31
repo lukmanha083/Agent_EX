@@ -238,7 +238,9 @@ defmodule AgentEx.Plugins.CodeSearch do
   defp valid_within_root?(path, root) do
     expanded = Path.expand(path)
     root_prefix = String.trim_trailing(root, "/") <> "/"
-    expanded == root or String.starts_with?(expanded, root_prefix)
+
+    (expanded == root or String.starts_with?(expanded, root_prefix)) and
+      not contains_symlink?(expanded, root)
   end
 
   defp safe_path(root, relative) do
@@ -246,11 +248,29 @@ defmodule AgentEx.Plugins.CodeSearch do
     expanded = Path.expand(joined)
     root_prefix = String.trim_trailing(root, "/") <> "/"
 
-    if expanded == root or String.starts_with?(expanded, root_prefix) do
-      {:ok, expanded}
-    else
-      {:error, "path traversal attempt: #{relative}"}
+    cond do
+      not (expanded == root or String.starts_with?(expanded, root_prefix)) ->
+        {:error, "path traversal attempt: #{relative}"}
+
+      contains_symlink?(expanded, root) ->
+        {:error, "symlinks not allowed in sandbox: #{relative}"}
+
+      true ->
+        {:ok, expanded}
     end
+  end
+
+  defp contains_symlink?(path, root) do
+    relative = Path.relative_to(path, root)
+
+    Path.split(relative)
+    |> Enum.scan(root, fn part, acc -> Path.join(acc, part) end)
+    |> Enum.any?(fn component ->
+      case File.lstat(component) do
+        {:ok, %File.Stat{type: :symlink}} -> true
+        _ -> false
+      end
+    end)
   end
 
   defp format_mode(mode) do
