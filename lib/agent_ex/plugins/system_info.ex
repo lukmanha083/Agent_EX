@@ -3,7 +3,8 @@ defmodule AgentEx.Plugins.SystemInfo do
   Built-in plugin for system introspection tools.
 
   Provides safe, read-only access to system information: environment
-  variables, working directory, current datetime, and disk usage.
+  variables, working directory, current datetime, disk usage, and
+  hardware specifications (CPU, RAM, OS, architecture).
 
   ## Config
 
@@ -38,7 +39,8 @@ defmodule AgentEx.Plugins.SystemInfo do
       env_var_tool(allowed_env_vars),
       cwd_tool(working_dir),
       datetime_tool(),
-      disk_usage_tool()
+      disk_usage_tool(),
+      system_specs_tool()
     ]
 
     {:ok, tools}
@@ -155,6 +157,36 @@ defmodule AgentEx.Plugins.SystemInfo do
     )
   end
 
+  defp system_specs_tool do
+    Tool.new(
+      name: "specs",
+      description:
+        "Get system hardware and OS specifications: CPU model, core count, " <>
+          "total/free RAM, OS name and version, architecture, and hostname.",
+      parameters: %{
+        "type" => "object",
+        "properties" => %{},
+        "required" => []
+      },
+      kind: :read,
+      function: fn _args ->
+        specs = %{
+          "os" => os_info(),
+          "architecture" => to_string(:erlang.system_info(:system_architecture)),
+          "cpu_cores" => System.schedulers_online(),
+          "cpu_model" => cpu_model(),
+          "ram_total" => ram_total(),
+          "ram_free" => ram_free(),
+          "hostname" => hostname(),
+          "erlang_version" => to_string(:erlang.system_info(:otp_release)),
+          "elixir_version" => System.version()
+        }
+
+        {:ok, Jason.encode!(specs, pretty: true)}
+      end
+    )
+  end
+
   # --- Helpers ---
 
   defp check_env_allowed(_name, nil),
@@ -223,4 +255,136 @@ defmodule AgentEx.Plugins.SystemInfo do
   end
 
   defp format_bytes(bytes), do: "#{bytes} B"
+
+  # --- System specs helpers (cross-platform) ---
+
+  defp os_info do
+    case :os.type() do
+      {:unix, :darwin} -> "macOS #{os_version_cmd("sw_vers", ["-productVersion"])}"
+      {:unix, :linux} -> "Linux #{os_version_cmd("uname", ["-r"])}"
+      {:win32, _} -> "Windows #{os_version_cmd("cmd", ["/c", "ver"])}"
+      {family, name} -> "#{family}/#{name}"
+    end
+  end
+
+  defp os_version_cmd(cmd, args) do
+    case System.cmd(cmd, args, stderr_to_stdout: true) do
+      {output, 0} -> String.trim(output)
+      _ -> "unknown"
+    end
+  rescue
+    _ -> "unknown"
+  end
+
+  defp cpu_model do
+    case :os.type() do
+      {:unix, :linux} -> read_proc_field("/proc/cpuinfo", "model name")
+      {:unix, :darwin} -> sysctl_value("machdep.cpu.brand_string")
+      _ -> "unknown"
+    end
+  end
+
+  defp ram_total do
+    case :os.type() do
+      {:unix, :linux} ->
+        case read_proc_field("/proc/meminfo", "MemTotal") do
+          "unknown" -> "unknown"
+          value -> parse_meminfo_kb(value)
+        end
+
+      {:unix, :darwin} ->
+        case sysctl_value("hw.memsize") do
+          "unknown" -> "unknown"
+          bytes -> format_bytes(parse_int(bytes))
+        end
+
+      _ ->
+        format_bytes(:erlang.memory(:total))
+    end
+  end
+
+  defp ram_free do
+    case :os.type() do
+      {:unix, :linux} ->
+        case read_proc_field("/proc/meminfo", "MemAvailable") do
+          "unknown" -> "unknown"
+          value -> parse_meminfo_kb(value)
+        end
+
+      {:unix, :darwin} ->
+        # Free pages * page size
+        case System.cmd("vm_stat", [], stderr_to_stdout: true) do
+          {output, 0} -> parse_vm_stat_free(output)
+          _ -> "unknown"
+        end
+
+      _ ->
+        "unknown"
+    end
+  end
+
+  defp hostname do
+    case :inet.gethostname() do
+      {:ok, name} -> to_string(name)
+      _ -> "unknown"
+    end
+  end
+
+  defp read_proc_field(path, field_name) do
+    case File.read(path) do
+      {:ok, content} ->
+        content
+        |> String.split("\n")
+        |> Enum.find_value("unknown", &extract_field(&1, field_name))
+
+      _ ->
+        "unknown"
+    end
+  end
+
+  defp extract_field(line, field_name) do
+    case String.split(line, ":", parts: 2) do
+      [key, value] -> if String.trim(key) == field_name, do: String.trim(value)
+      _ -> nil
+    end
+  end
+
+  defp sysctl_value(key) do
+    case System.cmd("sysctl", ["-n", key], stderr_to_stdout: true) do
+      {output, 0} -> String.trim(output)
+      _ -> "unknown"
+    end
+  rescue
+    _ -> "unknown"
+  end
+
+  defp parse_meminfo_kb(value) do
+    # MemTotal: 16384000 kB
+    case Integer.parse(String.trim(value)) do
+      {kb, _} -> format_bytes(kb * 1024)
+      :error -> value
+    end
+  end
+
+  defp parse_vm_stat_free(output) do
+    pages =
+      output
+      |> String.split("\n")
+      |> Enum.find_value(0, fn line ->
+        if String.contains?(line, "Pages free") do
+          line |> String.replace(~r/[^\d]/, "") |> parse_int()
+        end
+      end)
+
+    # macOS page size is typically 16384 on Apple Silicon, 4096 on Intel
+    page_size =
+      case System.cmd("pagesize", [], stderr_to_stdout: true) do
+        {ps, 0} -> parse_int(String.trim(ps))
+        _ -> 4096
+      end
+
+    format_bytes(pages * page_size)
+  rescue
+    _ -> "unknown"
+  end
 end

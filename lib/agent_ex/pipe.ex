@@ -222,15 +222,16 @@ defmodule AgentEx.Pipe do
       },
       function: fn %{"task" => task} ->
         result = through(task, agent, model_client, opts)
-        report = build_memory_report(name, opts)
+        report = build_memory_report(name, Keyword.put(opts, :semantic_query, task))
         {:ok, result <> report}
       end
     )
   end
 
-  defp build_memory_report(_agent_name, opts) do
+  defp build_memory_report(agent_name, opts) do
     case opts[:memory] do
-      %{user_id: uid, project_id: pid, agent_id: aid, session_id: sid} ->
+      %{user_id: uid, project_id: pid, session_id: sid} = mem ->
+        aid = Map.get(mem, :agent_id) || agent_name
         semantic_query = opts[:semantic_query] || ""
         Memory.ContextBuilder.build_report(uid, pid, aid, sid, semantic_query: semantic_query)
 

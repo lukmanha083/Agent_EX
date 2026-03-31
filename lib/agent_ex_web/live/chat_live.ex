@@ -336,16 +336,22 @@ defmodule AgentExWeb.ChatLive do
         root_path: project.root_path
       )
 
+    # Refresh agents/prompt — assemble may have auto-created a default agent
+    agents = AgentStore.list(user.id, project.id)
+    system_prompt = ToolAssembler.orchestrator_prompt(user.id, project.id)
+    socket = assign(socket, agents: agents, system_prompt: system_prompt)
+
     case AgentEx.ToolAgent.start_link(tools: tools) do
       {:ok, tool_agent} ->
         input_messages = [
-          AgentEx.Message.system(socket.assigns.system_prompt),
+          AgentEx.Message.system(system_prompt),
           AgentEx.Message.user(message)
         ]
 
         EventLoop.run(run_id, tool_agent, client, input_messages, tools,
           memory: orchestrator_memory,
           context_window: orchestrator_memory.context_window,
+          tool_timeout: 120_000,
           metadata: %{user_id: user.id}
         )
 
@@ -405,8 +411,10 @@ defmodule AgentExWeb.ChatLive do
     stop_current_session(socket)
 
     # Load messages from Postgres (display-only for UI)
+    # Filter out session summaries and other internal system messages
     db_messages =
       Chat.list_messages(conversation.id)
+      |> Enum.reject(&internal_message?/1)
       |> Enum.map(fn msg ->
         base = %{role: role_atom(msg.role), content: msg.content}
         if msg.metadata, do: Map.put(base, :metadata, msg.metadata), else: base
@@ -656,6 +664,9 @@ defmodule AgentExWeb.ChatLive do
       %{"name" => s.name, "status" => to_string(s.status)}
     end)
   end
+
+  defp internal_message?(%{role: "system"}), do: true
+  defp internal_message?(_), do: false
 
   defp project_agent_id(user, project), do: "u#{user.id}_p#{project.id}_chat"
 

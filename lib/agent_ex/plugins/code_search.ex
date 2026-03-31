@@ -35,21 +35,27 @@ defmodule AgentEx.Plugins.CodeSearch do
 
   @impl true
   def init(config) do
-    root = Map.fetch!(config, "root_path") |> Path.expand()
-    max_results = Map.get(config, "max_results", @default_max_results)
-    max_file_size = Map.get(config, "max_file_size", @default_max_file_size)
+    case Map.get(config, "root_path") do
+      nil ->
+        {:error, {:missing_root_path}}
 
-    unless File.dir?(root) do
-      raise ArgumentError, "root_path #{root} is not a directory"
+      raw_root ->
+        root = Path.expand(raw_root)
+
+        if File.dir?(root) do
+          max_results = Map.get(config, "max_results", @default_max_results)
+          max_file_size = Map.get(config, "max_file_size", @default_max_file_size)
+
+          {:ok,
+           [
+             find_files_tool(root, max_results),
+             grep_tool(root, max_results, max_file_size),
+             file_info_tool(root)
+           ]}
+        else
+          {:error, {:invalid_root_path, root}}
+        end
     end
-
-    tools = [
-      find_files_tool(root, max_results),
-      grep_tool(root, max_results, max_file_size),
-      file_info_tool(root)
-    ]
-
-    {:ok, tools}
   end
 
   defp find_files_tool(root, max_results) do
@@ -77,12 +83,8 @@ defmodule AgentEx.Plugins.CodeSearch do
         pattern = Map.fetch!(args, "pattern")
         include_hidden = Map.get(args, "include_hidden", false)
 
-        full_pattern = Path.join(root, pattern)
-        match_opts = if include_hidden, do: [match_dot: true], else: []
-
         results =
-          Path.wildcard(full_pattern, match_opts)
-          |> Enum.filter(&valid_within_root?(&1, root))
+          safe_glob(root, pattern, include_hidden)
           |> Enum.take(max_results)
           |> Enum.map(&Path.relative_to(&1, root))
 
@@ -133,13 +135,9 @@ defmodule AgentEx.Plugins.CodeSearch do
 
         case Regex.compile(search_pattern, regex_opts) do
           {:ok, regex} ->
-            full_glob = Path.join(root, file_pattern)
-
             results =
-              Path.wildcard(full_glob)
-              |> Enum.filter(
-                &(valid_within_root?(&1, root) and regular_file_under_size?(&1, max_file_size))
-              )
+              safe_glob(root, file_pattern, false)
+              |> Enum.filter(&regular_file_under_size?(&1, max_file_size))
               |> Enum.flat_map(&search_file(&1, regex, root, context_lines))
               |> Enum.take(max_results)
 
@@ -193,6 +191,34 @@ defmodule AgentEx.Plugins.CodeSearch do
     )
   end
 
+  # --- Safe glob: checks symlinks during traversal, not after ---
+
+  defp safe_glob(root, pattern, include_hidden) do
+    full_pattern = Path.join(root, pattern)
+    match_opts = if include_hidden, do: [match_dot: true], else: []
+
+    Path.wildcard(full_pattern, match_opts)
+    |> Enum.filter(fn path ->
+      expanded = Path.expand(path)
+      within_root?(expanded, root) and not symlink_in_path?(expanded, root)
+    end)
+  end
+
+  defp within_root?(expanded, root) do
+    root_prefix = String.trim_trailing(root, "/") <> "/"
+    expanded == root or String.starts_with?(expanded, root_prefix)
+  end
+
+  defp symlink_in_path?(path, root) do
+    relative = Path.relative_to(path, root)
+
+    Path.split(relative)
+    |> Enum.scan(root, fn part, acc -> Path.join(acc, part) end)
+    |> Enum.any?(fn component ->
+      match?({:ok, %File.Stat{type: :symlink}}, File.lstat(component))
+    end)
+  end
+
   # --- Helpers ---
 
   defp search_file(file_path, regex, root, context_lines) do
@@ -235,42 +261,20 @@ defmodule AgentEx.Plugins.CodeSearch do
     end
   end
 
-  defp valid_within_root?(path, root) do
-    expanded = Path.expand(path)
-    root_prefix = String.trim_trailing(root, "/") <> "/"
-
-    (expanded == root or String.starts_with?(expanded, root_prefix)) and
-      not contains_symlink?(expanded, root)
-  end
-
   defp safe_path(root, relative) do
     joined = Path.join(root, relative)
     expanded = Path.expand(joined)
-    root_prefix = String.trim_trailing(root, "/") <> "/"
 
     cond do
-      not (expanded == root or String.starts_with?(expanded, root_prefix)) ->
+      not within_root?(expanded, root) ->
         {:error, "path traversal attempt: #{relative}"}
 
-      contains_symlink?(expanded, root) ->
+      symlink_in_path?(expanded, root) ->
         {:error, "symlinks not allowed in sandbox: #{relative}"}
 
       true ->
         {:ok, expanded}
     end
-  end
-
-  defp contains_symlink?(path, root) do
-    relative = Path.relative_to(path, root)
-
-    Path.split(relative)
-    |> Enum.scan(root, fn part, acc -> Path.join(acc, part) end)
-    |> Enum.any?(fn component ->
-      case File.lstat(component) do
-        {:ok, %File.Stat{type: :symlink}} -> true
-        _ -> false
-      end
-    end)
   end
 
   defp format_mode(mode) do

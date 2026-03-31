@@ -49,6 +49,9 @@ defmodule AgentEx.ToolAssembler do
     # Full tool pool — specialist agents get assigned from this via tool_ids
     available = available_tools(user_id, project_id, root_path)
 
+    # Auto-create default agent if project has none
+    ensure_default_agent(user_id, project_id, available, provider: provider)
+
     # Orchestrator gets :read plugin tools only — it can observe but not act
     read_tools = Enum.filter(available, &AgentEx.Tool.read?/1)
 
@@ -178,7 +181,27 @@ defmodule AgentEx.ToolAssembler do
     agents = AgentStore.list(user_id, project_id)
 
     if agents == [] do
-      "You are a helpful AI assistant."
+      """
+      You are a helpful AI assistant with read-only access to the project files.
+
+      ## Important limitation
+      This project has no specialist agents configured yet. You can:
+      - Search and read files in the codebase
+      - Answer questions about the code
+      - Fetch web content for research
+      - Save planning notes to .memory/
+
+      You CANNOT modify files, run commands, or execute code because those actions
+      require specialist agents that the user hasn't created yet.
+
+      If the user asks you to perform a task that requires modifying files, running code,
+      or any write operation, explain that they need to create at least one specialist agent
+      first. Direct them to the **Agents** page in the sidebar to set up agents with the
+      appropriate tools (e.g. text editor, shell, filesystem).
+
+      Be helpful with what you CAN do — read code, explain architecture, plan tasks,
+      and prepare notes so that once agents are set up, work can begin immediately.
+      """
     else
       agent_descriptions =
         Enum.map_join(agents, "\n", fn a ->
@@ -190,7 +213,7 @@ defmodule AgentEx.ToolAssembler do
       You are an AI orchestrator. You plan, delegate, and synthesize — you do not act directly.
 
       ## Session startup
-      1. Check `.memory/` for previous plans and progress (use search.find_files or editor.read)
+      1. Check `.memory/` for previous plans and progress (use search_find_files or editor_read)
       2. If files exist, read plan.md and progress.md to understand where you left off
       3. If no files exist, this is a fresh project — start planning from scratch
 
@@ -217,11 +240,23 @@ defmodule AgentEx.ToolAssembler do
       - **Parallel**: Independent subtasks — call multiple delegates in one turn
       - **Iterative**: Review result, refine task, delegate again
 
+      ## When to delegate vs answer directly:
+      - **Answer directly** for questions, explanations, writing code snippets, giving advice,
+        or anything that does NOT require modifying files, running commands, or accessing the filesystem
+      - **Delegate** ONLY when the task requires tool actions: creating/editing files on disk,
+        running shell commands, searching the codebase, or system operations
+      - Example: "write a python program" → answer with code directly (no delegation needed)
+      - Example: "create a file prime_counter.py with..." → delegate to agent (needs filesystem write)
+      - Example: "find all TODO comments in the codebase" → delegate (needs search tools)
+
       ## Rules:
       - You CANNOT modify files, run commands, or execute code directly
       - You CAN read files, search the codebase, and fetch web content for planning
       - You CAN save notes to .memory/*.md files
-      - All modifications happen through specialist agents
+      - All file modifications happen through specialist agents
+      - ONLY delegate tasks that require tool usage — answer everything else directly
+      - If a delegation fails or times out, report the error to the user instead of retrying endlessly
+      - Give each delegation a clear, focused task — do NOT combine multiple unrelated operations
       """
     end
   end
@@ -314,6 +349,54 @@ defmodule AgentEx.ToolAssembler do
     case parts do
       [] -> "specialist agent"
       _ -> Enum.join(parts, ". ")
+    end
+  end
+
+  @doc """
+  Auto-create a default agent if the project has no agents.
+  The default agent gets access to all available builtin plugin tools.
+  """
+  def ensure_default_agent(user_id, project_id, available_tools, opts \\ []) do
+    case AgentStore.list(user_id, project_id) do
+      [] ->
+        provider = Keyword.get(opts, :provider, "anthropic")
+        tool_ids = Enum.map(available_tools, & &1.name)
+
+        config =
+          AgentConfig.new(%{
+            user_id: user_id,
+            project_id: project_id,
+            name: "computer_use",
+            description:
+              "General-purpose computer use agent that can read/write files, " <>
+                "search code, run shell commands, fetch web content, and inspect system state",
+            role: "computer use agent",
+            personality: "methodical and thorough",
+            goal:
+              "Execute tasks by using the right tools: search before editing, " <>
+                "read before writing, verify after changing",
+            constraints: [
+              "Always read a file before editing it",
+              "Verify changes after writing files",
+              "Use search tools to find files before assuming paths",
+              "Explain what you're doing before executing destructive commands"
+            ],
+            tool_guidance:
+              "You have full access to the project filesystem, shell, and system tools. " <>
+                "Use search_find_files and search_grep to locate code. " <>
+                "Use editor_read before editor_edit. " <>
+                "Use shell_run_command for builds, tests, and git operations. " <>
+                "Use system_specs to check hardware and OS information.",
+            provider: provider,
+            model: AgentEx.ProviderHelpers.default_model_for(provider),
+            tool_ids: tool_ids
+          })
+
+        AgentStore.save(config)
+        Logger.info("ToolAssembler: created default agent '#{config.name}' for project #{project_id}")
+
+      _agents ->
+        :ok
     end
   end
 end

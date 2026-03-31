@@ -276,7 +276,7 @@ defmodule AgentExWeb.UserLive.Settings do
             Ecto.Changeset.get_field(changeset, :provider) || socket.assigns.selected_provider
 
           model =
-            Ecto.Changeset.get_field(changeset, :model) || socket.assigns.selected_model
+            resolve_model_for_error(changeset, provider, socket.assigns)
 
           {:noreply,
            assign(socket,
@@ -358,6 +358,16 @@ defmodule AgentExWeb.UserLive.Settings do
        socket
        |> put_flash(:error, "Session expired. Please re-authenticate.")
        |> push_navigate(to: ~p"/users/log-in")}
+    end
+  end
+
+  # Avoid cross-provider model leakage on validation errors:
+  # only keep the previous model if the provider hasn't changed.
+  defp resolve_model_for_error(changeset, effective_provider, assigns) do
+    case Ecto.Changeset.get_field(changeset, :model) do
+      nil when effective_provider == assigns.selected_provider -> assigns.selected_model
+      nil -> default_model_for(effective_provider)
+      model -> model
     end
   end
 end

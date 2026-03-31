@@ -64,10 +64,13 @@ defmodule AgentEx.Plugins.CodeSearchTest do
       assert "file_info" in names
     end
 
-    test "raises on invalid root_path" do
-      assert_raise ArgumentError, fn ->
-        CodeSearch.init(%{"root_path" => "/nonexistent/path/surely"})
-      end
+    test "returns error on invalid root_path" do
+      assert {:error, {:invalid_root_path, _}} =
+               CodeSearch.init(%{"root_path" => "/nonexistent/path/surely"})
+    end
+
+    test "returns error on missing root_path" do
+      assert {:error, {:missing_root_path}} = CodeSearch.init(%{})
     end
   end
 

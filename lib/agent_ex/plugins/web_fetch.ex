@@ -71,10 +71,6 @@ defmodule AgentEx.Plugins.WebFetch do
           "headers" => %{
             "type" => "object",
             "description" => "Additional HTTP headers as key-value pairs"
-          },
-          "body" => %{
-            "type" => "string",
-            "description" => "Request body (for POST/PUT/PATCH)"
           }
         },
         "required" => ["url"]
@@ -83,12 +79,11 @@ defmodule AgentEx.Plugins.WebFetch do
       function: fn args ->
         url = Map.fetch!(args, "url")
         headers = Map.get(args, "headers", %{})
-        body = Map.get(args, "body")
 
         with {:ok, method} <- validate_method(Map.get(args, "method", "GET")),
              :ok <- validate_url(url, allowed_domains),
              {:ok, response} <-
-               do_request(method, url, headers, body, timeout, max_body_size, allowed_domains) do
+               do_request(method, url, headers, nil, timeout, max_body_size, allowed_domains) do
           result = %{
             "status" => response.status,
             "body" => truncate_body(response.body, max_body_size),
@@ -203,6 +198,9 @@ defmodule AgentEx.Plugins.WebFetch do
   defp do_request(method, url, headers, body, timeout, max_body_size, allowed_domains) do
     header_list = Enum.map(headers, fn {k, v} -> {to_string(k), to_string(v)} end)
 
+    # Stream response body and halt once max_body_size is reached
+    collector = into_collector(max_body_size)
+
     req_opts = [
       method: method,
       url: url,
@@ -211,13 +209,35 @@ defmodule AgentEx.Plugins.WebFetch do
       connect_options: [timeout: timeout],
       redirect: false,
       retry: false,
-      max_body_size: max_body_size,
+      into: collector,
       allowed_domains: allowed_domains
     ]
 
     req_opts = if body, do: Keyword.put(req_opts, :body, body), else: req_opts
 
-    do_request_with_redirects(req_opts, @max_redirects)
+    case do_request_with_redirects(req_opts, @max_redirects) do
+      {:ok, %{body: body} = response} when is_list(body) ->
+        {:ok, %{response | body: IO.iodata_to_binary(body)}}
+
+      other ->
+        other
+    end
+  end
+
+  defp into_collector(max_body_size) do
+    fn {:data, chunk}, {req, resp} ->
+      acc = resp.body || []
+      acc_size = IO.iodata_length(acc)
+
+      if acc_size + byte_size(chunk) > max_body_size do
+        # Take only what fits and halt
+        remaining = max_body_size - acc_size
+        trimmed = binary_part(chunk, 0, min(remaining, byte_size(chunk)))
+        {:halt, {req, %{resp | body: [acc | [trimmed]]}}}
+      else
+        {:cont, {req, %{resp | body: [acc | [chunk]]}}}
+      end
+    end
   end
 
   defp do_request_with_redirects(_req_opts, remaining) when remaining < 0 do

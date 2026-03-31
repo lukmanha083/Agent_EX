@@ -91,13 +91,14 @@ defmodule AgentEx.ProviderTools do
     list(provider)
     |> Enum.reject(fn spec -> MapSet.member?(disabled, spec.name) end)
     |> Enum.map(fn spec ->
-      Tool.builtin(spec.name, type: spec.type, description: spec.description, kind: spec.kind)
+      Tool.builtin(spec.name, type: spec.type, description: spec.description)
     end)
   end
 
   @doc """
   Build `%Tool{}` structs for read-only builtins (for orchestrator use).
   Only includes tools classified as `:read` kind.
+  Filtering by read/write happens at the spec level; the Tool keeps `kind: :builtin`.
   """
   @spec read_only_tools(String.t(), [String.t()]) :: [Tool.t()]
   def read_only_tools(provider, disabled_builtins \\ []) do
@@ -107,7 +108,7 @@ defmodule AgentEx.ProviderTools do
     |> Enum.reject(fn spec -> MapSet.member?(disabled, spec.name) end)
     |> Enum.filter(fn spec -> spec.kind == :read end)
     |> Enum.map(fn spec ->
-      Tool.builtin(spec.name, type: spec.type, description: spec.description, kind: spec.kind)
+      Tool.builtin(spec.name, type: spec.type, description: spec.description)
     end)
   end
 

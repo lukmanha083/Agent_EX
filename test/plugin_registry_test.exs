@@ -137,13 +137,13 @@ defmodule AgentEx.PluginRegistryTest do
 
       tools = Workbench.list_tools(wb)
       assert length(tools) == 1
-      assert hd(tools).name == "simple.say_hello"
+      assert hd(tools).name == "simple_say_hello"
     end
 
     test "plugin tools are callable", %{reg: reg, wb: wb} do
       :ok = PluginRegistry.attach(reg, SimplePlugin, %{"greeting" => "Hi"})
 
-      result = Workbench.call_tool(wb, "simple.say_hello", %{"name" => "World"})
+      result = Workbench.call_tool(wb, "simple_say_hello", %{"name" => "World"})
       assert result.content == "Hi, World!"
       assert result.is_error == false
     end
@@ -218,7 +218,7 @@ defmodule AgentEx.PluginRegistryTest do
       assert {:ok, %PluginInfo{} = info} = PluginRegistry.get_plugin(reg, "simple")
       assert info.name == "simple"
       assert info.version == "1.0.0"
-      assert info.tool_names == ["simple.say_hello"]
+      assert info.tool_names == ["simple_say_hello"]
       assert info.module == SimplePlugin
     end
 

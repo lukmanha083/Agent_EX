@@ -127,5 +127,10 @@ defmodule AgentEx.Memory.TokenBudgetTest do
       budgets = TokenBudget.calculate(32_000)
       refute TokenBudget.needs_compression?(budgets.compression_threshold - 1, budgets)
     end
+
+    test "returns true at exact threshold (>= boundary)" do
+      budgets = TokenBudget.calculate(32_000)
+      assert TokenBudget.needs_compression?(budgets.compression_threshold, budgets)
+    end
   end
 end

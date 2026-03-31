@@ -31,8 +31,8 @@ defmodule AgentExWeb.Features.AgentBuilderTest do
       session
       |> resize_window(1280, 900)
       |> visit("/agents")
-      |> assert_has(css("[data-testid='agents-empty']"))
-      |> click(button("Create your first agent"))
+      |> assert_has(css("[data-testid='agent-grid']"))
+      |> click(css("[data-testid='new-agent-btn']"))
       |> assert_has(css("[data-testid='agent-editor']"))
       |> fill_in(css("input[name='name']"), with: "Security Auditor")
       |> fill_in(css("input[name='role']"), with: "Senior security analyst")
@@ -45,7 +45,7 @@ defmodule AgentExWeb.Features.AgentBuilderTest do
         session
         |> resize_window(1280, 900)
         |> visit("/agents")
-        |> click(button("Create your first agent"))
+        |> click(css("[data-testid='new-agent-btn']"))
         |> assert_has(css("[data-testid='agent-editor']"))
         |> fill_in(css("input[name='name']"), with: "Guarded Agent")
 

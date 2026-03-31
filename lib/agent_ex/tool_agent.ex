@@ -33,8 +33,8 @@ defmodule AgentEx.ToolAgent do
 
   Maps to AutoGen's: `caller.send_message(call, recipient=tool_agent_id)`
   """
-  def execute(agent, %FunctionCall{} = call) do
-    GenServer.call(agent, {:execute, call})
+  def execute(agent, %FunctionCall{} = call, timeout \\ :infinity) do
+    GenServer.call(agent, {:execute, call}, timeout)
   end
 
   @doc "List all registered tools."
