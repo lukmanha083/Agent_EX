@@ -352,6 +352,7 @@ defmodule AgentExWeb.ChatLive do
           memory: orchestrator_memory,
           context_window: orchestrator_memory.context_window,
           tool_timeout: 120_000,
+          reasoning_first: true,
           metadata: %{user_id: user.id}
         )
 

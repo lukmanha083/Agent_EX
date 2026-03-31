@@ -118,14 +118,39 @@ defmodule AgentEx.ToolCallerLoop do
       context_window: context_window
     }
 
+    reasoning_first = Keyword.get(opts, :reasoning_first, false)
+
     Logger.debug("ToolCallerLoop: starting THINK phase (initial)")
 
-    case think(context, input_messages) do
-      {:ok, response} ->
-        loop(context, [response], 0)
+    # When reasoning_first is enabled, the first LLM call has no tools.
+    # This forces the model to produce a text reasoning/plan. Then a second
+    # call WITH tools lets it decide: answer directly (text) or delegate (tool call).
+    if reasoning_first do
+      run_with_reasoning(context, input_messages)
+    else
+      case think(context, input_messages) do
+        {:ok, response} -> loop(context, [response], 0)
+        {:error, reason} -> {:error, reason}
+      end
+    end
+  end
 
-      {:error, reason} ->
-        {:error, reason}
+  # -- Reasoning-first: think without tools, then decide with tools --
+
+  defp run_with_reasoning(context, input_messages) do
+    Logger.debug("ToolCallerLoop: REASON phase — thinking without tools")
+
+    with {:ok, reasoning} <- think_without_tools(context, input_messages) do
+      # Feed the reasoning back as conversation context and call with tools.
+      # The model can now either: (a) refine its text answer, or (b) call tools.
+      messages_with_reasoning = input_messages ++ [reasoning]
+
+      Logger.debug("ToolCallerLoop: DECIDE phase — re-querying with tools available")
+
+      case think(context, messages_with_reasoning) do
+        {:ok, decision} -> loop(context, [reasoning, decision], 0)
+        {:error, reason} -> {:error, reason}
+      end
     end
   end
 
@@ -287,6 +312,15 @@ defmodule AgentEx.ToolCallerLoop do
 
   defp think(%{model_client: client, tools: tools}, messages) do
     ModelClient.create(client, messages, tools: tools)
+  end
+
+  # First call without tools — forces the LLM to reason with text
+  defp think_without_tools(%{model_fn: fun}, messages) when is_function(fun, 2) do
+    fun.(messages, [])
+  end
+
+  defp think_without_tools(%{model_client: client}, messages) do
+    ModelClient.create(client, messages, tools: [])
   end
 
   # -- Memory integration helpers --
