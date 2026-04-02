@@ -32,7 +32,12 @@ defmodule AgentExWeb.Features.ProjectManagementTest do
   describe "project switching and isolation" do
     test "switching projects isolates conversations", %{session: session, user: user} do
       {:ok, project_b} =
-        Projects.create_project(%{user_id: user.id, name: "Project B"})
+        Projects.create_project(%{
+          user_id: user.id,
+          name: "Project B",
+          provider: "anthropic",
+          model: "claude-sonnet-4-6"
+        })
 
       {:ok, _convo} =
         Chat.create_conversation(%{
@@ -68,7 +73,12 @@ defmodule AgentExWeb.Features.ProjectManagementTest do
   describe "project deletion" do
     test "delete project shows success flash", %{session: session, user: user} do
       {:ok, project} =
-        Projects.create_project(%{user_id: user.id, name: "Temp Project"})
+        Projects.create_project(%{
+          user_id: user.id,
+          name: "Temp Project",
+          provider: "anthropic",
+          model: "claude-sonnet-4-6"
+        })
 
       session =
         session

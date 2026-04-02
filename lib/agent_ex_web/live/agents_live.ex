@@ -28,7 +28,7 @@ defmodule AgentExWeb.AgentsLive do
       available = ToolAssembler.available_tools(user.id, project.id, project.root_path)
 
       ToolAssembler.ensure_default_agent(user.id, project.id, available,
-        provider: user.provider || "anthropic"
+        provider: project.provider || "anthropic"
       )
 
       agents = AgentStore.list(user.id, project.id)

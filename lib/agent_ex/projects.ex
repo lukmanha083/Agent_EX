@@ -9,6 +9,14 @@ defmodule AgentEx.Projects do
   require Logger
 
   def create_project(attrs) do
+    with {:ok, project} <- %Project{} |> Project.creation_changeset(attrs) |> Repo.insert() do
+      ensure_root_path_dir(project)
+      {:ok, project}
+    end
+  end
+
+  @doc "Create project with legacy changeset (for default project backwards compat)."
+  def create_project_legacy(attrs) do
     with {:ok, project} <- %Project{} |> Project.changeset(attrs) |> Repo.insert() do
       ensure_root_path_dir(project)
       {:ok, project}
@@ -29,7 +37,7 @@ defmodule AgentEx.Projects do
   end
 
   def update_project(%Project{} = project, attrs) do
-    with {:ok, updated} <- project |> Project.changeset(attrs) |> Repo.update() do
+    with {:ok, updated} <- project |> Project.update_changeset(attrs) |> Repo.update() do
       ensure_root_path_dir(updated)
       {:ok, updated}
     end
@@ -59,7 +67,13 @@ defmodule AgentEx.Projects do
   end
 
   defp create_default_project(user_id) do
-    case create_project(%{user_id: user_id, name: "Default", is_default: true}) do
+    case create_project_legacy(%{
+           user_id: user_id,
+           name: "Default",
+           is_default: true,
+           provider: "anthropic",
+           model: AgentEx.ProviderHelpers.default_model_for("anthropic")
+         }) do
       {:ok, project} ->
         {:ok, project}
 

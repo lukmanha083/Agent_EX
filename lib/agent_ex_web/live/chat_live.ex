@@ -25,9 +25,9 @@ defmodule AgentExWeb.ChatLive do
     else
       agents = AgentStore.list(user.id, project.id)
 
-      # Orchestrator always uses the user's profile provider/model setting
-      provider = user.provider || "anthropic"
-      model = user.model || default_model_for(provider)
+      # Orchestrator uses the project's provider/model setting
+      provider = project.provider || "anthropic"
+      model = project.model || default_model_for(provider)
       system_prompt = ToolAssembler.orchestrator_prompt(user.id, project.id)
       conversations = Chat.list_conversations(user.id, project.id)
 
@@ -332,7 +332,7 @@ defmodule AgentExWeb.ChatLive do
       ToolAssembler.assemble(user.id, project.id, client,
         memory: agent_memory_opts,
         provider: socket.assigns.provider,
-        disabled_builtins: user.disabled_builtins || [],
+        disabled_builtins: project.disabled_builtins || [],
         root_path: project.root_path
       )
 

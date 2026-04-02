@@ -77,10 +77,19 @@ defmodule AgentEx.Accounts do
   def register_user(attrs) do
     alias AgentEx.Projects.Project
 
+    default_provider = "anthropic"
+    default_model = AgentEx.ProviderHelpers.default_model_for(default_provider)
+
     Ecto.Multi.new()
     |> Ecto.Multi.insert(:user, User.registration_changeset(%User{}, attrs))
     |> Ecto.Multi.insert(:default_project, fn %{user: user} ->
-      Project.changeset(%Project{}, %{user_id: user.id, name: "Default", is_default: true})
+      Project.changeset(%Project{}, %{
+        user_id: user.id,
+        name: "Default",
+        is_default: true,
+        provider: default_provider,
+        model: default_model
+      })
     end)
     |> Repo.transaction()
     |> case do
@@ -137,30 +146,6 @@ defmodule AgentEx.Accounts do
   def update_user_timezone(%User{} = user, attrs) do
     user
     |> User.timezone_changeset(attrs)
-    |> Repo.update()
-  end
-
-  @doc """
-  Returns a changeset for changing the user's LLM provider and model.
-  """
-  def change_user_provider(%User{} = user, attrs \\ %{}, opts \\ []) do
-    User.provider_changeset(user, attrs, opts)
-  end
-
-  @doc """
-  Updates the user's LLM provider and model.
-  """
-  def update_user_provider(%User{} = user, attrs) do
-    user
-    |> User.provider_changeset(attrs)
-    |> Repo.update()
-  end
-
-  @doc "Update just the user's disabled_builtins list."
-  def update_user_disabled_builtins(%User{} = user, disabled_builtins)
-      when is_list(disabled_builtins) do
-    user
-    |> Ecto.Changeset.change(disabled_builtins: disabled_builtins)
     |> Repo.update()
   end
 

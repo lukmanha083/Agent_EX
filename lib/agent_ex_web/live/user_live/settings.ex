@@ -3,8 +3,7 @@ defmodule AgentExWeb.UserLive.Settings do
 
   on_mount({AgentExWeb.UserAuth, :require_sudo_mode})
 
-  alias AgentEx.{Accounts, ProviderTools}
-  import AgentExWeb.ProviderHelpers
+  alias AgentEx.Accounts
 
   @impl true
   def render(assigns) do
@@ -32,77 +31,6 @@ defmodule AgentExWeb.UserLive.Settings do
                 Update timezone
               </.button>
             </.form>
-          </.card_content>
-        </.card>
-
-        <%!-- LLM Provider section --%>
-        <.card>
-          <.card_header>
-            <.card_title>LLM Provider</.card_title>
-            <.card_description>Choose your default model for chat conversations.</.card_description>
-          </.card_header>
-          <.card_content>
-            <.form for={@provider_form} id="provider_form" phx-submit="update_provider" phx-change="validate_provider" class="space-y-4">
-              <.input
-                field={@provider_form[:provider]}
-                type="select"
-                label="Provider"
-                options={provider_options()}
-              />
-              <.input
-                field={@provider_form[:model]}
-                type="select"
-                label="Model"
-                options={Enum.map(models_for_provider(@selected_provider), fn m -> {m, m} end)}
-              />
-              <div class="flex items-center gap-2 rounded-md bg-gray-800/50 border border-gray-700 px-3 py-2">
-                <span class="text-xs text-gray-400">Context window:</span>
-                <span class="text-xs font-mono text-white">{format_context_window(context_window_for(@selected_model))}</span>
-                <span class="text-xs text-gray-500">tokens</span>
-              </div>
-              <p class="text-xs text-muted-foreground">API key configuration coming in a future update. Keys are currently read from server environment.</p>
-              <.button phx-disable-with="Saving..." class="bg-indigo-600 hover:bg-indigo-500 text-white">
-                Update provider
-              </.button>
-            </.form>
-          </.card_content>
-        </.card>
-
-        <%!-- Provider Built-in Tools section --%>
-        <.card :if={ProviderTools.has_builtins?(@selected_provider)}>
-          <.card_header>
-            <.card_title>Provider Tools</.card_title>
-            <.card_description>
-              Built-in tools provided by {@selected_provider}. These are available to the chat orchestrator.
-            </.card_description>
-          </.card_header>
-          <.card_content>
-            <div class="space-y-2">
-              <div
-                :for={spec <- ProviderTools.list(@selected_provider)}
-                class="flex items-center justify-between rounded-md border border-gray-800 bg-gray-800/50 px-3 py-2"
-              >
-                <div>
-                  <span class="text-sm font-medium text-white">{spec.name}</span>
-                  <p class="text-xs text-gray-400">{spec.description}</p>
-                </div>
-                <button
-                  type="button"
-                  phx-click={if spec.name in @disabled_builtins, do: "enable_builtin", else: "disable_builtin"}
-                  phx-value-name={spec.name}
-                  class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-                  style={if spec.name in @disabled_builtins, do: "background-color: rgb(55, 65, 81)", else: "background-color: rgb(79, 70, 229)"}
-                  role="switch"
-                  aria-checked={to_string(spec.name not in @disabled_builtins)}
-                  aria-label={"Toggle #{spec.name}"}
-                >
-                  <span
-                    class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition-transform"
-                    style={if spec.name in @disabled_builtins, do: "transform: translateX(0)", else: "transform: translateX(1rem)"}
-                  />
-                </button>
-              </div>
-            </div>
           </.card_content>
         </.card>
 
@@ -169,7 +97,6 @@ defmodule AgentExWeb.UserLive.Settings do
   def mount(_params, _session, socket) do
     user = socket.assigns.current_scope.user
     timezone_changeset = Accounts.change_user_timezone(user, %{})
-    provider_changeset = Accounts.change_user_provider(user, %{})
     password_changeset = Accounts.change_user_password(user, %{}, hash_password: false)
 
     socket =
@@ -177,10 +104,6 @@ defmodule AgentExWeb.UserLive.Settings do
       |> assign(:current_email, user.email)
       |> assign(:timezone_form, to_form(timezone_changeset))
       |> assign(:timezone_options, AgentEx.Timezone.select_options())
-      |> assign(:provider_form, to_form(provider_changeset))
-      |> assign(:selected_provider, user.provider || "openai")
-      |> assign(:selected_model, user.model || default_model_for(user.provider || "openai"))
-      |> assign(:disabled_builtins, user.disabled_builtins || [])
       |> assign(:password_form, to_form(password_changeset))
       |> assign(:trigger_submit, false)
 
@@ -223,112 +146,6 @@ defmodule AgentExWeb.UserLive.Settings do
     end
   end
 
-  def handle_event("validate_provider", params, socket) do
-    %{"user" => user_params} = params
-    new_provider = user_params["provider"] || socket.assigns.selected_provider
-
-    user_params =
-      if new_provider != socket.assigns.selected_provider do
-        Map.put(user_params, "model", default_model_for(new_provider))
-      else
-        user_params
-      end
-
-    provider_form =
-      socket.assigns.current_scope.user
-      |> Accounts.change_user_provider(user_params)
-      |> Map.put(:action, :validate)
-      |> to_form()
-
-    new_model = user_params["model"] || default_model_for(new_provider)
-
-    {:noreply,
-     assign(socket,
-       provider_form: provider_form,
-       selected_provider: new_provider,
-       selected_model: new_model
-     )}
-  end
-
-  def handle_event("update_provider", params, socket) do
-    %{"user" => user_params} = params
-    user = socket.assigns.current_scope.user
-
-    if Accounts.sudo_mode?(user) do
-      # Reset disabled_builtins when provider changes (old names may not apply)
-      new_provider = user_params["provider"]
-      provider_changed? = new_provider && new_provider != user.provider
-
-      user_params =
-        if provider_changed?,
-          do: Map.put(user_params, "disabled_builtins", []),
-          else: user_params
-
-      case Accounts.update_user_provider(user, user_params) do
-        {:ok, _user} ->
-          {:noreply,
-           socket
-           |> put_flash(:info, "Provider updated successfully.")
-           |> push_navigate(to: ~p"/users/settings")}
-
-        {:error, changeset} ->
-          provider =
-            Ecto.Changeset.get_field(changeset, :provider) || socket.assigns.selected_provider
-
-          model =
-            resolve_model_for_error(changeset, provider, socket.assigns)
-
-          {:noreply,
-           assign(socket,
-             provider_form: to_form(changeset, action: :insert),
-             selected_provider: provider,
-             selected_model: model
-           )}
-      end
-    else
-      {:noreply,
-       socket
-       |> put_flash(:error, "Session expired. Please re-authenticate.")
-       |> push_navigate(to: ~p"/users/log-in")}
-    end
-  end
-
-  def handle_event("disable_builtin", %{"name" => name}, socket) do
-    user = socket.assigns.current_scope.user
-
-    if Accounts.sudo_mode?(user) do
-      disabled = Enum.uniq([name | socket.assigns.disabled_builtins])
-
-      case Accounts.update_user_disabled_builtins(user, disabled) do
-        {:ok, _} -> {:noreply, assign(socket, disabled_builtins: disabled)}
-        {:error, _} -> {:noreply, put_flash(socket, :error, "Failed to update")}
-      end
-    else
-      {:noreply,
-       socket
-       |> put_flash(:error, "Session expired. Please re-authenticate.")
-       |> push_navigate(to: ~p"/users/log-in")}
-    end
-  end
-
-  def handle_event("enable_builtin", %{"name" => name}, socket) do
-    user = socket.assigns.current_scope.user
-
-    if Accounts.sudo_mode?(user) do
-      disabled = Enum.reject(socket.assigns.disabled_builtins, &(&1 == name))
-
-      case Accounts.update_user_disabled_builtins(user, disabled) do
-        {:ok, _} -> {:noreply, assign(socket, disabled_builtins: disabled)}
-        {:error, _} -> {:noreply, put_flash(socket, :error, "Failed to update")}
-      end
-    else
-      {:noreply,
-       socket
-       |> put_flash(:error, "Session expired. Please re-authenticate.")
-       |> push_navigate(to: ~p"/users/log-in")}
-    end
-  end
-
   def handle_event("validate_password", params, socket) do
     %{"user" => user_params} = params
 
@@ -358,16 +175,6 @@ defmodule AgentExWeb.UserLive.Settings do
        socket
        |> put_flash(:error, "Session expired. Please re-authenticate.")
        |> push_navigate(to: ~p"/users/log-in")}
-    end
-  end
-
-  # Avoid cross-provider model leakage on validation errors:
-  # only keep the previous model if the provider hasn't changed.
-  defp resolve_model_for_error(changeset, effective_provider, assigns) do
-    case Ecto.Changeset.get_field(changeset, :model) do
-      nil when effective_provider == assigns.selected_provider -> assigns.selected_model
-      nil -> default_model_for(effective_provider)
-      model -> model
     end
   end
 end

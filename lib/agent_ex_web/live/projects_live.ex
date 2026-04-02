@@ -5,27 +5,48 @@ defmodule AgentExWeb.ProjectsLive do
 
   import AgentExWeb.ProjectComponents
 
+  import AgentExWeb.ProviderHelpers,
+    only: [
+      default_model_for: 1,
+      provider_options: 0,
+      models_for_provider: 1,
+      context_window_for: 1,
+      format_context_window: 1
+    ]
+
   @impl true
   def mount(_params, _session, socket) do
     user = socket.assigns.current_scope.user
     projects = Projects.list_projects(user.id)
+    default_provider = "anthropic"
+    default_model = default_model_for(default_provider)
 
     {:ok,
      assign(socket,
        projects: projects,
        editing: nil,
        show_editor: false,
-       form: empty_form()
+       form: empty_form(default_provider, default_model),
+       selected_provider: default_provider,
+       provider_options: provider_options(),
+       model_options: model_select_options(default_provider),
+       context_window_display: format_context_window(context_window_for(default_model))
      )}
   end
 
   @impl true
   def handle_event("new_project", _params, socket) do
+    default_provider = "anthropic"
+    default_model = default_model_for(default_provider)
+
     {:noreply,
      assign(socket,
        editing: nil,
        show_editor: true,
-       form: empty_form()
+       form: empty_form(default_provider, default_model),
+       selected_provider: default_provider,
+       model_options: model_select_options(default_provider),
+       context_window_display: format_context_window(context_window_for(default_model))
      )}
   end
 
@@ -50,6 +71,29 @@ defmodule AgentExWeb.ProjectsLive do
     {:noreply, assign(socket, show_editor: false, editing: nil)}
   end
 
+  def handle_event("validate_project", params, socket) do
+    new_provider = params["provider"] || socket.assigns.selected_provider
+    provider_changed? = new_provider != socket.assigns.selected_provider
+    current_model = resolve_current_model(params, socket.assigns, provider_changed?, new_provider)
+    form = merge_project_form(socket.assigns.form, params, new_provider, current_model)
+
+    socket =
+      if provider_changed? do
+        assign(socket,
+          selected_provider: new_provider,
+          model_options: model_select_options(new_provider)
+        )
+      else
+        socket
+      end
+
+    {:noreply,
+     assign(socket,
+       form: form,
+       context_window_display: format_context_window(context_window_for(current_model))
+     )}
+  end
+
   def handle_event("save_project", params, socket) do
     user = socket.assigns.current_scope.user
 
@@ -57,7 +101,15 @@ defmodule AgentExWeb.ProjectsLive do
       if socket.assigns.editing do
         Projects.update_project(socket.assigns.editing, form_to_attrs(params))
       else
-        Projects.create_project(Map.put(form_to_attrs(params), :user_id, user.id))
+        Projects.create_project(
+          form_to_attrs(params)
+          |> Map.put(:user_id, user.id)
+          |> Map.put(:provider, params["provider"] || "anthropic")
+          |> Map.put(
+            :model,
+            params["model"] || default_model_for(params["provider"] || "anthropic")
+          )
+        )
       end
 
     case result do
@@ -103,8 +155,34 @@ defmodule AgentExWeb.ProjectsLive do
     end
   end
 
-  defp empty_form do
-    %{"name" => "", "description" => "", "root_path" => ""}
+  defp resolve_current_model(_params, _assigns, true, new_provider),
+    do: default_model_for(new_provider)
+
+  defp resolve_current_model(params, assigns, false, _provider),
+    do: params["model"] || assigns.form["model"] || ""
+
+  defp merge_project_form(form, params, provider, model) do
+    Map.merge(form, %{
+      "name" => params["name"] || form["name"],
+      "description" => params["description"] || form["description"],
+      "root_path" => params["root_path"] || form["root_path"],
+      "provider" => provider,
+      "model" => model
+    })
+  end
+
+  defp empty_form(provider, model) do
+    %{
+      "name" => "",
+      "description" => "",
+      "root_path" => "",
+      "provider" => provider,
+      "model" => model
+    }
+  end
+
+  defp model_select_options(provider) do
+    Enum.map(models_for_provider(provider), fn m -> {m, m} end)
   end
 
   defp project_to_form(project) do

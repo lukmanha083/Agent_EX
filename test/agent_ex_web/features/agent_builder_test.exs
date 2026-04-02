@@ -11,7 +11,13 @@ defmodule AgentExWeb.Features.AgentBuilderTest do
     user = user_fixture()
 
     {:ok, project} =
-      Projects.create_project(%{user_id: user.id, name: "Test Project", root_path: "/tmp/test"})
+      Projects.create_project(%{
+        user_id: user.id,
+        name: "Test Project",
+        root_path: "/tmp/test",
+        provider: "anthropic",
+        model: "claude-sonnet-4-6"
+      })
 
     session = feature_log_in_user(session, user)
 

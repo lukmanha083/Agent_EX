@@ -79,7 +79,13 @@ defmodule AgentExWeb.ProjectComponents do
 
       <p :if={@project.description && String.trim(@project.description) != ""} class="text-xs text-gray-400 mb-3 line-clamp-2">{@project.description}</p>
 
-      <div class="mt-auto flex items-center gap-2">
+      <div class="mt-auto flex items-center gap-2 flex-wrap">
+        <.badge :if={@project.provider} variant="outline" class="text-[10px] text-indigo-400 border-indigo-500/30">
+          {@project.provider}
+        </.badge>
+        <.badge :if={@project.model} variant="secondary" class="text-[10px]">
+          {@project.model}
+        </.badge>
         <.badge :if={@project.is_default} variant="secondary" class="text-[10px]">
           default
         </.badge>
@@ -92,6 +98,9 @@ defmodule AgentExWeb.ProjectComponents do
   attr(:project, :map, default: nil)
   attr(:form, :map, required: true)
   attr(:show, :boolean, default: false)
+  attr(:provider_options, :list, default: [])
+  attr(:model_options, :list, default: [])
+  attr(:context_window_display, :string, default: nil)
 
   def project_editor_dialog(assigns) do
     ~H"""
@@ -107,13 +116,37 @@ defmodule AgentExWeb.ProjectComponents do
           </p>
         </div>
 
-        <.form for={@form} phx-submit="save_project" class="space-y-4">
+        <.form for={@form} phx-submit="save_project" phx-change="validate_project" class="space-y-4">
           <.input type="text" name="name" value={@form["name"]} label="Name" placeholder="e.g. Stock Research" required />
           <.input type="text" name="description" value={@form["description"]} label="Description" placeholder="What this project is for" />
           <.input type="text" name="root_path" value={@form["root_path"]} label="Sandbox Root Path" placeholder="e.g. ~/projects/trading" />
           <p class="text-[10px] text-gray-500 -mt-2">
             Agents in this project will be confined to this directory.
           </p>
+
+          <%!-- Provider/Model: editable on create, read-only on edit --%>
+          <%= if @project do %>
+            <fieldset class="border-t border-gray-800 pt-4">
+              <legend class="text-xs font-medium text-gray-500 uppercase tracking-wider">Model (locked)</legend>
+              <div class="mt-2 rounded-md bg-gray-800/50 border border-gray-700 px-3 py-2">
+                <span class="text-sm text-white">{@project.provider} / {@project.model}</span>
+              </div>
+              <p class="text-[10px] text-gray-500 mt-1">Provider and model cannot be changed after project creation.</p>
+            </fieldset>
+          <% else %>
+            <fieldset class="border-t border-gray-800 pt-4">
+              <legend class="text-xs font-medium text-gray-500 uppercase tracking-wider">LLM Provider</legend>
+              <div class="grid grid-cols-2 gap-3 mt-3">
+                <.input type="select" name="provider" value={@form["provider"]} label="Provider" options={@provider_options} />
+                <.input type="select" name="model" value={@form["model"]} label="Model" options={@model_options} />
+              </div>
+              <div :if={@context_window_display} class="flex items-center gap-2 rounded-md bg-gray-800/50 border border-gray-700 px-3 py-2 mt-3">
+                <span class="text-xs text-gray-400">Context window:</span>
+                <span class="text-xs font-mono text-white">{@context_window_display}</span>
+                <span class="text-xs text-gray-500">tokens</span>
+              </div>
+            </fieldset>
+          <% end %>
 
           <div class="flex justify-end gap-2 pt-2">
             <.button type="button" variant="outline" phx-click="close_editor" class="border-gray-700 text-gray-300 hover:bg-gray-800">

@@ -11,7 +11,12 @@ defmodule AgentExWeb.Features.ToolsMcpTest do
     user = user_fixture()
 
     {:ok, project} =
-      Projects.create_project(%{user_id: user.id, name: "Tools Project"})
+      Projects.create_project(%{
+        user_id: user.id,
+        name: "Tools Project",
+        provider: "anthropic",
+        model: "claude-sonnet-4-6"
+      })
 
     session = feature_log_in_user(session, user)
 
