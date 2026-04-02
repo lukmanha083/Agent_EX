@@ -19,7 +19,7 @@ defmodule AgentEx.Vault.Secret do
     |> validate_required([:project_id, :key, :encrypted_value])
     |> validate_format(:key, ~r/^[a-z][a-z0-9_:.-]{0,63}$/,
       message:
-        "must start with a letter and contain only lowercase, digits, underscores, colons, dots, hyphens"
+        "must start with a lowercase letter and contain only lowercase letters, digits, underscores, colons, dots, or hyphens (max 64 chars)"
     )
     |> unique_constraint([:project_id, :key])
     |> foreign_key_constraint(:project_id)

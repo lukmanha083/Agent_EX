@@ -67,8 +67,14 @@ defmodule AgentEx.Vault do
   @spec delete_secret(integer(), String.t()) :: :ok | :not_found
   def delete_secret(project_id, key) do
     case Repo.get_by(Secret, project_id: project_id, key: key) do
-      nil -> :not_found
-      secret -> Repo.delete(secret) && :ok
+      nil ->
+        :not_found
+
+      secret ->
+        case Repo.delete(secret) do
+          {:ok, _} -> :ok
+          {:error, reason} -> {:error, reason}
+        end
     end
   end
 

@@ -691,8 +691,8 @@ defmodule AgentExWeb.ChatLive do
     AgentEx.Budget.record_usage(%{
       project_id: project.id,
       conversation_id: conversation && conversation.id,
-      provider: project.provider,
-      model: project.model,
+      provider: socket.assigns.provider,
+      model: socket.assigns.model,
       input_tokens: i,
       output_tokens: o
     })

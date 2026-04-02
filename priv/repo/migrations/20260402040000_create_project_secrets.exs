@@ -12,6 +12,5 @@ defmodule AgentEx.Repo.Migrations.CreateProjectSecrets do
     end
 
     create unique_index(:project_secrets, [:project_id, :key])
-    create index(:project_secrets, [:project_id])
   end
 end

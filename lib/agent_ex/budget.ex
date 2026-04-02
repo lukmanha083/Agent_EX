@@ -81,6 +81,9 @@ defmodule AgentEx.Budget do
   @spec budget_remaining(integer()) :: :unlimited | integer()
   def budget_remaining(project_id) do
     case Repo.get(Project, project_id) do
+      nil ->
+        :unlimited
+
       %Project{token_budget: nil} ->
         :unlimited
 
