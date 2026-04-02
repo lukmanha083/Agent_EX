@@ -130,34 +130,46 @@
 
     <!-- Navigation -->
     <nav class="flex-1 px-3 py-3 space-y-1">
-      <p class="px-2 mb-2 text-[11px] font-medium text-gray-500 uppercase tracking-wider">Platform</p>
-      <.link navigate={~p"/chat"} class={[
-        "flex items-center gap-3 px-2 py-2 rounded-md transition-colors",
-        nav_active?(@socket, AgentExWeb.ChatLive) && "bg-gray-800 text-white font-medium" || "text-gray-400 hover:bg-gray-800/50 hover:text-gray-200"
-      ]}>
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4 shrink-0">
-          <path d="M3.505 2.365A41.369 41.369 0 0 1 9 2c1.863 0 3.697.124 5.495.365 1.247.167 2.18 1.108 2.435 2.268a4.45 4.45 0 0 0-.577-.069 43.36 43.36 0 0 0-4.353 0C9.168 4.749 7 6.733 7 9.035c0 1.358.635 2.565 1.625 3.346-.463.305-.96.559-1.484.756-1.077.405-1.916-.265-1.916-1.378V10.5c0-.235.007-.467.022-.696A4.998 4.998 0 0 1 2 5.869V5.75c0-1.505.923-2.97 2.17-3.29a.228.228 0 0 0-.165-.035ZM12 8.217a33.36 33.36 0 0 0-3.397.166c-1.04.152-1.853 1.03-1.853 2.163v1.01c0 1.133.813 2.01 1.853 2.163A33.36 33.36 0 0 0 12 13.885a33.36 33.36 0 0 0 3.397-.166c1.04-.152 1.853-1.03 1.853-2.163v-1.01c0-1.133-.813-2.01-1.853-2.163A33.36 33.36 0 0 0 12 8.217Z" />
-        </svg>
-        <span class="text-sm">Chat</span>
-      </.link>
-      <.link navigate={~p"/agents"} class={[
-        "flex items-center gap-3 px-2 py-2 rounded-md transition-colors",
-        nav_active?(@socket, AgentExWeb.AgentsLive) && "bg-gray-800 text-white font-medium" || "text-gray-400 hover:bg-gray-800/50 hover:text-gray-200"
-      ]}>
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4 shrink-0">
-          <path d="M10 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM3.465 14.493a1.23 1.23 0 0 0 .41 1.412A9.957 9.957 0 0 0 10 18c2.31 0 4.438-.784 6.131-2.1.43-.333.604-.903.408-1.41a7.002 7.002 0 0 0-13.074.003Z" />
-        </svg>
-        <span class="text-sm">Agents</span>
-      </.link>
-      <.link navigate={~p"/tools"} class={[
-        "flex items-center gap-3 px-2 py-2 rounded-md transition-colors",
-        nav_active?(@socket, AgentExWeb.ToolsLive) && "bg-gray-800 text-white font-medium" || "text-gray-400 hover:bg-gray-800/50 hover:text-gray-200"
-      ]}>
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4 shrink-0">
-          <path fill-rule="evenodd" d="M14.5 10a4.5 4.5 0 0 0 4.284-5.882c-.105-.324-.51-.391-.752-.15L15.34 6.66a.454.454 0 0 1-.493.101 3.046 3.046 0 0 1-1.608-1.607.454.454 0 0 1 .1-.493l2.693-2.692c.24-.241.174-.647-.15-.752a4.5 4.5 0 0 0-5.873 4.575c.055.873-.128 1.808-.8 2.368l-7.23 6.024a2.724 2.724 0 1 0 3.837 3.837l6.024-7.23c.56-.672 1.495-.855 2.368-.8.096.007.193.01.291.01ZM5 16a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z" clip-rule="evenodd" />
-        </svg>
-        <span class="text-sm">Tools</span>
-      </.link>
+      <%= if assigns[:current_project] do %>
+        <p class="px-2 mb-2 text-[11px] font-medium text-gray-500 uppercase tracking-wider">Platform</p>
+        <.link navigate={~p"/chat"} class={[
+          "flex items-center gap-3 px-2 py-2 rounded-md transition-colors",
+          nav_active?(@socket, AgentExWeb.ChatLive) && "bg-gray-800 text-white font-medium" || "text-gray-400 hover:bg-gray-800/50 hover:text-gray-200"
+        ]}>
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4 shrink-0">
+            <path d="M3.505 2.365A41.369 41.369 0 0 1 9 2c1.863 0 3.697.124 5.495.365 1.247.167 2.18 1.108 2.435 2.268a4.45 4.45 0 0 0-.577-.069 43.36 43.36 0 0 0-4.353 0C9.168 4.749 7 6.733 7 9.035c0 1.358.635 2.565 1.625 3.346-.463.305-.96.559-1.484.756-1.077.405-1.916-.265-1.916-1.378V10.5c0-.235.007-.467.022-.696A4.998 4.998 0 0 1 2 5.869V5.75c0-1.505.923-2.97 2.17-3.29a.228.228 0 0 0-.165-.035ZM12 8.217a33.36 33.36 0 0 0-3.397.166c-1.04.152-1.853 1.03-1.853 2.163v1.01c0 1.133.813 2.01 1.853 2.163A33.36 33.36 0 0 0 12 13.885a33.36 33.36 0 0 0 3.397-.166c1.04-.152 1.853-1.03 1.853-2.163v-1.01c0-1.133-.813-2.01-1.853-2.163A33.36 33.36 0 0 0 12 8.217Z" />
+          </svg>
+          <span class="text-sm">Chat</span>
+        </.link>
+        <.link navigate={~p"/agents"} class={[
+          "flex items-center gap-3 px-2 py-2 rounded-md transition-colors",
+          nav_active?(@socket, AgentExWeb.AgentsLive) && "bg-gray-800 text-white font-medium" || "text-gray-400 hover:bg-gray-800/50 hover:text-gray-200"
+        ]}>
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4 shrink-0">
+            <path d="M10 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM3.465 14.493a1.23 1.23 0 0 0 .41 1.412A9.957 9.957 0 0 0 10 18c2.31 0 4.438-.784 6.131-2.1.43-.333.604-.903.408-1.41a7.002 7.002 0 0 0-13.074.003Z" />
+          </svg>
+          <span class="text-sm">Agents</span>
+        </.link>
+        <.link navigate={~p"/tools"} class={[
+          "flex items-center gap-3 px-2 py-2 rounded-md transition-colors",
+          nav_active?(@socket, AgentExWeb.ToolsLive) && "bg-gray-800 text-white font-medium" || "text-gray-400 hover:bg-gray-800/50 hover:text-gray-200"
+        ]}>
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4 shrink-0">
+            <path fill-rule="evenodd" d="M14.5 10a4.5 4.5 0 0 0 4.284-5.882c-.105-.324-.51-.391-.752-.15L15.34 6.66a.454.454 0 0 1-.493.101 3.046 3.046 0 0 1-1.608-1.607.454.454 0 0 1 .1-.493l2.693-2.692c.24-.241.174-.647-.15-.752a4.5 4.5 0 0 0-5.873 4.575c.055.873-.128 1.808-.8 2.368l-7.23 6.024a2.724 2.724 0 1 0 3.837 3.837l6.024-7.23c.56-.672 1.495-.855 2.368-.8.096.007.193.01.291.01ZM5 16a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z" clip-rule="evenodd" />
+          </svg>
+          <span class="text-sm">Tools</span>
+        </.link>
+      <% else %>
+        <div class="px-2 py-8 text-center">
+          <p class="text-xs text-gray-500 mb-3">Create a project to access Chat, Agents, and Tools.</p>
+          <.link navigate={~p"/projects/new"} class="inline-flex items-center gap-1.5 text-xs font-medium text-indigo-400 hover:text-indigo-300 transition-colors">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-3.5 h-3.5">
+              <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
+            </svg>
+            Create a project
+          </.link>
+        </div>
+      <% end %>
     </nav>
 
     <!-- Footer -->

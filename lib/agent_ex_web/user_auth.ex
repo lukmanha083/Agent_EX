@@ -322,11 +322,13 @@ defmodule AgentExWeb.UserAuth do
   end
 
   @doc "Returns the path to redirect to after log in."
-  # the user was already logged in, redirect to settings
+  # Already logged in — redirect to settings
   def signed_in_path(%Plug.Conn{assigns: %{current_scope: %Scope{user: %Accounts.User{}}}}) do
     ~p"/users/settings"
   end
 
+  # New login — redirect to /chat. The :require_project on_mount hook
+  # will bounce users without projects to /projects/new.
   def signed_in_path(_), do: ~p"/chat"
 
   @doc """
