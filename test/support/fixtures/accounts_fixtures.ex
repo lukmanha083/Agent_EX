@@ -41,6 +41,23 @@ defmodule AgentEx.AccountsFixtures do
     user
   end
 
+  def project_fixture(user, attrs \\ %{}) do
+    {:ok, project} =
+      AgentEx.Projects.create_project(
+        Map.merge(
+          %{
+            user_id: user.id,
+            name: "Test Project #{System.unique_integer([:positive])}",
+            provider: "anthropic",
+            model: "claude-sonnet-4-6"
+          },
+          attrs
+        )
+      )
+
+    project
+  end
+
   def user_scope_fixture do
     user = user_fixture()
     user_scope_fixture(user)

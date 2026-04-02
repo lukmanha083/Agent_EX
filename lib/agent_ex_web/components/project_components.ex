@@ -49,7 +49,7 @@ defmodule AgentExWeb.ProjectComponents do
             <p :if={@project.root_path && @project.root_path != ""} class="text-[10px] text-gray-500 font-mono truncate max-w-[180px]">{@project.root_path}</p>
           </div>
         </div>
-        <div :if={not @project.is_default} class="flex gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-within:opacity-100 transition-opacity">
+        <div class="flex gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-within:opacity-100 transition-opacity">
           <button
             type="button"
             phx-click="edit_project"
@@ -85,9 +85,6 @@ defmodule AgentExWeb.ProjectComponents do
         </.badge>
         <.badge :if={@project.model} variant="secondary" class="text-[10px]">
           {@project.model}
-        </.badge>
-        <.badge :if={@project.is_default} variant="secondary" class="text-[10px]">
-          default
         </.badge>
       </div>
     </div>

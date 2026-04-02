@@ -16,7 +16,7 @@ defmodule AgentExWeb.ToolsLive do
     attached = MapSet.new(builtin, &{"built-in", &1.name})
 
     http_tools =
-      if project && !project.is_default,
+      if project,
         do: HttpToolStore.list(user.id, project.id),
         else: []
 

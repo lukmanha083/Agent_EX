@@ -40,17 +40,27 @@ defmodule AgentExWeb.Router do
   scope "/", AgentExWeb do
     pipe_through([:browser, :require_authenticated_user])
 
-    live_session :require_authenticated_user,
+    # Project management — does NOT require an existing project
+    live_session :project_management,
       on_mount: [{AgentExWeb.UserAuth, :require_authenticated}] do
-      live("/chat", ChatLive, :index)
-      live("/chat/:conversation_id", ChatLive, :show)
       live("/projects", ProjectsLive, :index)
-      live("/agents", AgentsLive, :index)
-      live("/tools", ToolsLive, :index)
+      live("/projects/new", ProjectsLive.New, :new)
 
       live("/users/profile", UserLive.Profile, :edit)
       live("/users/profile/confirm-email/:token", UserLive.Profile, :confirm_email)
       live("/users/settings", UserLive.Settings, :edit)
+    end
+
+    # App routes — require an active project
+    live_session :require_project,
+      on_mount: [
+        {AgentExWeb.UserAuth, :require_authenticated},
+        {AgentExWeb.UserAuth, :require_project}
+      ] do
+      live("/chat", ChatLive, :index)
+      live("/chat/:conversation_id", ChatLive, :show)
+      live("/agents", AgentsLive, :index)
+      live("/tools", ToolsLive, :index)
     end
 
     post("/users/update-password", UserSessionController, :update_password)

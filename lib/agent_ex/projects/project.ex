@@ -9,7 +9,6 @@ defmodule AgentEx.Projects.Project do
     field(:name, :string)
     field(:description, :string)
     field(:root_path, :string)
-    field(:is_default, :boolean, default: false)
     field(:provider, :string)
     field(:model, :string)
     field(:disabled_builtins, {:array, :string}, default: [])
@@ -42,25 +41,6 @@ defmodule AgentEx.Projects.Project do
     |> cast(attrs, [:name, :description, :root_path, :disabled_builtins])
     |> validate_required([:name])
     |> unique_constraint([:user_id, :name])
-  end
-
-  # Keep for backwards compat with existing default project logic (removed in Phase 2)
-  def changeset(project, attrs) do
-    project
-    |> cast(attrs, [
-      :user_id,
-      :name,
-      :description,
-      :root_path,
-      :is_default,
-      :provider,
-      :model,
-      :disabled_builtins
-    ])
-    |> validate_required([:user_id, :name])
-    |> unique_constraint([:user_id, :name])
-    |> unique_constraint(:is_default, name: :projects_one_default_per_user)
-    |> foreign_key_constraint(:user_id)
   end
 
   defp validate_model_for_provider(changeset) do

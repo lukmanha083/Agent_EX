@@ -3,15 +3,21 @@ defmodule AgentExWeb.Features.ProviderChatTest do
 
   import AgentEx.AccountsFixtures
 
-  alias AgentEx.Projects
-
   @moduletag :feature
 
   setup %{session: session} do
     user = user_fixture()
-    # The default project gets provider/model from register_user
-    project = Projects.get_default_project(user.id)
+    project = project_fixture(user)
     session = feature_log_in_user(session, user)
+
+    # Switch to the test project
+    execute_script(session, """
+      const form = document.getElementById('desktop-project-form') || document.getElementById('mobile-project-form');
+      if (form) { form.action = '/projects/switch/#{project.id}'; form.submit(); }
+    """)
+
+    :timer.sleep(1000)
+
     {:ok, session: session, user: user, project: project}
   end
 
