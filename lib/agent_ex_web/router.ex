@@ -62,6 +62,7 @@ defmodule AgentExWeb.Router do
       live("/agents", AgentsLive, :index)
       live("/tools", ToolsLive, :index)
       live("/vault", VaultLive, :index)
+      live("/budget", BudgetLive, :index)
     end
 
     post("/users/update-password", UserSessionController, :update_password)

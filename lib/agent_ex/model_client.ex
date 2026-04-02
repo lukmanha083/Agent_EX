@@ -80,7 +80,10 @@ defmodule AgentEx.ModelClient do
 
     case Req.post(url, json: body, headers: headers) do
       {:ok, %{status: 200, body: resp_body}} ->
-        parse_response(resp_body, client.provider)
+        with {:ok, message} <- parse_response(resp_body, client.provider) do
+          usage = extract_usage(resp_body, client.provider)
+          {:ok, %{message | usage: usage}}
+        end
 
       {:ok, %{status: status, body: resp_body}} ->
         {:error, {status, resp_body}}
@@ -252,6 +255,24 @@ defmodule AgentEx.ModelClient do
   defp resolve_api_key(%{project_id: pid}) do
     AgentEx.Vault.resolve_key(pid, "llm:openai", :openai_api_key, "OPENAI_API_KEY")
   end
+
+  # -- Usage extraction --
+
+  defp extract_usage(
+         %{"usage" => %{"input_tokens" => input, "output_tokens" => output}},
+         :anthropic
+       ) do
+    %{input_tokens: input, output_tokens: output}
+  end
+
+  defp extract_usage(
+         %{"usage" => %{"prompt_tokens" => input, "completion_tokens" => output}},
+         _provider
+       ) do
+    %{input_tokens: input, output_tokens: output}
+  end
+
+  defp extract_usage(_, _), do: nil
 
   # -- Helpers --
 

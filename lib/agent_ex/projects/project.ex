@@ -12,6 +12,7 @@ defmodule AgentEx.Projects.Project do
     field(:provider, :string)
     field(:model, :string)
     field(:disabled_builtins, {:array, :string}, default: [])
+    field(:token_budget, :integer)
 
     timestamps(type: :utc_datetime_usec)
   end
@@ -38,7 +39,7 @@ defmodule AgentEx.Projects.Project do
   @doc "Changeset for updating an existing project. Provider and model cannot be changed."
   def update_changeset(project, attrs) do
     project
-    |> cast(attrs, [:name, :description, :root_path, :disabled_builtins])
+    |> cast(attrs, [:name, :description, :root_path, :disabled_builtins, :token_budget])
     |> validate_required([:name])
     |> unique_constraint([:user_id, :name])
   end

@@ -37,14 +37,15 @@ defmodule AgentEx.Message do
   end
 
   @enforce_keys [:role, :content]
-  defstruct [:role, :content, :source, :tool_calls]
+  defstruct [:role, :content, :source, :tool_calls, :usage]
 
   @type role :: :system | :user | :assistant | :tool
   @type t :: %__MODULE__{
           role: role(),
           content: String.t() | [FunctionResult.t()],
           source: String.t() | nil,
-          tool_calls: [FunctionCall.t()] | nil
+          tool_calls: [FunctionCall.t()] | nil,
+          usage: map() | nil
         }
 
   def system(content), do: %__MODULE__{role: :system, content: content}

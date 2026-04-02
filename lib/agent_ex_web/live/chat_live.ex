@@ -103,18 +103,28 @@ defmodule AgentExWeb.ChatLive do
   def handle_event("send", %{"message" => raw_message}, socket) do
     message = String.trim(raw_message)
 
-    if message == "" do
-      {:noreply, socket}
-    else
-      socket = ensure_conversation(socket, message)
+    cond do
+      message == "" ->
+        {:noreply, socket}
 
-      case socket.assigns.conversation do
-        nil ->
-          {:noreply, socket}
+      AgentEx.Budget.budget_exceeded?(socket.assigns.project.id) ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           "Monthly token budget exceeded. Increase your budget in the Budget page."
+         )}
 
-        conversation ->
-          send_message(socket, conversation, message)
-      end
+      true ->
+        socket = ensure_conversation(socket, message)
+
+        case socket.assigns.conversation do
+          nil ->
+            {:noreply, socket}
+
+          conversation ->
+            send_message(socket, conversation, message)
+        end
     end
   end
 
@@ -240,6 +250,9 @@ defmodule AgentExWeb.ChatLive do
   defp handle_run_event(%Event{type: :pipeline_complete} = event, socket) do
     content = event.data[:final_content] || "No response."
     messages = socket.assigns.messages ++ [%{role: :assistant, content: content}]
+
+    # Record token usage for budget tracking
+    maybe_record_token_usage(socket, event.data[:total_usage])
 
     # Save assistant message to DB with execution metadata
     if socket.assigns.conversation do
@@ -669,6 +682,23 @@ defmodule AgentExWeb.ChatLive do
 
   defp internal_message?(%{role: "system"}), do: true
   defp internal_message?(_), do: false
+
+  defp maybe_record_token_usage(socket, %{input_tokens: i, output_tokens: o})
+       when i > 0 or o > 0 do
+    project = socket.assigns.project
+    conversation = socket.assigns.conversation
+
+    AgentEx.Budget.record_usage(%{
+      project_id: project.id,
+      conversation_id: conversation && conversation.id,
+      provider: project.provider,
+      model: project.model,
+      input_tokens: i,
+      output_tokens: o
+    })
+  end
+
+  defp maybe_record_token_usage(_, _), do: :ok
 
   defp project_agent_id(user, project), do: "u#{user.id}_p#{project.id}_chat"
 
