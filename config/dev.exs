@@ -1,7 +1,10 @@
 import Config
 
 config :agent_ex,
-  dets_dir: "priv/data/dev"
+  dets_dir: "priv/data/dev",
+  # Dev-only vault key (32 bytes, base64). Generate for prod with:
+  # :crypto.strong_rand_bytes(32) |> Base.encode64()
+  vault_key: "EMSRIAOwy6s+d17xQGXfmo0RIFF0omVEvGah1nOkAQ0="
 
 # Database
 config :agent_ex, AgentEx.Repo,

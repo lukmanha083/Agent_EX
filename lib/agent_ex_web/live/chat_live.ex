@@ -321,7 +321,7 @@ defmodule AgentExWeb.ChatLive do
     session_id = "conversation-#{conversation.id}"
     user = socket.assigns.current_scope.user
     project = socket.assigns.project
-    client = build_model_client(socket.assigns.provider, socket.assigns.model)
+    client = build_model_client(socket.assigns.provider, socket.assigns.model, project.id)
 
     {orchestrator_memory, agent_memory_opts} =
       build_memory_opts(socket, user, project, session_id)
@@ -577,10 +577,11 @@ defmodule AgentExWeb.ChatLive do
     end
   end
 
-  defp build_model_client(provider, model) do
+  defp build_model_client(provider, model, project_id) do
     AgentEx.ModelClient.new(
       model: model,
-      provider: provider_to_atom(provider)
+      provider: provider_to_atom(provider),
+      project_id: project_id
     )
   end
 

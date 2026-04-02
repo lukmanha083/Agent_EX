@@ -13,13 +13,20 @@ defmodule AgentEx.ModelClient do
   alias AgentEx.Tool
 
   @enforce_keys [:model]
-  defstruct [:model, :api_key, provider: :openai, base_url: "https://api.openai.com/v1"]
+  defstruct [
+    :model,
+    :api_key,
+    :project_id,
+    provider: :openai,
+    base_url: "https://api.openai.com/v1"
+  ]
 
   @type provider :: :openai | :moonshot | :anthropic
 
   @type t :: %__MODULE__{
           model: String.t(),
           api_key: String.t() | nil,
+          project_id: integer() | nil,
           provider: provider(),
           base_url: String.t()
         }
@@ -232,21 +239,19 @@ defmodule AgentEx.ModelClient do
 
   # -- API key resolution (per-provider, config then env) --
 
-  defp resolve_api_key(%{api_key: key}) when is_binary(key), do: key
+  defp resolve_api_key(%{api_key: key}) when is_binary(key) and key != "", do: key
 
-  defp resolve_api_key(%{provider: :anthropic}) do
-    app_key(:anthropic_api_key) || System.get_env("ANTHROPIC_API_KEY") || ""
+  defp resolve_api_key(%{provider: :anthropic, project_id: pid}) do
+    AgentEx.Vault.resolve_key(pid, "llm:anthropic", :anthropic_api_key, "ANTHROPIC_API_KEY")
   end
 
-  defp resolve_api_key(%{provider: :moonshot}) do
-    app_key(:moonshot_api_key) || System.get_env("MOONSHOT_API_KEY") || ""
+  defp resolve_api_key(%{provider: :moonshot, project_id: pid}) do
+    AgentEx.Vault.resolve_key(pid, "llm:moonshot", :moonshot_api_key, "MOONSHOT_API_KEY")
   end
 
-  defp resolve_api_key(_client) do
-    app_key(:openai_api_key) || System.get_env("OPENAI_API_KEY") || ""
+  defp resolve_api_key(%{project_id: pid}) do
+    AgentEx.Vault.resolve_key(pid, "llm:openai", :openai_api_key, "OPENAI_API_KEY")
   end
-
-  defp app_key(key), do: Application.get_env(:agent_ex, key)
 
   # -- Helpers --
 
