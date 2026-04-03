@@ -131,16 +131,12 @@ defmodule AgentExWeb.ChatLive do
   def handle_event("send", _params, socket), do: {:noreply, socket}
 
   def handle_event("cancel", _params, socket) do
-    if socket.assigns.run_id do
-      EventLoop.cancel(socket.assigns.run_id)
-      Phoenix.PubSub.unsubscribe(AgentEx.PubSub, "run:#{socket.assigns.run_id}")
-    end
+    socket = cancel_active_run(socket)
 
     messages =
       socket.assigns.messages ++ [%{role: :assistant, content: "Cancelled by user."}]
 
-    {:noreply,
-     assign(socket, messages: messages, events: [], stages: [], thinking: false, run_id: nil)}
+    {:noreply, assign(socket, messages: messages, events: [], stages: [])}
   end
 
   def handle_event("clear", _params, socket) do
@@ -285,6 +281,8 @@ defmodule AgentExWeb.ChatLive do
       maybe_generate_title(socket.assigns.conversation, messages, content)
     end
 
+    cleanup_run(socket)
+
     {:noreply,
      assign(socket,
        messages: messages,
@@ -300,6 +298,8 @@ defmodule AgentExWeb.ChatLive do
   defp handle_run_event(%Event{type: :pipeline_error} = event, socket) do
     reason = event.data[:reason] || "Unknown error"
     messages = socket.assigns.messages ++ [%{role: :assistant, content: "Error: #{reason}"}]
+
+    cleanup_run(socket)
 
     {:noreply,
      assign(socket,
@@ -333,10 +333,7 @@ defmodule AgentExWeb.ChatLive do
     messages = socket.assigns.messages ++ [%{role: :user, content: message}]
 
     # Cancel previous run if any
-    if socket.assigns.run_id do
-      EventLoop.cancel(socket.assigns.run_id)
-      Phoenix.PubSub.unsubscribe(AgentEx.PubSub, "run:#{socket.assigns.run_id}")
-    end
+    socket = cancel_active_run(socket)
 
     run_id = "run-#{System.unique_integer([:positive])}"
     EventLoop.subscribe(run_id)
@@ -482,6 +479,13 @@ defmodule AgentExWeb.ChatLive do
       assign(socket, run_id: nil, thinking: false)
     else
       socket
+    end
+  end
+
+  defp cleanup_run(socket) do
+    if socket.assigns.run_id do
+      AgentEx.TaskList.clear(socket.assigns.run_id)
+      Phoenix.PubSub.unsubscribe(AgentEx.PubSub, "run:#{socket.assigns.run_id}")
     end
   end
 

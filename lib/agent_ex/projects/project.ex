@@ -42,6 +42,7 @@ defmodule AgentEx.Projects.Project do
     project
     |> cast(attrs, [:name, :description, :root_path, :disabled_builtins, :token_budget])
     |> validate_required([:name])
+    |> validate_number(:token_budget, greater_than_or_equal_to: 0)
     |> unique_constraint([:user_id, :name])
   end
 

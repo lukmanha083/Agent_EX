@@ -344,7 +344,7 @@ defmodule AgentEx.Memory do
     alias AgentEx.Memory.WorkingMemory
     alias AgentEx.Message
 
-    _context_window = Keyword.get(opts, :context_window)
+    max_recent = Keyword.get(opts, :context_window) || @max_recent_turns
 
     conversation =
       try do
@@ -363,12 +363,12 @@ defmodule AgentEx.Memory do
     total = length(conversation)
 
     {summary_msg, recent_msgs} =
-      if total > @max_recent_turns do
-        older = Enum.take(conversation, total - @max_recent_turns)
-        recent = Enum.take(conversation, -@max_recent_turns)
+      if total > max_recent do
+        older = Enum.take(conversation, total - max_recent)
+        recent = Enum.take(conversation, -max_recent)
 
         summary = summarize_turns(older)
-        {[Message.system("[Conversation history]\n#{summary}")], recent}
+        {[Message.user("[Conversation history]\n#{summary}")], recent}
       else
         {[], conversation}
       end

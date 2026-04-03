@@ -215,29 +215,39 @@ defmodule AgentExWeb.BudgetLive do
   def handle_event("update_budget", params, socket) do
     project = socket.assigns.project
 
-    budget =
-      case Integer.parse(params["token_budget"] || "") do
-        {n, ""} when n > 0 -> n
-        {0, ""} -> nil
-        _ -> nil
-      end
+    case parse_budget(params["token_budget"]) do
+      {:error, msg} ->
+        {:noreply, put_flash(socket, :error, msg)}
 
-    case Budget.update_budget(project.id, budget) do
-      {:ok, updated} ->
-        {:noreply,
-         socket
-         |> assign(project: updated)
-         |> load_budget_data(updated)
-         |> put_flash(
-           :info,
-           if(budget,
-             do: "Budget set to #{format_number(budget)} tokens",
-             else: "Budget set to unlimited"
-           )
-         )}
+      {:ok, budget} ->
+        case Budget.update_budget(project.id, budget) do
+          {:ok, updated} ->
+            {:noreply,
+             socket
+             |> assign(project: updated)
+             |> load_budget_data(updated)
+             |> put_flash(
+               :info,
+               if(budget,
+                 do: "Budget set to #{format_number(budget)} tokens",
+                 else: "Budget set to unlimited"
+               )
+             )}
 
-      {:error, _} ->
-        {:noreply, put_flash(socket, :error, "Failed to update budget")}
+          {:error, _} ->
+            {:noreply, put_flash(socket, :error, "Failed to update budget")}
+        end
+    end
+  end
+
+  defp parse_budget(nil), do: {:ok, nil}
+  defp parse_budget(""), do: {:ok, nil}
+
+  defp parse_budget(input) when is_binary(input) do
+    case Integer.parse(String.trim(input)) do
+      {n, ""} when n > 0 -> {:ok, n}
+      {0, ""} -> {:ok, nil}
+      _ -> {:error, "Invalid budget value. Enter a positive number or leave empty for unlimited."}
     end
   end
 

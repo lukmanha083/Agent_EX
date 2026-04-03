@@ -89,7 +89,7 @@ defmodule AgentEx.EventLoop.PipeRunner do
   def merge(run_id, results, consolidator, model_client, opts \\ []) do
     broadcast(run_id, :stage_start, %{agent: consolidator.name, type: :merge})
 
-    result = Pipe.merge(results, consolidator, model_client, opts)
+    {result, _usage} = Pipe.merge(results, consolidator, model_client, opts)
 
     broadcast(run_id, :stage_complete, %{
       agent: consolidator.name,

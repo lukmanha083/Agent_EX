@@ -5,20 +5,22 @@ defmodule AgentEx.TaskList do
   Stores tasks per run_id in ETS. Tasks are ephemeral — they live for the
   duration of a conversation run and are used by the orchestrator to plan,
   track delegation, and reason about results.
+
+  The ETS table is owned by this GenServer to prevent ownership leaks
+  and race conditions from lazy creation.
   """
+
+  use GenServer
 
   @table :orchestrator_tasks
 
-  def init do
-    if :ets.whereis(@table) == :undefined do
-      :ets.new(@table, [:named_table, :public, :set])
-    end
+  # -- Client API --
 
-    :ok
+  def start_link(_opts \\ []) do
+    GenServer.start_link(__MODULE__, [], name: __MODULE__)
   end
 
   def create_task(run_id, task) do
-    init()
     id = System.unique_integer([:positive])
     now = DateTime.utc_now() |> DateTime.to_iso8601()
 
@@ -60,18 +62,19 @@ defmodule AgentEx.TaskList do
   end
 
   def get_tasks(run_id) do
-    init()
-
     case :ets.lookup(@table, run_id) do
       [{^run_id, tasks}] -> tasks
       [] -> []
     end
+  rescue
+    ArgumentError -> []
   end
 
   def clear(run_id) do
-    init()
     :ets.delete(@table, run_id)
     :ok
+  rescue
+    ArgumentError -> :ok
   end
 
   def format_tasks(run_id) do
@@ -85,6 +88,16 @@ defmodule AgentEx.TaskList do
       |> Enum.map_join("\n", &format_task_line/1)
     end
   end
+
+  # -- GenServer callbacks --
+
+  @impl true
+  def init(_) do
+    :ets.new(@table, [:named_table, :public, :set])
+    {:ok, %{}}
+  end
+
+  # -- Private --
 
   defp format_task_line({t, i}) do
     icon = status_icon(t.status)

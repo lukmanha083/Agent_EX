@@ -144,10 +144,7 @@ defmodule AgentEx.ToolCallerLoop do
       # Feed the reasoning back as a user message carrying the analysis,
       # so the conversation ends with a user message (required by Anthropic).
       reasoning_relay =
-        Message.user(
-          "Based on your analysis above, now proceed with the available tools. " <>
-            "Your reasoning:\n\n#{reasoning.content}"
-        )
+        Message.user("Based on your analysis above, now proceed with the available tools.")
 
       messages_with_reasoning = input_messages ++ [reasoning, reasoning_relay]
 

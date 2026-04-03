@@ -105,10 +105,13 @@ defmodule AgentEx.PipeTest do
           tools: [weather_tool()]
         )
 
-      {result, _usage} =
+      {result, usage} =
         Pipe.through("What's the weather in Tokyo?", agent, nil, model_fn: model_fn)
 
       assert result == "The weather in Tokyo is Sunny, 25°C"
+      assert is_map(usage)
+      assert Map.has_key?(usage, :input_tokens)
+      assert Map.has_key?(usage, :output_tokens)
     end
 
     test "chains stages via pipe operator" do

@@ -212,22 +212,7 @@ defmodule AgentEx.ToolAssembler do
           "required" => ["task_id", "status"]
         },
         kind: :write,
-        function: fn args ->
-          task_id = args["task_id"]
-          status = String.to_existing_atom(args["status"])
-
-          updates =
-            %{status: status}
-            |> then(fn m -> if args["agent"], do: Map.put(m, :agent, args["agent"]), else: m end)
-            |> then(fn m ->
-              if args["result"], do: Map.put(m, :result, args["result"]), else: m
-            end)
-
-          case AgentEx.TaskList.update_task(run_id, task_id, updates) do
-            {:ok, t} -> {:ok, "Task ##{t.id} updated: #{t.status} — #{t.title}"}
-            {:error, :not_found} -> {:error, "Task ##{task_id} not found"}
-          end
-        end
+        function: fn args -> execute_update_task(run_id, args) end
       ),
       AgentEx.Tool.new(
         name: "list_tasks",
@@ -429,7 +414,6 @@ defmodule AgentEx.ToolAssembler do
   def ensure_default_agent(user_id, project_id, available_tools, opts \\ []) do
     case AgentStore.list(user_id, project_id) do
       [] ->
-        _provider = Keyword.get(opts, :provider, "anthropic")
         tool_ids = Enum.map(available_tools, & &1.name)
 
         config =
@@ -515,5 +499,36 @@ defmodule AgentEx.ToolAssembler do
     Logger.info(
       "ToolAssembler: upgraded default agent 'assistant' → 'computer_use' for project #{project_id}"
     )
+  end
+
+  @valid_statuses %{
+    "pending" => :pending,
+    "in_progress" => :in_progress,
+    "completed" => :completed,
+    "failed" => :failed
+  }
+
+  defp execute_update_task(run_id, args) do
+    task_id = args["task_id"]
+
+    case Map.get(@valid_statuses, args["status"]) do
+      nil ->
+        {:error,
+         "Invalid status: #{args["status"]}. Use: pending, in_progress, completed, failed"}
+
+      status ->
+        updates = build_task_updates(status, args)
+
+        case AgentEx.TaskList.update_task(run_id, task_id, updates) do
+          {:ok, t} -> {:ok, "Task ##{t.id} updated: #{t.status} — #{t.title}"}
+          {:error, :not_found} -> {:error, "Task ##{task_id} not found"}
+        end
+    end
+  end
+
+  defp build_task_updates(status, args) do
+    base = %{status: status}
+    base = if args["agent"], do: Map.put(base, :agent, args["agent"]), else: base
+    if args["result"], do: Map.put(base, :result, args["result"]), else: base
   end
 end

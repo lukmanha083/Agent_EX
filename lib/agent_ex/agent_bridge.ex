@@ -34,7 +34,7 @@ defmodule AgentEx.AgentBridge do
          %AgentConfig{} = config,
          user_id,
          project_id,
-         _model_client,
+         model_client,
          opts
        ) do
     system_message = AgentConfig.build_system_messages(config)
@@ -55,12 +55,14 @@ defmodule AgentEx.AgentBridge do
         intervention: resolve_intervention(config)
       )
 
+    agent_provider = AgentEx.ProviderHelpers.provider_to_atom(config.provider)
+
     agent_model_client =
-      ModelClient.new(
-        model: config.model,
-        provider: AgentEx.ProviderHelpers.provider_to_atom(config.provider),
-        project_id: project_id
-      )
+      if model_client do
+        %{model_client | model: config.model, provider: agent_provider, project_id: project_id}
+      else
+        ModelClient.new(model: config.model, provider: agent_provider, project_id: project_id)
+      end
 
     # Resolve context_window from agent's own model
     agent_context_window = AgentEx.ProviderHelpers.context_window_for(config.model)

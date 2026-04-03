@@ -108,10 +108,11 @@ defmodule AgentExWeb.ChatComponents do
   defp render_markdown(content) when is_binary(content) do
     content
     |> Earmark.as_html!(compact_output: true, smartypants: false)
+    |> HtmlSanitizeEx.markdown_html()
     |> Phoenix.HTML.raw()
   end
 
-  defp render_markdown(content), do: content
+  defp render_markdown(content), do: Phoenix.HTML.html_escape(to_string(content))
 
   defp model_label(nil), do: "AI"
 
