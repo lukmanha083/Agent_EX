@@ -115,6 +115,16 @@ defmodule AgentExWeb.ChatLive do
            "Monthly token budget exceeded. Increase your budget in the Budget page."
          )}
 
+      missing_api_key?(socket) ->
+        provider = socket.assigns.provider
+
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           "No API key configured for #{provider}. Add one in Vault → LLM: #{String.capitalize(provider)}."
+         )}
+
       true ->
         socket = ensure_conversation(socket, message)
 
@@ -604,6 +614,13 @@ defmodule AgentExWeb.ChatLive do
       {:error, reason} ->
         Logger.warning("Failed to start orchestrator session: #{inspect(reason)}")
     end
+  end
+
+  defp missing_api_key?(socket) do
+    project_id = socket.assigns.project.id
+    vault_key = "llm:#{socket.assigns.provider}"
+    key = AgentEx.Vault.resolve_key(project_id, vault_key)
+    key == "" or is_nil(key)
   end
 
   defp build_model_client(provider, model, project_id) do
