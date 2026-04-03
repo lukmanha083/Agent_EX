@@ -33,7 +33,7 @@ defmodule AgentExWeb.ChatComponents do
         "max-w-[75%] rounded-xl px-4 py-2.5 text-sm leading-relaxed",
         message_style(@role)
       ]}>
-        <div class="whitespace-pre-wrap break-words">{@content}</div>
+        <div class="chat-markdown break-words">{render_markdown(@content)}</div>
       </div>
 
       <div :if={@role == :user} class="flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold bg-gray-600 text-white">
@@ -102,6 +102,17 @@ defmodule AgentExWeb.ChatComponents do
   end
 
   # -- Helpers --
+
+  defp render_markdown(nil), do: ""
+
+  defp render_markdown(content) when is_binary(content) do
+    content
+    |> Earmark.as_html!(compact_output: true, smartypants: false)
+    |> HtmlSanitizeEx.markdown_html()
+    |> Phoenix.HTML.raw()
+  end
+
+  defp render_markdown(content), do: Phoenix.HTML.html_escape(to_string(content))
 
   defp model_label(nil), do: "AI"
 

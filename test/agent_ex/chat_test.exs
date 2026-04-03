@@ -8,7 +8,7 @@ defmodule AgentEx.ChatTest do
 
   defp create_user(_) do
     user = user_fixture()
-    project = Projects.get_default_project(user.id)
+    project = project_fixture(user)
     %{user: user, project: project}
   end
 
@@ -66,7 +66,7 @@ defmodule AgentEx.ChatTest do
 
     test "does not return other users' conversations", %{project: _project} do
       other_user = user_fixture()
-      other_project = Projects.get_default_project(other_user.id)
+      other_project = project_fixture(other_user)
       assert Chat.list_conversations(other_user.id, other_project.id) == []
     end
   end

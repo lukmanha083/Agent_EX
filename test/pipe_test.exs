@@ -84,7 +84,7 @@ defmodule AgentEx.PipeTest do
           system_message: "You are a financial analyst"
         )
 
-      result = Pipe.through("Analyze AAPL", agent, nil, model_fn: model_fn)
+      {result, _usage} = Pipe.through("Analyze AAPL", agent, nil, model_fn: model_fn)
       assert result == "Analysis complete: AAPL is bullish"
     end
 
@@ -105,8 +105,13 @@ defmodule AgentEx.PipeTest do
           tools: [weather_tool()]
         )
 
-      result = Pipe.through("What's the weather in Tokyo?", agent, nil, model_fn: model_fn)
+      {result, usage} =
+        Pipe.through("What's the weather in Tokyo?", agent, nil, model_fn: model_fn)
+
       assert result == "The weather in Tokyo is Sunny, 25°C"
+      assert is_map(usage)
+      assert Map.has_key?(usage, :input_tokens)
+      assert Map.has_key?(usage, :output_tokens)
     end
 
     test "chains stages via pipe operator" do
@@ -121,7 +126,7 @@ defmodule AgentEx.PipeTest do
       analyst =
         Pipe.Agent.new(name: "analyst", system_message: "You analyze stock data")
 
-      result =
+      {result, _usage} =
         "Analyze AAPL"
         |> Pipe.through(researcher, nil, model_fn: researcher_fn)
         |> Pipe.through(analyst, nil, model_fn: analyst_fn)
@@ -200,7 +205,7 @@ defmodule AgentEx.PipeTest do
         Pipe.Agent.new(name: "lead", system_message: "Consolidate research results")
 
       results = ["Source A: bullish", "Source B: strong buy"]
-      result = Pipe.merge(results, consolidator, nil, model_fn: consolidator_fn)
+      {result, _usage} = Pipe.merge(results, consolidator, nil, model_fn: consolidator_fn)
       assert result =~ "Combined report"
     end
   end
@@ -230,7 +235,7 @@ defmodule AgentEx.PipeTest do
           end
         )
 
-      assert result == "Finance analysis complete"
+      assert result == {"Finance analysis complete", %{input_tokens: 0, output_tokens: 0}}
     end
   end
 
@@ -284,7 +289,7 @@ defmodule AgentEx.PipeTest do
           tools: [delegate]
         )
 
-      result =
+      {result, _usage} =
         Pipe.through("Analyze AAPL", orchestrator, nil, model_fn: orchestrator_fn)
 
       assert result =~ "AAPL is at $150"
@@ -300,7 +305,7 @@ defmodule AgentEx.PipeTest do
       agent =
         Pipe.Agent.new(name: "processor", system_message: "Process the input")
 
-      result =
+      {result, _usage} =
         "hello world"
         |> Pipe.tool(uppercase_tool())
         |> Pipe.through(agent, nil, model_fn: agent_fn)

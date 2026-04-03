@@ -338,14 +338,14 @@ defmodule AgentEx.Memory do
   this only injects Tier 1 working memory — the orchestrator's previous turns.
   The orchestrator retrieves other context via read tools (.memory/ files).
   """
+  @max_recent_turns 4
+
   def inject_orchestrator_history(messages, user_id, project_id, agent_id, session_id, opts \\ []) do
-    alias AgentEx.Memory.{OrchestratorContext, WorkingMemory}
+    alias AgentEx.Memory.WorkingMemory
     alias AgentEx.Message
 
-    context_window = Keyword.get(opts, :context_window)
-    budgets = OrchestratorContext.calculate_zones(context_window)
+    max_recent = Keyword.get(opts, :context_window) || @max_recent_turns
 
-    # Only gather Tier 1 conversation history
     conversation =
       try do
         WorkingMemory.Server.to_context_messages({user_id, project_id, agent_id}, session_id)
@@ -359,11 +359,22 @@ defmodule AgentEx.Memory do
           []
       end
 
-    # Truncate to conversation zone budget
-    truncated = OrchestratorContext.truncate_conversation(conversation, budgets)
+    # Split: keep last N turns raw, summarize older ones
+    total = length(conversation)
+
+    {summary_msg, recent_msgs} =
+      if total > max_recent do
+        older = Enum.take(conversation, total - max_recent)
+        recent = Enum.take(conversation, -max_recent)
+
+        summary = summarize_turns(older)
+        {[Message.user("[Conversation history]\n#{summary}")], recent}
+      else
+        {[], conversation}
+      end
 
     history_msgs =
-      Enum.map(truncated, fn msg ->
+      Enum.map(recent_msgs, fn msg ->
         role = if is_atom(msg.role), do: Atom.to_string(msg.role), else: msg.role
 
         case role do
@@ -374,6 +385,39 @@ defmodule AgentEx.Memory do
       end)
 
     {system_msgs, rest} = Enum.split_while(messages, &(&1.role == :system))
-    system_msgs ++ history_msgs ++ rest
+    system_msgs ++ summary_msg ++ history_msgs ++ rest
+  end
+
+  # Compact summary of older turns — no LLM call, just extraction
+  defp summarize_turns(messages) do
+    messages
+    |> Enum.chunk_every(2)
+    |> Enum.map(fn chunk ->
+      user_msg = Enum.find(chunk, fn m -> to_string(m[:role]) in ["user", "task"] end)
+      assistant_msg = Enum.find(chunk, fn m -> to_string(m[:role]) == "assistant" end)
+
+      user_text = truncate_text(user_msg[:content], 80)
+      assistant_text = truncate_text(assistant_msg[:content], 120)
+
+      cond do
+        user_text && assistant_text -> "User: #{user_text}\nAssistant: #{assistant_text}"
+        user_text -> "User: #{user_text}"
+        assistant_text -> "Assistant: #{assistant_text}"
+        true -> nil
+      end
+    end)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join("\n---\n")
+  end
+
+  defp truncate_text(nil, _), do: nil
+  defp truncate_text("", _), do: nil
+
+  defp truncate_text(text, max) when is_binary(text) do
+    if String.length(text) <= max do
+      text
+    else
+      String.slice(text, 0, max) <> "..."
+    end
   end
 end

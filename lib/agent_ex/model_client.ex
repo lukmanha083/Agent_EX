@@ -13,13 +13,20 @@ defmodule AgentEx.ModelClient do
   alias AgentEx.Tool
 
   @enforce_keys [:model]
-  defstruct [:model, :api_key, provider: :openai, base_url: "https://api.openai.com/v1"]
+  defstruct [
+    :model,
+    :api_key,
+    :project_id,
+    provider: :openai,
+    base_url: "https://api.openai.com/v1"
+  ]
 
   @type provider :: :openai | :moonshot | :anthropic
 
   @type t :: %__MODULE__{
           model: String.t(),
           api_key: String.t() | nil,
+          project_id: integer() | nil,
           provider: provider(),
           base_url: String.t()
         }
@@ -71,9 +78,12 @@ defmodule AgentEx.ModelClient do
     headers = request_headers(client)
     url = request_url(client)
 
-    case Req.post(url, json: body, headers: headers) do
+    case Req.post(url, json: body, headers: headers, receive_timeout: 120_000) do
       {:ok, %{status: 200, body: resp_body}} ->
-        parse_response(resp_body, client.provider)
+        with {:ok, message} <- parse_response(resp_body, client.provider) do
+          usage = extract_usage(resp_body, client.provider)
+          {:ok, %{message | usage: usage}}
+        end
 
       {:ok, %{status: status, body: resp_body}} ->
         {:error, {status, resp_body}}
@@ -232,21 +242,37 @@ defmodule AgentEx.ModelClient do
 
   # -- API key resolution (per-provider, config then env) --
 
-  defp resolve_api_key(%{api_key: key}) when is_binary(key), do: key
+  defp resolve_api_key(%{api_key: key}) when is_binary(key) and key != "", do: key
 
-  defp resolve_api_key(%{provider: :anthropic}) do
-    app_key(:anthropic_api_key) || System.get_env("ANTHROPIC_API_KEY") || ""
+  defp resolve_api_key(%{provider: :anthropic, project_id: pid}) do
+    AgentEx.Vault.resolve_key(pid, "llm:anthropic")
   end
 
-  defp resolve_api_key(%{provider: :moonshot}) do
-    app_key(:moonshot_api_key) || System.get_env("MOONSHOT_API_KEY") || ""
+  defp resolve_api_key(%{provider: :moonshot, project_id: pid}) do
+    AgentEx.Vault.resolve_key(pid, "llm:moonshot")
   end
 
-  defp resolve_api_key(_client) do
-    app_key(:openai_api_key) || System.get_env("OPENAI_API_KEY") || ""
+  defp resolve_api_key(%{project_id: pid}) do
+    AgentEx.Vault.resolve_key(pid, "llm:openai")
   end
 
-  defp app_key(key), do: Application.get_env(:agent_ex, key)
+  # -- Usage extraction --
+
+  defp extract_usage(
+         %{"usage" => %{"input_tokens" => input, "output_tokens" => output}},
+         :anthropic
+       ) do
+    %{input_tokens: input, output_tokens: output}
+  end
+
+  defp extract_usage(
+         %{"usage" => %{"prompt_tokens" => input, "completion_tokens" => output}},
+         _provider
+       ) do
+    %{input_tokens: input, output_tokens: output}
+  end
+
+  defp extract_usage(_, _), do: nil
 
   # -- Helpers --
 

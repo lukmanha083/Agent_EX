@@ -7,32 +7,25 @@ defmodule AgentExWeb.Features.ProviderChatTest do
 
   setup %{session: session} do
     user = user_fixture()
+    project = project_fixture(user)
     session = feature_log_in_user(session, user)
-    {:ok, session: session, user: user}
+
+    # Switch to the test project
+    execute_script(session, """
+      const form = document.getElementById('desktop-project-form') || document.getElementById('mobile-project-form');
+      if (form) { form.action = '/projects/switch/#{project.id}'; form.submit(); }
+    """)
+
+    :timer.sleep(1000)
+
+    {:ok, session: session, user: user, project: project}
   end
 
   describe "provider/model reflected in chat" do
-    test "chat page shows current model in badge", %{session: session, user: user} do
+    test "chat page shows project model in badge", %{session: session, project: project} do
       session = visit(session, "/chat")
       source = page_source(session)
-      assert source =~ user.model || "gpt-4o-mini"
-    end
-
-    test "changing provider in settings persists", %{session: session} do
-      session =
-        session
-        |> visit("/users/settings")
-        |> execute_script("""
-          const sel = document.querySelector('#provider_form select[name="user[provider]"]');
-          sel.value = 'anthropic';
-          sel.dispatchEvent(new Event('input', { bubbles: true }));
-        """)
-        |> click(button("Update provider"))
-        |> assert_has(css("p", text: "Provider updated successfully", count: :any))
-
-      session = visit(session, "/users/settings")
-      source = page_source(session)
-      assert source =~ "anthropic"
+      assert source =~ project.model
     end
   end
 end

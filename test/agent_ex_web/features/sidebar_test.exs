@@ -7,6 +7,15 @@ defmodule AgentExWeb.Features.SidebarTest do
 
   setup %{session: session} do
     user = user_fixture()
+
+    {:ok, _project} =
+      AgentEx.Projects.create_project(%{
+        user_id: user.id,
+        name: "Test Project",
+        provider: "anthropic",
+        model: "claude-sonnet-4-6"
+      })
+
     session = feature_log_in_user(session, user)
     {:ok, session: session, user: user}
   end

@@ -253,6 +253,19 @@ defmodule AgentExWeb.UserAuth do
     end
   end
 
+  def on_mount(:require_project, _params, _session, socket) do
+    if socket.assigns[:current_project] do
+      {:cont, socket}
+    else
+      socket =
+        socket
+        |> Phoenix.LiveView.put_flash(:info, "Create a project to get started.")
+        |> Phoenix.LiveView.redirect(to: ~p"/projects/new")
+
+      {:halt, socket}
+    end
+  end
+
   def on_mount(:require_sudo_mode, _params, session, socket) do
     socket = mount_current_scope(socket, session)
 
@@ -300,19 +313,17 @@ defmodule AgentExWeb.UserAuth do
         project
 
       _ ->
-        case AgentEx.Projects.ensure_default_project(user_id) do
-          {:ok, default} -> default
-          {:error, _} -> nil
+        # No fallback to default — pick first project or nil
+        case AgentEx.Projects.list_projects(user_id) do
+          [first | _] -> first
+          [] -> nil
         end
     end
   end
 
   @doc "Returns the path to redirect to after log in."
-  # the user was already logged in, redirect to settings
-  def signed_in_path(%Plug.Conn{assigns: %{current_scope: %Scope{user: %Accounts.User{}}}}) do
-    ~p"/users/settings"
-  end
-
+  # Redirect to /chat. The :require_project on_mount hook
+  # will bounce users without projects to /projects/new.
   def signed_in_path(_), do: ~p"/chat"
 
   @doc """

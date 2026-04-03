@@ -141,9 +141,12 @@ defmodule AgentEx.ToolCallerLoop do
     Logger.debug("ToolCallerLoop: REASON phase — thinking without tools")
 
     with {:ok, reasoning} <- think_without_tools(context, input_messages) do
-      # Feed the reasoning back as conversation context and call with tools.
-      # The model can now either: (a) refine its text answer, or (b) call tools.
-      messages_with_reasoning = input_messages ++ [reasoning]
+      # Feed the reasoning back as a user message carrying the analysis,
+      # so the conversation ends with a user message (required by Anthropic).
+      reasoning_relay =
+        Message.user("Based on your analysis above, now proceed with the available tools.")
+
+      messages_with_reasoning = input_messages ++ [reasoning, reasoning_relay]
 
       Logger.debug("ToolCallerLoop: DECIDE phase — re-querying with tools available")
 

@@ -113,6 +113,7 @@ defmodule AgentEx.AgentConfig do
           updated_at: DateTime.t() | nil
         }
 
+  # provider and model are intentionally excluded — they are immutable after creation
   @updatable_fields [
     :name,
     :description,
@@ -128,8 +129,6 @@ defmodule AgentEx.AgentConfig do
     :tool_examples,
     :output_format,
     :system_prompt,
-    :provider,
-    :model,
     :context_window,
     :disabled_builtins,
     :intervention_pipeline,

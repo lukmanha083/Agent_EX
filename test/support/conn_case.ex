@@ -33,6 +33,7 @@ defmodule AgentExWeb.ConnCase do
     alias AgentEx.AccountsFixtures
 
     user = AccountsFixtures.user_fixture()
+    project = AccountsFixtures.project_fixture(user)
     scope = Scope.for_user(user)
 
     opts =
@@ -40,7 +41,12 @@ defmodule AgentExWeb.ConnCase do
       |> Map.take([:token_authenticated_at])
       |> Enum.into([])
 
-    %{conn: log_in_user(conn, user, opts), user: user, scope: scope}
+    conn =
+      conn
+      |> log_in_user(user, opts)
+      |> Plug.Conn.put_session(:current_project_id, project.id)
+
+    %{conn: conn, user: user, project: project, scope: scope}
   end
 
   @doc """

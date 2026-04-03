@@ -9,17 +9,51 @@ defmodule AgentEx.Projects.Project do
     field(:name, :string)
     field(:description, :string)
     field(:root_path, :string)
-    field(:is_default, :boolean, default: false)
+    field(:provider, :string)
+    field(:model, :string)
+    field(:disabled_builtins, {:array, :string}, default: [])
+    field(:token_budget, :integer)
 
     timestamps(type: :utc_datetime_usec)
   end
 
-  def changeset(project, attrs) do
+  @doc "Changeset for creating a new project. Provider and model are required and locked after creation."
+  def creation_changeset(project, attrs) do
     project
-    |> cast(attrs, [:user_id, :name, :description, :root_path, :is_default])
-    |> validate_required([:user_id, :name])
+    |> cast(attrs, [
+      :user_id,
+      :name,
+      :description,
+      :root_path,
+      :provider,
+      :model,
+      :disabled_builtins,
+      :token_budget
+    ])
+    |> validate_required([:user_id, :name, :provider, :model])
+    |> validate_inclusion(:provider, AgentEx.ProviderHelpers.valid_providers())
+    |> validate_model_for_provider()
     |> unique_constraint([:user_id, :name])
-    |> unique_constraint(:is_default, name: :projects_one_default_per_user)
     |> foreign_key_constraint(:user_id)
+  end
+
+  @doc "Changeset for updating an existing project. Provider and model cannot be changed."
+  def update_changeset(project, attrs) do
+    project
+    |> cast(attrs, [:name, :description, :root_path, :disabled_builtins, :token_budget])
+    |> validate_required([:name])
+    |> validate_number(:token_budget, greater_than_or_equal_to: 0)
+    |> unique_constraint([:user_id, :name])
+  end
+
+  defp validate_model_for_provider(changeset) do
+    provider = get_field(changeset, :provider)
+    model = get_field(changeset, :model)
+
+    if provider && model && not AgentEx.ProviderHelpers.valid_model?(provider, model) do
+      add_error(changeset, :model, "is not valid for the selected provider")
+    else
+      changeset
+    end
   end
 end

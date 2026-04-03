@@ -1,5 +1,5 @@
 defmodule AgentEx.Projects do
-  @moduledoc "Project context — CRUD and default project management."
+  @moduledoc "Project context — CRUD for user projects."
 
   import Ecto.Query
 
@@ -9,7 +9,7 @@ defmodule AgentEx.Projects do
   require Logger
 
   def create_project(attrs) do
-    with {:ok, project} <- %Project{} |> Project.changeset(attrs) |> Repo.insert() do
+    with {:ok, project} <- %Project{} |> Project.creation_changeset(attrs) |> Repo.insert() do
       ensure_root_path_dir(project)
       {:ok, project}
     end
@@ -24,61 +24,53 @@ defmodule AgentEx.Projects do
   def list_projects(user_id) do
     Project
     |> where(user_id: ^user_id)
-    |> order_by(asc: :is_default, asc: :name)
+    |> order_by(asc: :name)
     |> Repo.all()
   end
 
   def update_project(%Project{} = project, attrs) do
-    with {:ok, updated} <- project |> Project.changeset(attrs) |> Repo.update() do
+    with {:ok, updated} <- project |> Project.update_changeset(attrs) |> Repo.update() do
       ensure_root_path_dir(updated)
       {:ok, updated}
     end
   end
 
-  def delete_project(%Project{is_default: true}), do: {:error, :cannot_delete_default}
-
   def delete_project(%Project{} = project) do
     with {:ok, deleted} <- Repo.delete(project) do
-      # Conversations + messages cascade via DB foreign key (on_delete: :delete_all)
-      # Agent configs: remove from ETS/DETS
       AgentEx.AgentStore.delete_by_project(project.user_id, project.id)
-      # HTTP tool configs: remove from ETS/DETS
       AgentEx.HttpToolStore.delete_by_project(project.user_id, project.id)
-      # Memory: all tiers scoped by (user_id, project_id) — direct project-scoped delete
-      Task.start(fn -> AgentEx.Memory.delete_project_data(project.user_id, project.id) end)
+      schedule_memory_cleanup(project)
       {:ok, deleted}
     end
   end
 
-  @doc "Get or create the default project for a user. Safe under concurrent calls."
-  def ensure_default_project(user_id) do
-    case Repo.get_by(Project, user_id: user_id, is_default: true) do
-      %Project{} = project -> {:ok, project}
-      nil -> create_default_project(user_id)
+  defp schedule_memory_cleanup(project) do
+    cleanup_fn = fn ->
+      try do
+        AgentEx.Memory.delete_project_data(project.user_id, project.id)
+      rescue
+        e ->
+          Logger.error(
+            "Failed to delete memory data for project #{project.id}: #{Exception.message(e)}"
+          )
+      end
     end
-  end
 
-  defp create_default_project(user_id) do
-    case create_project(%{user_id: user_id, name: "Default", is_default: true}) do
-      {:ok, project} ->
-        {:ok, project}
+    case Task.Supervisor.start_child(AgentEx.TaskSupervisor, cleanup_fn) do
+      {:ok, _} ->
+        :ok
 
-      {:error, _changeset} ->
-        # Race: another process created the default project concurrently
-        case Repo.get_by(Project, user_id: user_id, is_default: true) do
-          %Project{} = project -> {:ok, project}
-          nil -> {:error, :default_project_creation_failed}
-        end
+      {:error, reason} ->
+        Logger.error(
+          "Failed to schedule memory cleanup for project #{project.id}: #{inspect(reason)}"
+        )
+
+        cleanup_fn.()
     end
-  end
-
-  def get_default_project(user_id) do
-    Repo.get_by(Project, user_id: user_id, is_default: true)
   end
 
   @doc """
   Auto-create the sandbox root directory if one is configured.
-  Only runs in local mode — in bridge mode, the bridge handles this.
   Safe: mkdir_p is a no-op if the directory already exists.
   """
   def ensure_root_path_dir(%Project{root_path: path}) when is_binary(path) and path != "" do

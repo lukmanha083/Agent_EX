@@ -98,7 +98,8 @@ defmodule AgentEx.EventLoop do
           {:ok, generated} ->
             broadcast(run_id, :pipeline_complete, %{
               message_count: length(generated),
-              final_content: final_content(generated)
+              final_content: final_content(generated),
+              total_usage: accumulate_usage(generated)
             })
 
             RunRegistry.complete_run(run_id)
@@ -216,6 +217,17 @@ defmodule AgentEx.EventLoop do
     |> Enum.find_value(fn
       %{content: content} when is_binary(content) and content != "" -> content
       _ -> nil
+    end)
+  end
+
+  defp accumulate_usage(generated) do
+    generated
+    |> Enum.reduce(%{input_tokens: 0, output_tokens: 0}, fn
+      %{usage: %{input_tokens: i, output_tokens: o}}, acc ->
+        %{acc | input_tokens: acc.input_tokens + i, output_tokens: acc.output_tokens + o}
+
+      _, acc ->
+        acc
     end)
   end
 end

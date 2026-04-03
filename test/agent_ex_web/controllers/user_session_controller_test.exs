@@ -5,7 +5,11 @@ defmodule AgentExWeb.UserSessionControllerTest do
   alias AgentEx.Accounts
 
   setup do
-    %{unconfirmed_user: unconfirmed_user_fixture(), user: user_fixture()}
+    user = user_fixture()
+    _project = project_fixture(user)
+    unconfirmed = unconfirmed_user_fixture()
+    _unconfirmed_project = project_fixture(unconfirmed)
+    %{unconfirmed_user: unconfirmed, user: user}
   end
 
   describe "POST /users/log-in - email and password" do

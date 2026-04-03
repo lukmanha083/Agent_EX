@@ -11,7 +11,12 @@ defmodule AgentExWeb.Features.ToolsMcpTest do
     user = user_fixture()
 
     {:ok, project} =
-      Projects.create_project(%{user_id: user.id, name: "Tools Project"})
+      Projects.create_project(%{
+        user_id: user.id,
+        name: "Tools Project",
+        provider: "anthropic",
+        model: "claude-sonnet-4-6"
+      })
 
     session = feature_log_in_user(session, user)
 
@@ -63,24 +68,6 @@ defmodule AgentExWeb.Features.ToolsMcpTest do
       |> fill_in(css("[data-testid='mcp-dialog'] input[name='command']"), with: "npx mcp-sqlite")
       |> click(css("[data-testid='mcp-dialog'] button[type='submit']"))
       |> assert_has(css("[role='alert']", text: "MCP server 'sqlite-server' added"))
-    end
-  end
-
-  describe "tools page gate" do
-    test "default project shows 'create project first'", %{session: session, user: user} do
-      default_project = Projects.get_default_project(user.id)
-
-      execute_script(session, """
-        const form = document.getElementById('desktop-project-form') || document.getElementById('mobile-project-form');
-        if (form) { form.action = '/projects/switch/#{default_project.id}'; form.submit(); }
-      """)
-
-      :timer.sleep(1000)
-
-      session
-      |> resize_window(1280, 900)
-      |> visit("/tools")
-      |> assert_has(css("h2", text: "Create a project first"))
     end
   end
 end

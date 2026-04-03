@@ -25,9 +25,9 @@ defmodule AgentExWeb.ChatLive do
     else
       agents = AgentStore.list(user.id, project.id)
 
-      # Orchestrator always uses the user's profile provider/model setting
-      provider = user.provider || "anthropic"
-      model = user.model || default_model_for(provider)
+      # Orchestrator uses the project's provider/model setting
+      provider = project.provider || "anthropic"
+      model = project.model || default_model_for(provider)
       system_prompt = ToolAssembler.orchestrator_prompt(user.id, project.id)
       conversations = Chat.list_conversations(user.id, project.id)
 
@@ -103,39 +103,65 @@ defmodule AgentExWeb.ChatLive do
   def handle_event("send", %{"message" => raw_message}, socket) do
     message = String.trim(raw_message)
 
-    if message == "" do
-      {:noreply, socket}
-    else
-      socket = ensure_conversation(socket, message)
+    cond do
+      message == "" ->
+        {:noreply, socket}
 
-      case socket.assigns.conversation do
-        nil ->
-          {:noreply, socket}
+      AgentEx.Budget.budget_exceeded?(socket.assigns.project.id) ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           "Monthly token budget exceeded. Increase your budget in the Budget page."
+         )}
 
-        conversation ->
-          send_message(socket, conversation, message)
-      end
+      missing_api_key?(socket) ->
+        provider = socket.assigns.provider
+
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           "No API key configured for #{provider}. Add one in Vault → LLM: #{String.capitalize(provider)}."
+         )}
+
+      true ->
+        socket = ensure_conversation(socket, message)
+
+        case socket.assigns.conversation do
+          nil ->
+            {:noreply, socket}
+
+          conversation ->
+            send_message(socket, conversation, message)
+        end
     end
   end
 
   def handle_event("send", _params, socket), do: {:noreply, socket}
 
   def handle_event("cancel", _params, socket) do
-    if socket.assigns.run_id do
-      EventLoop.cancel(socket.assigns.run_id)
-      Phoenix.PubSub.unsubscribe(AgentEx.PubSub, "run:#{socket.assigns.run_id}")
-    end
+    socket = cancel_active_run(socket)
 
     messages =
       socket.assigns.messages ++ [%{role: :assistant, content: "Cancelled by user."}]
 
-    {:noreply,
-     assign(socket, messages: messages, events: [], stages: [], thinking: false, run_id: nil)}
+    {:noreply, assign(socket, messages: messages, events: [], stages: [])}
   end
 
   def handle_event("clear", _params, socket) do
     socket = cancel_active_run(socket)
-    {:noreply, push_patch(socket, to: ~p"/chat")}
+
+    if socket.assigns.conversation do
+      Chat.delete_conversation(socket.assigns.conversation)
+      user = socket.assigns.current_scope.user
+      project = socket.assigns.project
+      conversations = Chat.list_conversations(user.id, project.id)
+      socket = assign(socket, conversations: conversations)
+      {:noreply, push_patch(socket, to: ~p"/chat")}
+    else
+      {:noreply, push_patch(socket, to: ~p"/chat")}
+    end
   end
 
   def handle_event("delete_conversation", %{"id" => id}, socket) do
@@ -241,6 +267,9 @@ defmodule AgentExWeb.ChatLive do
     content = event.data[:final_content] || "No response."
     messages = socket.assigns.messages ++ [%{role: :assistant, content: content}]
 
+    # Record token usage for budget tracking
+    maybe_record_token_usage(socket, event.data[:total_usage])
+
     # Save assistant message to DB with execution metadata
     if socket.assigns.conversation do
       metadata = build_run_metadata(socket.assigns.events, socket.assigns.stages)
@@ -262,6 +291,8 @@ defmodule AgentExWeb.ChatLive do
       maybe_generate_title(socket.assigns.conversation, messages, content)
     end
 
+    cleanup_run(socket)
+
     {:noreply,
      assign(socket,
        messages: messages,
@@ -277,6 +308,8 @@ defmodule AgentExWeb.ChatLive do
   defp handle_run_event(%Event{type: :pipeline_error} = event, socket) do
     reason = event.data[:reason] || "Unknown error"
     messages = socket.assigns.messages ++ [%{role: :assistant, content: "Error: #{reason}"}]
+
+    cleanup_run(socket)
 
     {:noreply,
      assign(socket,
@@ -310,10 +343,7 @@ defmodule AgentExWeb.ChatLive do
     messages = socket.assigns.messages ++ [%{role: :user, content: message}]
 
     # Cancel previous run if any
-    if socket.assigns.run_id do
-      EventLoop.cancel(socket.assigns.run_id)
-      Phoenix.PubSub.unsubscribe(AgentEx.PubSub, "run:#{socket.assigns.run_id}")
-    end
+    socket = cancel_active_run(socket)
 
     run_id = "run-#{System.unique_integer([:positive])}"
     EventLoop.subscribe(run_id)
@@ -321,7 +351,7 @@ defmodule AgentExWeb.ChatLive do
     session_id = "conversation-#{conversation.id}"
     user = socket.assigns.current_scope.user
     project = socket.assigns.project
-    client = build_model_client(socket.assigns.provider, socket.assigns.model)
+    client = build_model_client(socket.assigns.provider, socket.assigns.model, project.id)
 
     {orchestrator_memory, agent_memory_opts} =
       build_memory_opts(socket, user, project, session_id)
@@ -332,8 +362,9 @@ defmodule AgentExWeb.ChatLive do
       ToolAssembler.assemble(user.id, project.id, client,
         memory: agent_memory_opts,
         provider: socket.assigns.provider,
-        disabled_builtins: user.disabled_builtins || [],
-        root_path: project.root_path
+        disabled_builtins: project.disabled_builtins || [],
+        root_path: project.root_path,
+        run_id: run_id
       )
 
     # Refresh agents/prompt — assemble may have auto-created a default agent
@@ -352,7 +383,7 @@ defmodule AgentExWeb.ChatLive do
           memory: orchestrator_memory,
           context_window: orchestrator_memory.context_window,
           tool_timeout: 120_000,
-          reasoning_first: reasoning_capable?(socket.assigns.model),
+          reasoning_first: reasoning_capable?(socket.assigns.model) and needs_reasoning?(message),
           metadata: %{user_id: user.id}
         )
 
@@ -453,10 +484,18 @@ defmodule AgentExWeb.ChatLive do
   defp cancel_active_run(socket) do
     if socket.assigns.run_id do
       EventLoop.cancel(socket.assigns.run_id)
+      AgentEx.TaskList.clear(socket.assigns.run_id)
       Phoenix.PubSub.unsubscribe(AgentEx.PubSub, "run:#{socket.assigns.run_id}")
       assign(socket, run_id: nil, thinking: false)
     else
       socket
+    end
+  end
+
+  defp cleanup_run(socket) do
+    if socket.assigns.run_id do
+      AgentEx.TaskList.clear(socket.assigns.run_id)
+      Phoenix.PubSub.unsubscribe(AgentEx.PubSub, "run:#{socket.assigns.run_id}")
     end
   end
 
@@ -577,10 +616,18 @@ defmodule AgentExWeb.ChatLive do
     end
   end
 
-  defp build_model_client(provider, model) do
+  defp missing_api_key?(socket) do
+    project_id = socket.assigns.project.id
+    vault_key = "llm:#{socket.assigns.provider}"
+    key = AgentEx.Vault.resolve_key(project_id, vault_key)
+    key == "" or is_nil(key)
+  end
+
+  defp build_model_client(provider, model, project_id) do
     AgentEx.ModelClient.new(
       model: model,
-      provider: provider_to_atom(provider)
+      provider: provider_to_atom(provider),
+      project_id: project_id
     )
   end
 
@@ -669,6 +716,24 @@ defmodule AgentExWeb.ChatLive do
   defp internal_message?(%{role: "system"}), do: true
   defp internal_message?(_), do: false
 
+  defp maybe_record_token_usage(socket, %{input_tokens: i, output_tokens: o})
+       when i > 0 or o > 0 do
+    project = socket.assigns.project
+    conversation = socket.assigns.conversation
+
+    AgentEx.Budget.record_usage(%{
+      project_id: project.id,
+      conversation_id: conversation && conversation.id,
+      provider: socket.assigns.provider,
+      model: socket.assigns.model,
+      source: "orchestrator",
+      input_tokens: i,
+      output_tokens: o
+    })
+  end
+
+  defp maybe_record_token_usage(_, _), do: :ok
+
   defp project_agent_id(user, project), do: "u#{user.id}_p#{project.id}_chat"
 
   # Only enable reasoning_first for models that can reliably distinguish
@@ -685,4 +750,24 @@ defmodule AgentExWeb.ChatLive do
   end
 
   defp reasoning_capable?(_), do: false
+
+  # Skip reasoning for short/simple messages; use it for complex tasks
+  # that benefit from planning before tool use.
+  @planning_signals ~w[
+    plan build create implement design refactor migrate
+    analyze compare review audit investigate debug
+    step-by-step multi-step workflow pipeline setup
+    architecture structure organize integrate deploy
+  ]
+  @min_reasoning_words 15
+
+  defp needs_reasoning?(message) when is_binary(message) do
+    word_count = length(String.split(message))
+    lower = String.downcase(message)
+
+    word_count >= @min_reasoning_words or
+      Enum.any?(@planning_signals, &String.contains?(lower, &1))
+  end
+
+  defp needs_reasoning?(_), do: false
 end

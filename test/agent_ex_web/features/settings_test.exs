@@ -17,7 +17,6 @@ defmodule AgentExWeb.Features.SettingsTest do
       |> visit("/users/settings")
       |> assert_has(css("h1", text: "Settings"))
       |> assert_has(css("#timezone_form"))
-      |> assert_has(css("#provider_form"))
       |> assert_has(css("#password_form"))
     end
 
@@ -31,18 +30,6 @@ defmodule AgentExWeb.Features.SettingsTest do
       """)
       |> click(button("Update timezone"))
       |> assert_has(css("p", text: "Timezone updated successfully", count: :any))
-    end
-
-    test "update provider and model", %{session: session} do
-      session
-      |> visit("/users/settings")
-      |> execute_script("""
-        const sel = document.querySelector('#provider_form select[name="user[provider]"]');
-        sel.value = 'anthropic';
-        sel.dispatchEvent(new Event('change', { bubbles: true }));
-      """)
-      |> click(button("Update provider"))
-      |> assert_has(css("p", text: "Provider updated successfully", count: :any))
     end
 
     test "update password", %{session: session} do

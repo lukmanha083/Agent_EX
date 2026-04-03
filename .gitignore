@@ -36,3 +36,6 @@ agent_ex-*.tar
 
 # HelixDB local instance data.
 .helix/
+
+# Auto-generated session logs.
+.memory/

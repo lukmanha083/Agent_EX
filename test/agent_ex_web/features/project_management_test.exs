@@ -25,14 +25,28 @@ defmodule AgentExWeb.Features.ProjectManagementTest do
       |> fill_in(css("input[name='description']"), with: "ML research workspace")
       |> fill_in(css("input[name='root_path']"), with: "/tmp/research")
       |> click(button("Create Project"))
+      |> visit("/projects")
       |> assert_has(css("[data-testid='project-grid']", text: "Research Project"))
     end
   end
 
   describe "project switching and isolation" do
     test "switching projects isolates conversations", %{session: session, user: user} do
+      {:ok, project_a} =
+        Projects.create_project(%{
+          user_id: user.id,
+          name: "Project A",
+          provider: "anthropic",
+          model: "claude-sonnet-4-6"
+        })
+
       {:ok, project_b} =
-        Projects.create_project(%{user_id: user.id, name: "Project B"})
+        Projects.create_project(%{
+          user_id: user.id,
+          name: "Project B",
+          provider: "anthropic",
+          model: "claude-sonnet-4-6"
+        })
 
       {:ok, _convo} =
         Chat.create_conversation(%{
@@ -43,7 +57,15 @@ defmodule AgentExWeb.Features.ProjectManagementTest do
           provider: "openai"
         })
 
-      # Visit chat on default project — should NOT see Project B's conversation
+      # Switch to Project A first
+      execute_script(session, """
+        const form = document.getElementById('desktop-project-form') || document.getElementById('mobile-project-form');
+        if (form) { form.action = '/projects/switch/#{project_a.id}'; form.submit(); }
+      """)
+
+      :timer.sleep(1000)
+
+      # Visit chat on Project A — should NOT see Project B's conversation
       session =
         session
         |> resize_window(1280, 900)
@@ -68,7 +90,12 @@ defmodule AgentExWeb.Features.ProjectManagementTest do
   describe "project deletion" do
     test "delete project shows success flash", %{session: session, user: user} do
       {:ok, project} =
-        Projects.create_project(%{user_id: user.id, name: "Temp Project"})
+        Projects.create_project(%{
+          user_id: user.id,
+          name: "Temp Project",
+          provider: "anthropic",
+          model: "claude-sonnet-4-6"
+        })
 
       session =
         session
@@ -90,21 +117,6 @@ defmodule AgentExWeb.Features.ProjectManagementTest do
       session
       |> assert_has(css("[role='alert']", text: "Project deleted"))
       |> refute_has(css("[data-testid='project-card-#{project.id}']"))
-    end
-
-    test "cannot delete the default project (no delete button)", %{session: session, user: user} do
-      default_project = Projects.get_default_project(user.id)
-
-      session
-      |> resize_window(1280, 900)
-      |> visit("/projects")
-      |> assert_has(css("[data-testid='project-card-#{default_project.id}']"))
-      |> refute_has(
-        css(
-          "[data-testid='project-card-#{default_project.id}'] button[aria-label='Delete project']",
-          visible: false
-        )
-      )
     end
   end
 end

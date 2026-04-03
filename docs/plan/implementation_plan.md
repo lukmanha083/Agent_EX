@@ -2521,6 +2521,716 @@ This means:
 
 ---
 
+## Phase 5d — Per-Project DETS Storage + Mandatory root_path
+
+### Problem
+
+All four DETS stores (AgentStore, HttpToolStore, PersistentMemory, ProceduralMemory)
+use a **single global file** each under `priv/data/{env}/`. This creates scaling and
+lifecycle issues:
+
+1. **DETS 2 GB limit** — a single `agent_configs.dets` file aggregates data from
+   every project across every user. As usage grows, the file approaches the DETS
+   hard limit of 2 GB, at which point writes fail silently.
+2. **O(n) delete** — `delete_by_project/2` scans the entire ETS table with `foldl`
+   to find matching keys. With thousands of projects, this becomes a bottleneck.
+3. **No portability** — project data is trapped inside the server. Users can't
+   back up, move, or inspect their project's agent state independently.
+4. **Lifecycle coupling** — deleting a project requires coordinated cleanup across
+   4 DETS tables, Postgres, and HelixDB. Any failure leaves orphan data.
+5. **Boot-time bloat** — on VM start, every store hydrates its entire DETS file
+   into ETS, including data for projects that may never be accessed in this session.
+
+### Scope
+
+This phase targets **localhost mode only** — the server and the user's filesystem
+are on the same machine. Phase 8 (Hybrid Bridge) extends this to remote machines
+where a bridge binary proxies filesystem access over WebSocket. The directory
+layout defined here (`.agent_ex/`) becomes the contract that Phase 8's bridge
+binary also uses, so the on-disk format is designed once and reused later.
+
+### Solution
+
+Store DETS files **per-project** inside the project's `root_path/.agent_ex/`
+directory. Make `root_path` a required field on project creation. Scaffold the
+`.agent_ex/` and `.memory/` directories automatically when a project is created.
+
+```text
+~/projects/trading/
+├── .agent_ex/                  ← AgentEx project data (auto-created)
+│   ├── agent_configs.dets      ← AgentStore data for this project only
+│   ├── http_tool_configs.dets  ← HttpToolStore data for this project only
+│   ├── persistent_memory.dets  ← Tier 2 key-value facts for this project
+│   ├── procedural_memory.dets  ← Tier 4 skills for this project
+│   └── .gitignore              ← ignores *.dets (auto-created)
+├── .memory/                    ← Orchestrator planning notes (existing)
+│   ├── plan.md
+│   └── progress.md
+└── (user's project files)
+
+~/projects/marketing/
+├── .agent_ex/
+│   ├── agent_configs.dets
+│   ├── http_tool_configs.dets
+│   ├── persistent_memory.dets
+│   └── procedural_memory.dets
+├── .memory/
+└── (user's project files)
+```
+
+**Delete a project = close DETS handles + `rm -rf .agent_ex/`** — instant, atomic,
+zero scanning.
+
+### Key Design Decisions
+
+**1. root_path becomes mandatory**
+
+`root_path` is currently optional. With per-project DETS, every project needs a
+local directory. Make `root_path` required in `creation_changeset/2` and validate
+that the parent directory exists (the project dir itself is created if missing).
+
+```elixir
+# project.ex — creation_changeset
+|> validate_required([:user_id, :name, :provider, :model, :root_path])
+|> validate_root_path()
+
+defp validate_root_path(changeset) do
+  case get_change(changeset, :root_path) do
+    nil -> changeset
+    path ->
+      expanded = Path.expand(path)
+      if File.dir?(Path.dirname(expanded)) do
+        changeset
+      else
+        add_error(changeset, :root_path, "parent directory does not exist")
+      end
+  end
+end
+```
+
+**2. Project directory scaffolding on creation**
+
+When a project is created, `Projects.create_project/1` creates the project
+directory, `.agent_ex/` (with a `.gitignore` for DETS files), and `.memory/`
+(for orchestrator planning notes, already used by `ToolAssembler`).
+
+```elixir
+# projects.ex — after Repo.insert
+def create_project(attrs) do
+  with {:ok, project} <- %Project{} |> Project.creation_changeset(attrs) |> Repo.insert() do
+    scaffold_project_dirs(project)
+    {:ok, project}
+  end
+end
+
+defp scaffold_project_dirs(%Project{root_path: root_path}) do
+  expanded = Path.expand(root_path)
+  agent_ex_dir = Path.join(expanded, ".agent_ex")
+  memory_dir = Path.join(expanded, ".memory")
+
+  File.mkdir_p!(agent_ex_dir)
+  File.mkdir_p!(memory_dir)
+
+  # Auto-create .gitignore so DETS files aren't committed
+  gitignore_path = Path.join(agent_ex_dir, ".gitignore")
+  unless File.exists?(gitignore_path) do
+    File.write!(gitignore_path, "# AgentEx project data — do not commit\n*.dets\n")
+  end
+end
+```
+
+**3. DETS files opened on demand, not at boot**
+
+Instead of opening a single global DETS file at GenServer init, each store opens
+per-project DETS files lazily when first accessed. A `DetsManager` module tracks
+open handles and resolves paths.
+
+```elixir
+# Conceptual approach — DetsManager
+defp dets_table_for(project_root_path, store_name) do
+  dets_path = Path.join([Path.expand(project_root_path), ".agent_ex", "#{store_name}.dets"])
+  table_name = :"#{store_name}_#{:erlang.phash2(dets_path)}"
+
+  case :dets.info(table_name) do
+    :undefined ->
+      {:ok, ^table_name} = :dets.open_file(table_name, file: String.to_charlist(dets_path), type: :set)
+      table_name
+    _ ->
+      table_name
+  end
+end
+```
+
+**4. ETS stays global, DETS is per-project**
+
+Keep a single ETS table per store type (`:agent_configs`, `:persistent_memory`,
+etc.) for fast in-memory reads. Keys remain `{user_id, project_id, ...}` tuples.
+Only the DETS backing changes — from one global file to many per-project files.
+
+This means:
+- **Read path** — unchanged. ETS lookup by composite key, same as today.
+- **Write path** — resolve project's DETS file, write there, then ETS.
+- **Hydration** — on first project access, open its DETS file and load into ETS.
+- **Eviction** — idle projects can be evicted from ETS + DETS handle closed.
+
+**5. Project deletion becomes directory-based**
+
+```elixir
+# projects.ex — delete_project/1
+def delete_project(%Project{} = project) do
+  with {:ok, deleted} <- Repo.delete(project) do
+    # Close any open DETS handles for this project
+    DetsManager.close_all(project.root_path)
+
+    # Evict project keys from ETS
+    AgentEx.AgentStore.evict_project(project.user_id, project.id)
+    AgentEx.HttpToolStore.evict_project(project.user_id, project.id)
+    AgentEx.Memory.PersistentMemory.Store.evict_project(project.user_id, project.id)
+    AgentEx.Memory.ProceduralMemory.Store.evict_project(project.user_id, project.id)
+
+    # Delete the .agent_ex directory — all DETS data gone instantly
+    agent_ex_dir = Path.join(Path.expand(project.root_path), ".agent_ex")
+    File.rm_rf(agent_ex_dir)
+
+    # Async cleanup for HelixDB (best-effort, unchanged)
+    Task.Supervisor.start_child(AgentEx.TaskSupervisor, fn ->
+      AgentEx.Memory.delete_helix_data(project.user_id, project.id)
+    end)
+
+    {:ok, deleted}
+  end
+end
+```
+
+### Phase 8 Forward-Compatibility
+
+The `.agent_ex/` directory layout is the **on-disk contract** that Phase 8's
+bridge binary will also read/write. In localhost mode the server accesses these
+files directly via `File` + `:dets`. In bridge mode (Phase 8), the bridge binary
+on the remote machine serves the same files over WebSocket and the server never
+touches the filesystem directly. The store modules need only swap the I/O backend
+(local vs bridge channel) — the DETS format and directory layout stay the same.
+
+### Migration Strategy
+
+Existing projects with data in global DETS files need migration:
+
+```text
+1. Add root_path validation (required for new projects, optional for existing)
+2. Add `mix agent_ex.migrate_dets` task:
+   a. For each project with root_path:
+      - Create .agent_ex/ directory
+      - Open per-project DETS file
+      - Scan global DETS, copy matching {user_id, project_id, ...} entries
+      - Verify count matches
+   b. After all projects migrated:
+      - Rename old global DETS files to *.bak
+3. Switch store GenServers to per-project DETS mode
+4. Clean up .bak files after confidence period
+```
+
+### File Inventory
+
+**Modified files:**
+
+| File | Change |
+|------|--------|
+| `lib/agent_ex/projects/project.ex` | Make `root_path` required in `creation_changeset`, add `validate_root_path` |
+| `lib/agent_ex/projects.ex` | Add `scaffold_project_dirs/1`, update `delete_project/1` for directory-based cleanup |
+| `lib/agent_ex/agent_store.ex` | Per-project DETS via DetsManager, add `evict_project/2`, lazy hydration |
+| `lib/agent_ex/http_tool_store.ex` | Same as AgentStore |
+| `lib/agent_ex/memory/persistent_memory/store.ex` | Per-project DETS via DetsManager, add `evict_project/2` |
+| `lib/agent_ex/memory/persistent_memory/loader.ex` | Accept project-specific DETS table in hydrate/sync |
+| `lib/agent_ex/memory/procedural_memory/store.ex` | Per-project DETS via DetsManager, add `evict_project/2` |
+| `lib/agent_ex/memory/procedural_memory/loader.ex` | Accept project-specific DETS table in hydrate/sync |
+| `lib/agent_ex_web/live/projects_live.ex` | Make root_path required in form UI |
+| `lib/agent_ex_web/components/project_components.ex` | Update editor form to require root_path |
+
+**New files:**
+
+| File | Purpose |
+|------|---------|
+| `lib/agent_ex/dets_manager.ex` | Shared logic for per-project DETS lifecycle (open/close/path resolution/handle registry) |
+| `lib/mix/tasks/migrate_dets.ex` | One-time migration from global to per-project DETS |
+
+### Dependency Graph
+
+```text
+5d-A: Enforce root_path
+  │
+  ├─ Project.creation_changeset: validate_required [:root_path]
+  ├─ Project.validate_root_path: parent dir must exist
+  ├─ ProjectsLive: root_path field required in editor form
+  ├─ ProjectComponents: update new project editor
+  │
+5d-B: Project Directory Scaffolding
+  │
+  ├─ Projects.create_project: call scaffold_project_dirs/1
+  ├─ scaffold_project_dirs: mkdir root_path/ + .agent_ex/ + .memory/
+  ├─ Auto-create .agent_ex/.gitignore (ignore *.dets)
+  │
+5d-C: DetsManager (shared lifecycle module)
+  │
+  ├─ DetsManager.open(project_root_path, store_name) → dets_ref
+  ├─ DetsManager.close(project_root_path, store_name)
+  ├─ DetsManager.close_all(project_root_path)
+  ├─ DetsManager.path_for(project_root_path, store_name) → charlist
+  ├─ Internal registry: track open handles by {root_path, store_name}
+  │
+5d-D: Store Migration (per store)
+  │
+  ├─ AgentStore: replace global DETS with DetsManager calls
+  ├─ HttpToolStore: same
+  ├─ PersistentMemory.Store: same
+  ├─ ProceduralMemory.Store: same
+  ├─ Loader modules: accept dynamic DETS ref
+  │
+5d-E: Delete Cleanup
+  │
+  ├─ Projects.delete_project: DetsManager.close_all → evict ETS → rm_rf .agent_ex/
+  ├─ Remove delete_by_project from all stores (no longer needed)
+  │
+5d-F: Migration Task
+  │
+  ├─ mix agent_ex.migrate_dets: copy global → per-project
+  └─ Verification + backup
+```
+
+---
+
+## Phase 5e — Migrate HelixDB → pgvector + Relational Graph
+
+### Problem
+
+HelixDB is a separate service for Tier 3 (semantic memory) and the knowledge
+graph. It causes several problems:
+
+1. **No per-project delete** — HelixDB has no query to delete by `user_id` or
+   `project_id`. The current workaround searches with a zero-vector, client-side
+   filters, then deletes one-by-one in batches of 500. 9 of 14 data types have
+   no delete query at all — entities, facts, and most embeddings are orphaned
+   forever when a project is deleted.
+2. **No server-side filtering** — vector search returns all results globally.
+   Elixir over-fetches 3× and filters client-side by `(user_id, project_id,
+   agent_id)`. Wasteful for multi-tenant workloads.
+3. **Extra infrastructure** — a separate HTTP service on port 6969 that must be
+   deployed, monitored, and kept running alongside the BEAM and Postgres.
+4. **Immature tooling** — no Elixir driver, no transaction support, limited
+   query language. Custom HTTP client with manual JSON parsing.
+
+### Why Not Apache AGE?
+
+Apache AGE (PostgreSQL graph extension) was evaluated and rejected due to
+**security concerns**:
+
+- AGE's `cypher()` function takes the query as a **text string constant** inside
+  `$$...$$`. PostgreSQL's `$1`/`$2` parameter binding cannot reach inside the
+  Cypher text — AGE's parser rejects them.
+- The only safe parameterization is SQL-level `PREPARE`/`EXECUTE` with an agtype
+  map as a third argument. This is **incompatible with Postgrex's wire-protocol
+  prepared statements** and connection pooling (DBConnection).
+- **CVE-2022-45786** — SQL injection in AGE's Python/Go drivers caused by exactly
+  this parameterization difficulty. Drivers resorted to string interpolation.
+- No maintained Elixir driver exists. Building one safely requires solving the
+  same PREPARE/EXECUTE + connection pooling problem that caused the CVE.
+
+### Why Not Cassandra + JanusGraph?
+
+Also evaluated and rejected:
+
+- JanusGraph has **no efficient bulk delete** — same vertex-by-vertex scan as
+  HelixDB. Does not solve the core problem.
+- **Gremlex** (only Elixir Gremlin client) is unmaintained since ~2020.
+- Adds 2-3 JVM processes (JanusGraph Server + Gremlin Server + optional
+  Elasticsearch) to the deployment — increases operational complexity instead
+  of reducing it.
+
+### Solution
+
+Replace HelixDB with **pgvector + regular Postgres tables**:
+
+- **pgvector** for all vector similarity search (Tier 3 semantic memory +
+  knowledge graph embeddings)
+- **Regular Postgres tables with foreign keys** for graph structure (entities,
+  facts, episodes, edges)
+- **`ON DELETE CASCADE`** from projects table handles all cleanup automatically
+- **Full Ecto integration** — schemas, changesets, parameterized queries, no
+  raw SQL, zero injection surface
+
+### Scaling Rationale: Long-Term Memory, Low Query Demand
+
+PostgreSQL is vertically scaled, so it's important to understand the query
+demand before putting more load on it. Analysis of the codebase shows the
+memory tiers have clearly separated access patterns:
+
+```text
+┌─────────────────────────────────────────────────────────────────────┐
+│                    Query Demand by Tier                              │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  HOT PATH (every LLM call, latency-critical)                        │
+│  ┌──────────────────────────────────────────────────────────┐       │
+│  │  Tier 1: Working Memory — GenServer (in-process RAM)     │       │
+│  │    READ: every iteration (blocking, synchronous)          │       │
+│  │    WRITE: ~3x per sense iteration                         │       │
+│  │                                                           │       │
+│  │  Tier 2: Persistent Memory — ETS (in-process RAM)        │       │
+│  │    READ: every iteration (parallel Task, O(1) lookup)     │       │
+│  │    WRITE: 0-many per session, async DETS sync             │       │
+│  │                                                           │       │
+│  │  Tier 4: Procedural Memory — ETS (in-process RAM)        │       │
+│  │    READ: every iteration (parallel Task, top-10 scan)     │       │
+│  │    WRITE: 1x at session close (async reflector)           │       │
+│  └──────────────────────────────────────────────────────────┘       │
+│                                                                      │
+│  WARM PATH (every LLM call, parallel + tolerant of latency)         │
+│  ┌──────────────────────────────────────────────────────────┐       │
+│  │  Tier 3: Semantic Memory — currently HelixDB → pgvector  │       │
+│  │    READ: per iteration IF semantic_query non-empty         │       │
+│  │    WRITE: 1x at session close (summary promotion)         │       │
+│  │    Already runs in parallel Task with 30s timeout         │       │
+│  │                                                           │       │
+│  │  Knowledge Graph — currently HelixDB → Postgres tables    │       │
+│  │    READ: per iteration IF semantic_query non-empty         │       │
+│  │    WRITE: explicit ingest only (not in hot loop)          │       │
+│  │    Already runs in parallel Task with 30s timeout         │       │
+│  └──────────────────────────────────────────────────────────┘       │
+│                                                                      │
+│  COLD PATH (session lifecycle events only)                           │
+│  ┌──────────────────────────────────────────────────────────┐       │
+│  │  Promotion: 1x at session close                           │       │
+│  │  Reflector: 1x at session close (LLM skill extraction)   │       │
+│  │  Observer: per sense iteration → writes to Tier 2 only    │       │
+│  │  KG Ingest: explicit call, not in default loop            │       │
+│  └──────────────────────────────────────────────────────────┘       │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**Key insight: Tier 3 and KG are already behind parallel Tasks with 30s
+timeouts.** They were designed for remote I/O latency (HelixDB HTTP calls).
+Moving them to Postgres adds ~1-5ms query time vs HelixDB's ~10-50ms HTTP
+round-trip — this is actually **faster**, not slower.
+
+**No tier refactoring is needed.** The architecture already separates:
+- **In-process hot tiers** (1, 2, 4): GenServer + ETS — zero network hops
+- **Database warm tiers** (3, KG): parallel Tasks — tolerate network latency
+
+Moving Tier 3 and KG from HelixDB to Postgres just swaps one remote backend
+for a faster, more reliable one that's already in the stack.
+
+### Database Schema
+
+#### Tier 3: Semantic Memory Vectors
+
+```elixir
+# Migration
+create table(:semantic_memories) do
+  add :project_id, references(:projects, on_delete: :delete_all), null: false
+  add :agent_id, :string, null: false
+  add :content, :text, null: false
+  add :memory_type, :string, default: "general"
+  add :session_id, :string
+  add :embedding, :vector, size: 1536, null: false
+
+  timestamps(type: :utc_datetime_usec, updated_at: false)
+end
+
+create index(:semantic_memories, [:project_id, :agent_id])
+create index(:semantic_memories, ["embedding vector_cosine_ops"],
+  using: "hnsw", name: :semantic_memories_embedding_idx)
+```
+
+```elixir
+# Schema
+defmodule AgentEx.Memory.SemanticMemory.Memory do
+  use Ecto.Schema
+  import Ecto.Changeset
+
+  schema "semantic_memories" do
+    belongs_to(:project, AgentEx.Projects.Project)
+    field(:agent_id, :string)
+    field(:content, :string)
+    field(:memory_type, :string, default: "general")
+    field(:session_id, :string)
+    field(:embedding, Pgvector.Ecto.Vector)
+
+    timestamps(type: :utc_datetime_usec, updated_at: false)
+  end
+end
+```
+
+#### Knowledge Graph: Entities
+
+```elixir
+create table(:kg_entities) do
+  # Entities are shared — linked to projects via episodes
+  add :name, :string, null: false
+  add :entity_type, :string, null: false
+  add :description, :text
+  add :summary, :text
+  add :name_embedding, :vector, size: 1536
+
+  timestamps(type: :utc_datetime_usec)
+end
+
+create unique_index(:kg_entities, [:name, :entity_type])
+create index(:kg_entities, ["name_embedding vector_cosine_ops"],
+  using: "hnsw", name: :kg_entities_embedding_idx)
+```
+
+#### Knowledge Graph: Episodes (per-project, per-agent)
+
+```elixir
+create table(:kg_episodes) do
+  add :project_id, references(:projects, on_delete: :delete_all), null: false
+  add :agent_id, :string, null: false
+  add :content, :text, null: false
+  add :role, :string
+  add :source, :string
+  add :content_embedding, :vector, size: 1536
+
+  timestamps(type: :utc_datetime_usec, updated_at: false)
+end
+
+create index(:kg_episodes, [:project_id, :agent_id])
+create index(:kg_episodes, ["content_embedding vector_cosine_ops"],
+  using: "hnsw", name: :kg_episodes_embedding_idx)
+```
+
+#### Knowledge Graph: Facts (entity → entity relationships)
+
+```elixir
+create table(:kg_facts) do
+  add :source_entity_id, references(:kg_entities, on_delete: :delete_all), null: false
+  add :target_entity_id, references(:kg_entities, on_delete: :delete_all), null: false
+  add :fact_type, :string, null: false
+  add :description, :text, null: false
+  add :confidence, :string
+  add :description_embedding, :vector, size: 1536
+
+  timestamps(type: :utc_datetime_usec)
+end
+
+create index(:kg_facts, [:source_entity_id])
+create index(:kg_facts, [:target_entity_id])
+create index(:kg_facts, ["description_embedding vector_cosine_ops"],
+  using: "hnsw", name: :kg_facts_embedding_idx)
+```
+
+#### Knowledge Graph: Entity ↔ Episode links
+
+```elixir
+create table(:kg_mentions) do
+  add :entity_id, references(:kg_entities, on_delete: :delete_all), null: false
+  add :episode_id, references(:kg_episodes, on_delete: :delete_all), null: false
+  add :confidence, :string
+
+  timestamps(type: :utc_datetime_usec, updated_at: false)
+end
+
+create index(:kg_mentions, [:entity_id])
+create index(:kg_mentions, [:episode_id])
+create unique_index(:kg_mentions, [:entity_id, :episode_id])
+```
+
+### Query Mapping: HelixDB → Ecto
+
+Every HelixDB query maps to a standard Ecto query with full parameterization:
+
+#### Semantic Memory
+
+| HelixDB Query | Ecto Replacement |
+|---|---|
+| `SearchMemory(vector, limit)` | `from(m in Memory, where: m.project_id == ^pid and m.agent_id == ^aid, order_by: cosine_distance(m.embedding, ^vec), limit: ^limit)` |
+| `AddMemory(...)` | `Repo.insert(%Memory{...})` |
+| `DeleteMemory(id)` | `Repo.delete(memory)` |
+
+**Improvement:** Server-side filtering via `WHERE project_id = ? AND agent_id = ?`
+replaces the current over-fetch + client-side filter pattern.
+
+#### Knowledge Graph
+
+| HelixDB Query | Ecto Replacement |
+|---|---|
+| `CreateEntity(...)` | `Repo.insert(%Entity{...}, on_conflict: ..., conflict_target: [:name, :entity_type])` |
+| `CreateEpisode(...)` | `Repo.insert(%Episode{...})` |
+| `CreateFact(...)` | `Repo.insert(%Fact{...})` |
+| `LinkEntityToEpisode(...)` | `Repo.insert(%Mention{...}, on_conflict: :nothing)` |
+| `FindEntity(vector, limit)` | `from(e in Entity, order_by: cosine_distance(e.name_embedding, ^vec), limit: ^limit)` |
+| `GetEntityKnowledge(id)` | `Repo.preload(entity, [:outgoing_facts, :incoming_facts])` or JOIN query |
+| `GetRelatedEntities(id)` | Self-join on facts: `source_entity → fact → target_entity` |
+| `HybridEntitySearch(vector)` | Vector search on entities + JOIN to facts |
+| `SearchEpisodes(vector, limit)` | `from(e in Episode, where: e.project_id == ^pid and e.agent_id == ^aid, order_by: cosine_distance(e.content_embedding, ^vec), limit: ^limit)` |
+| `SearchFacts(vector, limit)` | `from(f in Fact, order_by: cosine_distance(f.description_embedding, ^vec), limit: ^limit)` |
+| `StoreEntityEmbedding(...)` | `Entity \|> changeset(%{name_embedding: vec}) \|> Repo.update()` — embedding stored directly on entity row |
+| `StoreEpisodeEmbedding(...)` | Same — embedding on episode row |
+| `StoreFactEmbedding(...)` | Same — embedding on fact row |
+
+**Simplification:** HelixDB stores embeddings as separate vector types
+(`EntityEmbedding`, `EpisodeEmbedding`, `FactEmbedding`) linked by edges
+(`HasEmbedding`, `HasEpisodeEmbedding`, `HasFactEmbedding`). In Postgres,
+the embedding is just a `vector` column on the entity/episode/fact row itself.
+This eliminates 6 data types and 3 edge types.
+
+### Entity Resolution
+
+The current entity resolution (similarity threshold 0.85) becomes a simple
+Ecto query:
+
+```elixir
+def resolve_entity(name, entity_type, description) do
+  embedding = Embeddings.embed!("#{name}: #{description}")
+
+  existing =
+    from(e in Entity,
+      order_by: cosine_distance(e.name_embedding, ^embedding),
+      limit: 1
+    )
+    |> Repo.one()
+
+  if existing && cosine_distance(existing.name_embedding, embedding) <= 0.15 do
+    # Update last_seen
+    existing |> Entity.changeset(%{last_seen: now, description: description}) |> Repo.update!()
+  else
+    Repo.insert!(%Entity{
+      name: name, entity_type: entity_type,
+      description: description, name_embedding: embedding
+    })
+  end
+end
+```
+
+### Project Deletion: Fully Automatic
+
+With `ON DELETE CASCADE` on all tables:
+
+```text
+DELETE FROM projects WHERE id = 42
+  → CASCADE: semantic_memories (all vectors for this project)
+  → CASCADE: kg_episodes (all episodes for this project)
+    → CASCADE: kg_mentions (all entity↔episode links)
+  → CASCADE: project_token_usage
+  → CASCADE: project_secrets
+  → CASCADE: conversations → conversation_messages
+```
+
+Entities and facts are shared (not project-scoped). Orphaned entities with no
+remaining mentions can be cleaned up by a periodic background job:
+
+```elixir
+# Cleanup entities with no remaining mentions or facts
+from(e in Entity,
+  left_join: m in Mention, on: m.entity_id == e.id,
+  left_join: fs in Fact, on: fs.source_entity_id == e.id,
+  left_join: ft in Fact, on: ft.target_entity_id == e.id,
+  where: is_nil(m.id) and is_nil(fs.id) and is_nil(ft.id)
+)
+|> Repo.delete_all()
+```
+
+### What Changes, What Doesn't
+
+| Component | Change? | Notes |
+|---|---|---|
+| Tier 1 (Working Memory) | **No** | GenServer stays — hot path, in-process |
+| Tier 2 (Persistent Memory) | **No** | ETS/DETS stays — hot path, in-process. Phase 5d moves to per-project DETS |
+| Tier 4 (Procedural Memory) | **No** | ETS/DETS stays — hot path, in-process. Phase 5d moves to per-project DETS |
+| Tier 3 (Semantic Memory) | **Yes** | HelixDB → pgvector. Store.ex rewritten to use Ecto |
+| Knowledge Graph | **Yes** | HelixDB → Postgres tables. Store/Retriever/Store rewritten |
+| ContextBuilder | **No** | Interface unchanged — still calls `to_context_messages()` on each tier |
+| Embeddings | **No** | OpenAI embedding API calls unchanged |
+| Extractor | **No** | LLM-based extraction unchanged — feeds Store |
+| Promotion | **No** | Session summary flow unchanged — calls Store.store() |
+| Observer/Reflector | **No** | Writes to Tier 2/4 — unaffected |
+
+### File Inventory
+
+**New files:**
+
+| File | Purpose |
+|------|---------|
+| `priv/repo/migrations/*_create_semantic_memories.exs` | Tier 3 pgvector table |
+| `priv/repo/migrations/*_create_knowledge_graph.exs` | KG entities, episodes, facts, mentions |
+| `lib/agent_ex/memory/semantic_memory/memory.ex` | Ecto schema for semantic memories |
+| `lib/agent_ex/memory/knowledge_graph/entity.ex` | Ecto schema for entities |
+| `lib/agent_ex/memory/knowledge_graph/episode.ex` | Ecto schema for episodes |
+| `lib/agent_ex/memory/knowledge_graph/fact.ex` | Ecto schema for facts |
+| `lib/agent_ex/memory/knowledge_graph/mention.ex` | Ecto schema for entity↔episode links |
+
+**Rewritten files:**
+
+| File | Change |
+|------|--------|
+| `lib/agent_ex/memory/semantic_memory/store.ex` | HelixDB HTTP calls → Ecto queries with pgvector |
+| `lib/agent_ex/memory/knowledge_graph/store.ex` | HelixDB calls → Ecto queries. Ingestion pipeline uses Repo.insert |
+| `lib/agent_ex/memory/knowledge_graph/retriever.ex` | 3 HelixDB searches → 3 Ecto queries with pgvector |
+
+**Modified files:**
+
+| File | Change |
+|------|--------|
+| `mix.exs` | Add `{:pgvector, "~> 0.3"}` dependency |
+| `config/config.exs` | Remove `helix_db_url` config |
+| `config/runtime.exs` | Remove `HELIX_DB_URL` env var handling |
+| `lib/agent_ex/application.ex` | Remove SemanticMemory.Store and KnowledgeGraph.Store from supervision tree (no longer GenServers — stateless Ecto modules) |
+| `lib/agent_ex/memory.ex` | Update delete_project_data to remove HelixDB cleanup (CASCADE handles it) |
+
+**Deleted files:**
+
+| File | Reason |
+|------|--------|
+| `lib/agent_ex/memory/semantic_memory/client.ex` | HelixDB HTTP client no longer needed |
+| `helix/schema.hx` | HelixDB schema definition |
+| `helix/queries.hx` | HelixDB query definitions |
+
+### Dependency Graph
+
+```text
+5e-A: pgvector Setup
+  │
+  ├─ mix.exs: add {:pgvector, "~> 0.3"}
+  ├─ Repo config: Pgvector.Extensions.Vector in Postgrex types
+  ├─ Migration: CREATE EXTENSION IF NOT EXISTS vector
+  │
+5e-B: Schema + Migration
+  │
+  ├─ Migration: semantic_memories table with vector(1536) + HNSW index
+  ├─ Migration: kg_entities, kg_episodes, kg_facts, kg_mentions
+  ├─ Ecto schemas: Memory, Entity, Episode, Fact, Mention
+  ├─ All project-scoped tables: ON DELETE CASCADE from projects
+  │
+5e-C: Rewrite Semantic Memory Store
+  │
+  ├─ SemanticMemory.Store: GenServer → stateless module
+  ├─ store(): Embeddings.embed + Repo.insert
+  ├─ search(): Ecto query with cosine_distance + WHERE project/agent
+  ├─ delete_by_project(): removed (CASCADE handles it)
+  ├─ delete_by_agent(): Repo.delete_all with WHERE clause
+  │
+5e-D: Rewrite Knowledge Graph Store + Retriever
+  │
+  ├─ KG.Store: GenServer → stateless module
+  ├─ Ingestion: create_episode → extract → resolve_entity → store_facts
+  ├─ Entity resolution: pgvector cosine search + threshold
+  ├─ KG.Retriever: 3 HelixDB searches → 3 Ecto queries
+  ├─ hybrid_search(): parallel Ecto queries (same Task pattern)
+  │
+5e-E: Cleanup
+  │
+  ├─ Delete: semantic_memory/client.ex, helix/schema.hx, helix/queries.hx
+  ├─ Remove: helix_db_url from config, HELIX_DB_URL from runtime.exs
+  ├─ application.ex: remove GenServer children for Store modules
+  ├─ memory.ex: simplify delete_project_data (no HelixDB cleanup needed)
+  ├─ .helix/ in .gitignore: can remove (no more HelixDB local data)
+  │
+5e-F: Data Migration (optional)
+  │
+  ├─ mix agent_ex.migrate_helix: pull existing HelixDB data into Postgres
+  └─ Best-effort: entities/episodes may be incomplete due to HelixDB limitations
+```
+
+---
+
 ## Phase 6 — Flow Builder + Triggers
 
 ### Problem
@@ -2832,6 +3542,15 @@ Three deployment modes that coexist:
 | **Local** | User runs AgentEx on `localhost` | Dev/personal use, full local access |
 | **Bridge** | Server-deployed + bridge on user's machine | Production, agents operate on user's real machine |
 | **Server-only** | Server-deployed, no bridge | API-only agents, cloud tools, no local access needed |
+
+> **Phase 5d prerequisite:** In **Local** mode, the server reads/writes DETS files
+> directly inside `project.root_path/.agent_ex/` (per-project storage, see Phase
+> 5d). In **Bridge** mode, the bridge binary on the user's machine serves those
+> same `.agent_ex/` files over the WebSocket channel. The store modules must swap
+> the I/O backend (direct `File`/`:dets` in local mode → bridge channel calls in
+> bridge mode) while the on-disk layout stays identical. `DetsManager` (Phase 5d)
+> should be designed with this backend swap in mind — e.g. a behaviour or adapter
+> pattern so Phase 8 can provide a `BridgeDetsAdapter` without rewriting the stores.
 
 The bridge is a **single pre-compiled binary** (packaged via Burrito) that:
 
@@ -4291,7 +5010,7 @@ Why BEAM/Elixir is uniquely suited for the bridge pattern:
 | Create | `lib/agent_ex_web/components/bridge_components.ex` | Status indicator, token display (show-once), download + checksum |
 | Create | `lib/agent_ex/bridge_app.ex` | Escript entry point: reads `~/.agentex/token`, enforces WSS |
 | Create | `lib/agent_ex/bridge/client.ex` | Bridge-side WebSocket client with backoff + jitter reconnect |
-| Create | `lib/agent_ex/bridge/executor.ex` | Bridge-side tool execution with local policy enforcement + auto-create sandbox root_path directory |
+| Create | `lib/agent_ex/bridge/executor.ex` | Bridge-side tool execution with local policy enforcement + auto-create sandbox root_path directory. **Must also serve `.agent_ex/` DETS files** — replaces localhost `DetsManager` (Phase 5d) with channel-proxied reads/writes so the server never touches the remote filesystem directly |
 | Create | `lib/agent_ex/bridge/policy.ex` | Parse + apply `~/.agentex/policy.json`, safe defaults |
 | Create | `lib/agent_ex/bridge/confirmation.ex` | TTY confirmation prompts for write operations |
 | Modify | `lib/agent_ex/application.ex` | Add Bridge.Registry to supervision tree |
@@ -4327,6 +5046,7 @@ Why BEAM/Elixir is uniquely suited for the bridge pattern:
   │
   ├─ Bridge.Client (WSS connection, token from file, backoff reconnect)
   ├─ Bridge.Executor (local execution with policy + sandbox + auto-create root_path dir)
+  ├─ Bridge.DetsProxy (serve .agent_ex/*.dets over channel, replacing localhost DetsManager from Phase 5d)
   ├─ Bridge.Confirmation (TTY prompts for write operations)
   ├─ BridgeApp (entry point, WSS enforcement, version check)
   ├─ Burrito packaging (single binary, embedded integrity hash)

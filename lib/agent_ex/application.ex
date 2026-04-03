@@ -31,6 +31,9 @@ defmodule AgentEx.Application do
       # EventLoop: ETS-based run tracking
       AgentEx.EventLoop.RunRegistry,
 
+      # Orchestrator task list (ETS-backed)
+      AgentEx.TaskList,
+
       # Memory system: Registry for per-session working memory
       {Registry, keys: :unique, name: AgentEx.Memory.SessionRegistry},
       AgentEx.Memory.WorkingMemory.Supervisor,

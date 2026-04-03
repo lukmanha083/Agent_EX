@@ -2,17 +2,20 @@ defmodule AgentEx.Memory.Embeddings do
   @moduledoc """
   OpenAI embedding API client.
   Uses text-embedding-3-small (1536 dimensions).
+  Supports project-scoped API keys via Vault.
   """
 
   require Logger
 
   @url "https://api.openai.com/v1/embeddings"
 
-  def embed(text) when is_binary(text) do
-    api_key = resolve_api_key()
+  @doc "Embed a single text. Accepts optional `project_id` for vault key resolution."
+  def embed(text, opts \\ []) when is_binary(text) do
+    project_id = Keyword.get(opts, :project_id)
+    api_key = resolve_api_key(project_id)
     model = Application.get_env(:agent_ex, :embedding_model, "text-embedding-3-small")
 
-    if is_nil(api_key) do
+    if api_key == "" or is_nil(api_key) do
       {:error, :missing_api_key}
     else
       body = %{input: text, model: model}
@@ -36,11 +39,13 @@ defmodule AgentEx.Memory.Embeddings do
     end
   end
 
-  def embed_batch(texts) when is_list(texts) do
-    api_key = resolve_api_key()
+  @doc "Embed a batch of texts. Accepts optional `project_id` for vault key resolution."
+  def embed_batch(texts, opts \\ []) when is_list(texts) do
+    project_id = Keyword.get(opts, :project_id)
+    api_key = resolve_api_key(project_id)
     model = Application.get_env(:agent_ex, :embedding_model, "text-embedding-3-small")
 
-    if is_nil(api_key) do
+    if api_key == "" or is_nil(api_key) do
       {:error, :missing_api_key}
     else
       body = %{input: texts, model: model}
@@ -67,7 +72,7 @@ defmodule AgentEx.Memory.Embeddings do
     end
   end
 
-  defp resolve_api_key do
-    Application.get_env(:agent_ex, :openai_api_key) || System.get_env("OPENAI_API_KEY")
+  defp resolve_api_key(project_id) do
+    AgentEx.Vault.resolve_key(project_id, "embedding:openai")
   end
 end
