@@ -44,7 +44,10 @@ defmodule AgentEx.Projects do
         try do
           AgentEx.Memory.delete_project_data(project.user_id, project.id)
         rescue
-          e -> Logger.error("Failed to delete memory data for project #{project.id}: #{Exception.message(e)}")
+          e ->
+            Logger.error(
+              "Failed to delete memory data for project #{project.id}: #{Exception.message(e)}"
+            )
         end
       end)
 
