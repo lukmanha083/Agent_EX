@@ -2521,6 +2521,283 @@ This means:
 
 ---
 
+## Phase 5d — Per-Project DETS Storage + Mandatory root_path
+
+### Problem
+
+All four DETS stores (AgentStore, HttpToolStore, PersistentMemory, ProceduralMemory)
+use a **single global file** each under `priv/data/{env}/`. This creates scaling and
+lifecycle issues:
+
+1. **DETS 2 GB limit** — a single `agent_configs.dets` file aggregates data from
+   every project across every user. As usage grows, the file approaches the DETS
+   hard limit of 2 GB, at which point writes fail silently.
+2. **O(n) delete** — `delete_by_project/2` scans the entire ETS table with `foldl`
+   to find matching keys. With thousands of projects, this becomes a bottleneck.
+3. **No portability** — project data is trapped inside the server. Users can't
+   back up, move, or inspect their project's agent state independently.
+4. **Lifecycle coupling** — deleting a project requires coordinated cleanup across
+   4 DETS tables, Postgres, and HelixDB. Any failure leaves orphan data.
+5. **Boot-time bloat** — on VM start, every store hydrates its entire DETS file
+   into ETS, including data for projects that may never be accessed in this session.
+
+### Scope
+
+This phase targets **localhost mode only** — the server and the user's filesystem
+are on the same machine. Phase 8 (Hybrid Bridge) extends this to remote machines
+where a bridge binary proxies filesystem access over WebSocket. The directory
+layout defined here (`.agent_ex/`) becomes the contract that Phase 8's bridge
+binary also uses, so the on-disk format is designed once and reused later.
+
+### Solution
+
+Store DETS files **per-project** inside the project's `root_path/.agent_ex/`
+directory. Make `root_path` a required field on project creation. Scaffold the
+`.agent_ex/` and `.memory/` directories automatically when a project is created.
+
+```text
+~/projects/trading/
+├── .agent_ex/                  ← AgentEx project data (auto-created)
+│   ├── agent_configs.dets      ← AgentStore data for this project only
+│   ├── http_tool_configs.dets  ← HttpToolStore data for this project only
+│   ├── persistent_memory.dets  ← Tier 2 key-value facts for this project
+│   ├── procedural_memory.dets  ← Tier 4 skills for this project
+│   └── .gitignore              ← ignores *.dets (auto-created)
+├── .memory/                    ← Orchestrator planning notes (existing)
+│   ├── plan.md
+│   └── progress.md
+└── (user's project files)
+
+~/projects/marketing/
+├── .agent_ex/
+│   ├── agent_configs.dets
+│   ├── http_tool_configs.dets
+│   ├── persistent_memory.dets
+│   └── procedural_memory.dets
+├── .memory/
+└── (user's project files)
+```
+
+**Delete a project = close DETS handles + `rm -rf .agent_ex/`** — instant, atomic,
+zero scanning.
+
+### Key Design Decisions
+
+**1. root_path becomes mandatory**
+
+`root_path` is currently optional. With per-project DETS, every project needs a
+local directory. Make `root_path` required in `creation_changeset/2` and validate
+that the parent directory exists (the project dir itself is created if missing).
+
+```elixir
+# project.ex — creation_changeset
+|> validate_required([:user_id, :name, :provider, :model, :root_path])
+|> validate_root_path()
+
+defp validate_root_path(changeset) do
+  case get_change(changeset, :root_path) do
+    nil -> changeset
+    path ->
+      expanded = Path.expand(path)
+      if File.dir?(Path.dirname(expanded)) do
+        changeset
+      else
+        add_error(changeset, :root_path, "parent directory does not exist")
+      end
+  end
+end
+```
+
+**2. Project directory scaffolding on creation**
+
+When a project is created, `Projects.create_project/1` creates the project
+directory, `.agent_ex/` (with a `.gitignore` for DETS files), and `.memory/`
+(for orchestrator planning notes, already used by `ToolAssembler`).
+
+```elixir
+# projects.ex — after Repo.insert
+def create_project(attrs) do
+  with {:ok, project} <- %Project{} |> Project.creation_changeset(attrs) |> Repo.insert() do
+    scaffold_project_dirs(project)
+    {:ok, project}
+  end
+end
+
+defp scaffold_project_dirs(%Project{root_path: root_path}) do
+  expanded = Path.expand(root_path)
+  agent_ex_dir = Path.join(expanded, ".agent_ex")
+  memory_dir = Path.join(expanded, ".memory")
+
+  File.mkdir_p!(agent_ex_dir)
+  File.mkdir_p!(memory_dir)
+
+  # Auto-create .gitignore so DETS files aren't committed
+  gitignore_path = Path.join(agent_ex_dir, ".gitignore")
+  unless File.exists?(gitignore_path) do
+    File.write!(gitignore_path, "# AgentEx project data — do not commit\n*.dets\n")
+  end
+end
+```
+
+**3. DETS files opened on demand, not at boot**
+
+Instead of opening a single global DETS file at GenServer init, each store opens
+per-project DETS files lazily when first accessed. A `DetsManager` module tracks
+open handles and resolves paths.
+
+```elixir
+# Conceptual approach — DetsManager
+defp dets_table_for(project_root_path, store_name) do
+  dets_path = Path.join([Path.expand(project_root_path), ".agent_ex", "#{store_name}.dets"])
+  table_name = :"#{store_name}_#{:erlang.phash2(dets_path)}"
+
+  case :dets.info(table_name) do
+    :undefined ->
+      {:ok, ^table_name} = :dets.open_file(table_name, file: String.to_charlist(dets_path), type: :set)
+      table_name
+    _ ->
+      table_name
+  end
+end
+```
+
+**4. ETS stays global, DETS is per-project**
+
+Keep a single ETS table per store type (`:agent_configs`, `:persistent_memory`,
+etc.) for fast in-memory reads. Keys remain `{user_id, project_id, ...}` tuples.
+Only the DETS backing changes — from one global file to many per-project files.
+
+This means:
+- **Read path** — unchanged. ETS lookup by composite key, same as today.
+- **Write path** — resolve project's DETS file, write there, then ETS.
+- **Hydration** — on first project access, open its DETS file and load into ETS.
+- **Eviction** — idle projects can be evicted from ETS + DETS handle closed.
+
+**5. Project deletion becomes directory-based**
+
+```elixir
+# projects.ex — delete_project/1
+def delete_project(%Project{} = project) do
+  with {:ok, deleted} <- Repo.delete(project) do
+    # Close any open DETS handles for this project
+    DetsManager.close_all(project.root_path)
+
+    # Evict project keys from ETS
+    AgentEx.AgentStore.evict_project(project.user_id, project.id)
+    AgentEx.HttpToolStore.evict_project(project.user_id, project.id)
+    AgentEx.Memory.PersistentMemory.Store.evict_project(project.user_id, project.id)
+    AgentEx.Memory.ProceduralMemory.Store.evict_project(project.user_id, project.id)
+
+    # Delete the .agent_ex directory — all DETS data gone instantly
+    agent_ex_dir = Path.join(Path.expand(project.root_path), ".agent_ex")
+    File.rm_rf(agent_ex_dir)
+
+    # Async cleanup for HelixDB (best-effort, unchanged)
+    Task.Supervisor.start_child(AgentEx.TaskSupervisor, fn ->
+      AgentEx.Memory.delete_helix_data(project.user_id, project.id)
+    end)
+
+    {:ok, deleted}
+  end
+end
+```
+
+### Phase 8 Forward-Compatibility
+
+The `.agent_ex/` directory layout is the **on-disk contract** that Phase 8's
+bridge binary will also read/write. In localhost mode the server accesses these
+files directly via `File` + `:dets`. In bridge mode (Phase 8), the bridge binary
+on the remote machine serves the same files over WebSocket and the server never
+touches the filesystem directly. The store modules need only swap the I/O backend
+(local vs bridge channel) — the DETS format and directory layout stay the same.
+
+### Migration Strategy
+
+Existing projects with data in global DETS files need migration:
+
+```text
+1. Add root_path validation (required for new projects, optional for existing)
+2. Add `mix agent_ex.migrate_dets` task:
+   a. For each project with root_path:
+      - Create .agent_ex/ directory
+      - Open per-project DETS file
+      - Scan global DETS, copy matching {user_id, project_id, ...} entries
+      - Verify count matches
+   b. After all projects migrated:
+      - Rename old global DETS files to *.bak
+3. Switch store GenServers to per-project DETS mode
+4. Clean up .bak files after confidence period
+```
+
+### File Inventory
+
+**Modified files:**
+
+| File | Change |
+|------|--------|
+| `lib/agent_ex/projects/project.ex` | Make `root_path` required in `creation_changeset`, add `validate_root_path` |
+| `lib/agent_ex/projects.ex` | Add `scaffold_project_dirs/1`, update `delete_project/1` for directory-based cleanup |
+| `lib/agent_ex/agent_store.ex` | Per-project DETS via DetsManager, add `evict_project/2`, lazy hydration |
+| `lib/agent_ex/http_tool_store.ex` | Same as AgentStore |
+| `lib/agent_ex/memory/persistent_memory/store.ex` | Per-project DETS via DetsManager, add `evict_project/2` |
+| `lib/agent_ex/memory/persistent_memory/loader.ex` | Accept project-specific DETS table in hydrate/sync |
+| `lib/agent_ex/memory/procedural_memory/store.ex` | Per-project DETS via DetsManager, add `evict_project/2` |
+| `lib/agent_ex/memory/procedural_memory/loader.ex` | Accept project-specific DETS table in hydrate/sync |
+| `lib/agent_ex_web/live/projects_live.ex` | Make root_path required in form UI |
+| `lib/agent_ex_web/components/project_components.ex` | Update editor form to require root_path |
+
+**New files:**
+
+| File | Purpose |
+|------|---------|
+| `lib/agent_ex/dets_manager.ex` | Shared logic for per-project DETS lifecycle (open/close/path resolution/handle registry) |
+| `lib/mix/tasks/migrate_dets.ex` | One-time migration from global to per-project DETS |
+
+### Dependency Graph
+
+```text
+5d-A: Enforce root_path
+  │
+  ├─ Project.creation_changeset: validate_required [:root_path]
+  ├─ Project.validate_root_path: parent dir must exist
+  ├─ ProjectsLive: root_path field required in editor form
+  ├─ ProjectComponents: update new project editor
+  │
+5d-B: Project Directory Scaffolding
+  │
+  ├─ Projects.create_project: call scaffold_project_dirs/1
+  ├─ scaffold_project_dirs: mkdir root_path/ + .agent_ex/ + .memory/
+  ├─ Auto-create .agent_ex/.gitignore (ignore *.dets)
+  │
+5d-C: DetsManager (shared lifecycle module)
+  │
+  ├─ DetsManager.open(project_root_path, store_name) → dets_ref
+  ├─ DetsManager.close(project_root_path, store_name)
+  ├─ DetsManager.close_all(project_root_path)
+  ├─ DetsManager.path_for(project_root_path, store_name) → charlist
+  ├─ Internal registry: track open handles by {root_path, store_name}
+  │
+5d-D: Store Migration (per store)
+  │
+  ├─ AgentStore: replace global DETS with DetsManager calls
+  ├─ HttpToolStore: same
+  ├─ PersistentMemory.Store: same
+  ├─ ProceduralMemory.Store: same
+  ├─ Loader modules: accept dynamic DETS ref
+  │
+5d-E: Delete Cleanup
+  │
+  ├─ Projects.delete_project: DetsManager.close_all → evict ETS → rm_rf .agent_ex/
+  ├─ Remove delete_by_project from all stores (no longer needed)
+  │
+5d-F: Migration Task
+  │
+  ├─ mix agent_ex.migrate_dets: copy global → per-project
+  └─ Verification + backup
+```
+
+---
+
 ## Phase 6 — Flow Builder + Triggers
 
 ### Problem
@@ -2832,6 +3109,15 @@ Three deployment modes that coexist:
 | **Local** | User runs AgentEx on `localhost` | Dev/personal use, full local access |
 | **Bridge** | Server-deployed + bridge on user's machine | Production, agents operate on user's real machine |
 | **Server-only** | Server-deployed, no bridge | API-only agents, cloud tools, no local access needed |
+
+> **Phase 5d prerequisite:** In **Local** mode, the server reads/writes DETS files
+> directly inside `project.root_path/.agent_ex/` (per-project storage, see Phase
+> 5d). In **Bridge** mode, the bridge binary on the user's machine serves those
+> same `.agent_ex/` files over the WebSocket channel. The store modules must swap
+> the I/O backend (direct `File`/`:dets` in local mode → bridge channel calls in
+> bridge mode) while the on-disk layout stays identical. `DetsManager` (Phase 5d)
+> should be designed with this backend swap in mind — e.g. a behaviour or adapter
+> pattern so Phase 8 can provide a `BridgeDetsAdapter` without rewriting the stores.
 
 The bridge is a **single pre-compiled binary** (packaged via Burrito) that:
 
@@ -4291,7 +4577,7 @@ Why BEAM/Elixir is uniquely suited for the bridge pattern:
 | Create | `lib/agent_ex_web/components/bridge_components.ex` | Status indicator, token display (show-once), download + checksum |
 | Create | `lib/agent_ex/bridge_app.ex` | Escript entry point: reads `~/.agentex/token`, enforces WSS |
 | Create | `lib/agent_ex/bridge/client.ex` | Bridge-side WebSocket client with backoff + jitter reconnect |
-| Create | `lib/agent_ex/bridge/executor.ex` | Bridge-side tool execution with local policy enforcement + auto-create sandbox root_path directory |
+| Create | `lib/agent_ex/bridge/executor.ex` | Bridge-side tool execution with local policy enforcement + auto-create sandbox root_path directory. **Must also serve `.agent_ex/` DETS files** — replaces localhost `DetsManager` (Phase 5d) with channel-proxied reads/writes so the server never touches the remote filesystem directly |
 | Create | `lib/agent_ex/bridge/policy.ex` | Parse + apply `~/.agentex/policy.json`, safe defaults |
 | Create | `lib/agent_ex/bridge/confirmation.ex` | TTY confirmation prompts for write operations |
 | Modify | `lib/agent_ex/application.ex` | Add Bridge.Registry to supervision tree |
@@ -4327,6 +4613,7 @@ Why BEAM/Elixir is uniquely suited for the bridge pattern:
   │
   ├─ Bridge.Client (WSS connection, token from file, backoff reconnect)
   ├─ Bridge.Executor (local execution with policy + sandbox + auto-create root_path dir)
+  ├─ Bridge.DetsProxy (serve .agent_ex/*.dets over channel, replacing localhost DetsManager from Phase 5d)
   ├─ Bridge.Confirmation (TTY prompts for write operations)
   ├─ BridgeApp (entry point, WSS enforcement, version check)
   ├─ Burrito packaging (single binary, embedded integrity hash)
