@@ -77,7 +77,13 @@ defmodule AgentEx.ToolAssembler do
     run_id = Keyword.get(opts, :run_id)
     task_tools = if run_id, do: orchestrator_task_tools(run_id), else: []
 
-    read_tools ++ provider_read ++ delegate_tools ++ memory_tool ++ task_tools
+    # Workflow tools — saved workflows exposed as callable tools
+    workflow_tools = AgentEx.Workflow.Tool.workflows_as_tools(project_id,
+      tools: available,
+      agent_runner: opts[:agent_runner]
+    )
+
+    read_tools ++ provider_read ++ delegate_tools ++ memory_tool ++ task_tools ++ workflow_tools
   end
 
   @doc """

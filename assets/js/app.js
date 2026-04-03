@@ -3,6 +3,7 @@ import {Socket} from "phoenix"
 import {LiveSocket} from "phoenix_live_view"
 import TimezoneDetect from "./hooks/timezone_detect"
 import Sortable from "./hooks/sortable"
+import WorkflowEditor from "./hooks/workflow_editor"
 
 // SaladUI — import all component JS so any component works without extra setup
 import SaladUILib from "salad_ui"
@@ -42,6 +43,7 @@ let Hooks = {}
 Hooks.TimezoneDetect = TimezoneDetect
 Hooks.SaladUI = SaladUILib.SaladUIHook
 Hooks.Sortable = Sortable
+Hooks.WorkflowEditor = WorkflowEditor
 
 // Clear input value after Enter key pushes the event
 Hooks.ClearOnEnter = {

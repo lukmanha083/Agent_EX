@@ -26,7 +26,13 @@ Phase 5a (Project Scope) implemented (2026-03-29).
 Phase 5b (Chat Orchestrator + REST API Tools + Agent-as-Tool) implemented (2026-03-30):
 HttpTool struct + HttpToolStore (ETS/DETS), AgentBridge (agents as delegate tools),
 ToolAssembler (unified tool assembly), ChatLive rewired to dynamic orchestrator.
-Phase 5c (Workflow Engine) next.
+Phase 5c (Workflow Engine) implemented (2026-04-03):
+Workflow Ecto schema (Postgres, JSONB nodes/edges), Workflows context (CRUD),
+Runner (topological sort DAG execution), Operators (data/flow/IO),
+Expression engine ({{node.path}} interpolation), Workflow.Tool (workflow-as-tool composability),
+WorkflowsLive (list + visual editor), sidebar nav integration.
+Workflows use Postgres (not DETS) — server-side definitions with ON DELETE CASCADE from projects.
+Phase 5d (Per-Project DETS Storage) next.
 Phase 8 (Hybrid Bridge — Remote Computer Use) is the final phase.
 
 **Table of Contents**
