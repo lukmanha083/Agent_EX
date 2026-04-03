@@ -33,6 +33,10 @@ Expression engine ({{node.path}} interpolation), Workflow.Tool (workflow-as-tool
 WorkflowsLive (list + visual editor), sidebar nav integration.
 Workflows use Postgres (not DETS) — server-side definitions with ON DELETE CASCADE from projects.
 Phase 5d (Per-Project DETS Storage) next.
+Phase 5f (Orchestration Engine — GenStage + Task Queue + Budget-Aware Dispatch) designed (2026-04-04):
+GenStage producer/consumer for orchestrator→specialist backpressure, LLM-as-scheduler
+with reactive task queue, transparent specialist-to-specialist delegation (Option B),
+budget zones (explore/focused/converge/report), Flow-based batch processing.
 Phase 8 (Hybrid Bridge — Remote Computer Use) is the final phase.
 
 **Table of Contents**
@@ -50,7 +54,8 @@ Phase 8 (Hybrid Bridge — Remote Computer Use) is the final phase.
 11. [Phase 5a — Project Scope](#phase-5a--project-scope)
 12. [Phase 5b — Chat Orchestrator + REST API Tools + Agent-as-Tool](#phase-5b--chat-orchestrator--rest-api-tools--agent-as-tool)
 12. [Phase 5c — Workflow Engine (Static Pipelines)](#phase-5c--workflow-engine-static-pipelines)
-13. [Phase 6 — Flow Builder + Triggers](#phase-6--flow-builder--triggers)
+13. [Phase 5f — Orchestration Engine (GenStage + Task Queue + Budget-Aware Dispatch)](#phase-5f--orchestration-engine-genstage--task-queue--budget-aware-dispatch)
+14. [Phase 6 — Flow Builder + Triggers](#phase-6--flow-builder--triggers)
 14. [Phase 7 — Run View + Memory Inspector](#phase-7--run-view--memory-inspector)
 15. [Phase 8 — Hybrid Bridge (Remote Computer Use)](#phase-8--hybrid-bridge-remote-computer-use)
 16. [File Manifest](#file-manifest)
@@ -3234,6 +3239,805 @@ from(e in Entity,
   ├─ mix agent_ex.migrate_helix: pull existing HelixDB data into Postgres
   └─ Best-effort: entities/episodes may be incomplete due to HelixDB limitations
 ```
+
+---
+
+## Phase 5f — Orchestration Engine (GenStage + Task Queue + Budget-Aware Dispatch)
+
+### Core Insight
+
+**The orchestrator is a scheduler, not a loop.** Current Swarm and Pipe run agents
+sequentially in a recursive loop — the orchestrator waits for each agent to finish
+before deciding the next step. This wastes time when tasks are independent and
+provides no backpressure when the system is overloaded.
+
+The real architecture should match how a human project manager works:
+
+1. **Plan** — decompose goal into independent tasks
+2. **Dispatch** — send tasks to available specialists concurrently
+3. **React** — as results arrive, re-evaluate: add/drop/reorder tasks
+4. **Converge** — as budget runs low, shift from exploration to synthesis
+
+The LLM **is** the scheduler. The task queue is not a FIFO — after every result,
+the orchestrator reasons about what to do next given what it knows now and how
+much budget remains.
+
+```text
+Current (sequential):
+  Orchestrator → Agent A → wait → Agent B → wait → Agent C → done
+
+Target (concurrent + reactive):
+  Orchestrator plans [A, B, C]
+       ├─► Agent A ──► result ──► Orchestrator re-evaluates
+       ├─► Agent B ──► result ──► Orchestrator re-evaluates
+       └─► (Agent C dispatched after A finishes, informed by A's result)
+```
+
+### Problem
+
+1. **Sequential execution** — `Swarm.swarm_loop/5` runs one agent at a time.
+   `Pipe.through/4` is sequential. Even `Pipe.fan_out/4` runs all agents on
+   the same input — no dynamic task scheduling.
+
+2. **No task queue** — the orchestrator has no concept of pending work. The LLM
+   generates tool calls (including `delegate_to_*`) and the system executes them
+   immediately. There's no way to queue tasks, reprioritize, or cancel pending work.
+
+3. **No backpressure** — if the orchestrator dispatches 10 delegate calls
+   simultaneously, all 10 run concurrently with no flow control. With expensive
+   LLM calls per agent, this can burn through budget fast.
+
+4. **Budget is passive** — `Budget.budget_remaining/1` exists but is only checked
+   externally (UI). The orchestrator itself has no awareness of budget — it can't
+   shift strategy when tokens are running low.
+
+5. **No transparent delegation** — when Agent A needs Agent B's help, it must go
+   through the orchestrator (Swarm handoff). There's no way for a specialist to
+   directly spawn a sub-specialist and report the merged result back.
+
+6. **No batch processing** — when a specialist processes a large dataset (e.g.,
+   enriching 500 products), each item goes through the tool sequentially.
+   No `Flow`-based parallel pipeline.
+
+### Solution
+
+Introduce three new concurrency layers that map to BEAM primitives:
+
+| Layer | Primitive | Purpose |
+|---|---|---|
+| Orchestrator dispatch | **GenStage** producer → consumer | Backpressure between orchestrator and specialist pool |
+| Specialist execution | **Task.async_stream** (existing) | Parallel tool calls within a specialist |
+| Batch processing | **Flow** | Parallel data pipelines within a tool/specialist |
+
+Plus two new capabilities:
+
+| Capability | Module | Purpose |
+|---|---|---|
+| Budget-aware scheduling | `Orchestrator.Budget` | Feed budget state into LLM reasoning |
+| Transparent delegation | `Specialist.Delegation` | Specialist → sub-specialist without orchestrator |
+
+### Architecture
+
+```text
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        Orchestrator (GenStage Producer)                  │
+│                                                                          │
+│  ┌──────────────┐  ┌───────────────┐  ┌──────────────┐                 │
+│  │ Task Queue   │  │ Budget Tracker│  │ LLM Planner  │                 │
+│  │ (priority)   │  │ (remaining,   │  │ (re-evaluate │                 │
+│  │              │  │  velocity,    │  │  after each  │                 │
+│  │ [task1: high]│  │  projections) │  │  result)     │                 │
+│  │ [task2: med ]│  │              │  │              │                 │
+│  │ [task3: low ]│  └───────────────┘  └──────────────┘                 │
+│  └──────┬───────┘                                                        │
+│         │ demand (GenStage)                                              │
+│         ▼                                                                │
+│  ┌──────────────────────────────────────────┐                           │
+│  │        Specialist Pool                    │                           │
+│  │        (ConsumerSupervisor)               │                           │
+│  │                                            │                           │
+│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ │                           │
+│  │  │Specialist│ │Specialist│ │Specialist│ │                           │
+│  │  │  (web)   │ │(analyst) │ │ (writer) │ │                           │
+│  │  │          │ │          │ │          │ │                           │
+│  │  │ Tools:   │ │ Tools:   │ │ Tools:   │ │                           │
+│  │  │ ├search  │ │ ├calc    │ │ ├format  │ │                           │
+│  │  │ ├fetch   │ │ ├chart   │ │ └draft   │ │                           │
+│  │  │ └scrape  │ │ └query   │ │          │ │                           │
+│  │  │          │ │          │ │          │ │                           │
+│  │  │ Can      │ │ Can      │ │          │ │                           │
+│  │  │ delegate │ │ delegate │ │          │ │                           │
+│  │  │ to ──────┼─┤          │ │          │ │                           │
+│  │  └──────────┘ └──────────┘ └──────────┘ │                           │
+│  └──────────────────────────────────────────┘                           │
+│         │                                                                │
+│         │ {:task_result, id, compressed_result, usage}                   │
+│         ▼                                                                │
+│  Orchestrator receives result → LLM re-evaluates → dispatch next        │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Key Design Decisions
+
+**1. GenStage producer/consumer (not Broadway)**
+
+Broadway is designed for external message sources (SQS, Kafka). Our "source" is
+the orchestrator's LLM — it generates tasks on demand. GenStage gives us exactly
+the right abstraction: the orchestrator produces tasks, specialists consume them,
+and demand flows backwards to control concurrency.
+
+```elixir
+# Orchestrator produces tasks when specialists have capacity
+def handle_demand(demand, state) do
+  {tasks, remaining} = TaskQueue.take(state.queue, demand)
+  {:noreply, tasks, %{state | queue: remaining}}
+end
+
+# Specialist pulls tasks automatically (backpressure)
+# ConsumerSupervisor spawns one process per task event
+```
+
+**2. LLM-as-scheduler (not static priority)**
+
+After each specialist reports back, the orchestrator feeds the result + budget
+state into an LLM call that decides what to do next:
+
+```elixir
+# Orchestrator's planning prompt (injected as system message)
+"""
+## Current State
+- Goal: #{state.goal}
+- Completed: #{format_completed(state.completed)}
+- Pending queue: #{format_queue(state.queue)}
+- Budget: #{state.budget.remaining}/#{state.budget.total} tokens
+  (#{state.budget.percent_remaining}% remaining, velocity: #{state.budget.velocity} tok/task)
+
+## Instructions
+Given the results so far, decide your next action:
+1. ADD tasks — enqueue new work for specialists
+2. DROP tasks — remove pending tasks that are no longer needed
+3. REORDER — change priority of pending tasks
+4. CONVERGE — produce final result from what you have
+5. REFINE — request more budget from user with progress summary
+"""
+```
+
+**3. Transparent delegation (Option B from conversation)**
+
+A specialist can delegate to another specialist without the orchestrator knowing.
+The sub-specialist reports back to the delegating specialist, which merges the
+result and reports a single compressed result to the orchestrator.
+
+```text
+Orchestrator dispatches to Specialist A
+  │
+  Specialist A (ResearchAgent)
+  │ ├── Tool: web_search → results
+  │ ├── Needs fact-checking
+  │ │   └── Delegates to Specialist B (FactCheckAgent)
+  │ │         └── Tool: web_search → verification
+  │ │         └── Reports back to A: "verified: 3/5 claims correct"
+  │ └── Compresses: "Research complete. Key findings: ... (3/5 verified)"
+  │
+  Specialist A reports to Orchestrator: compressed result
+  (Orchestrator never knew about Specialist B)
+```
+
+Implementation uses `DynamicSupervisor` — the delegating specialist spawns a
+child process, monitors it, and collects the result:
+
+```elixir
+defmodule AgentEx.Specialist.Delegation do
+  def delegate(specialist_config, task, opts) do
+    {:ok, pid} = DynamicSupervisor.start_child(
+      AgentEx.Specialist.DelegationSupervisor,
+      {AgentEx.Specialist.Worker, {specialist_config, task, self(), opts}}
+    )
+    ref = Process.monitor(pid)
+    receive do
+      {:specialist_result, ^pid, result} ->
+        Process.demonitor(ref, [:flush])
+        {:ok, result}
+      {:DOWN, ^ref, :process, ^pid, reason} ->
+        {:error, {:delegation_failed, reason}}
+    after
+      opts[:timeout] || 120_000 ->
+        DynamicSupervisor.terminate_child(AgentEx.Specialist.DelegationSupervisor, pid)
+        {:error, :delegation_timeout}
+    end
+  end
+end
+```
+
+**4. Budget as first-class orchestration signal**
+
+Budget isn't just a counter — it's a signal that changes orchestrator behavior:
+
+```text
+Budget zones:
+  ┌──────────────────────────────────────────────────────────────┐
+  │  >50% remaining    │ EXPLORE    │ Full parallelism, deep    │
+  │                     │            │ research, broad coverage   │
+  ├─────────────────────┼────────────┼───────────────────────────┤
+  │  20-50% remaining  │ FOCUSED    │ Reduce parallelism, skip  │
+  │                     │            │ non-critical tasks         │
+  ├─────────────────────┼────────────┼───────────────────────────┤
+  │  <20% remaining    │ CONVERGE   │ Stop dispatching, synth-  │
+  │                     │            │ esize from what you have   │
+  ├─────────────────────┼────────────┼───────────────────────────┤
+  │  ~0% remaining     │ REPORT     │ Emit best-effort result + │
+  │                     │            │ incomplete task summary    │
+  └─────────────────────┴────────────┴───────────────────────────┘
+```
+
+The budget tracker calculates:
+- `remaining` — tokens left
+- `velocity` — average tokens per specialist task (EMA)
+- `projected_tasks` — how many more tasks the budget can support
+- `zone` — current zone (explore/focused/converge/report)
+
+This gets injected into the orchestrator's system prompt so the LLM naturally
+adjusts its strategy.
+
+**5. Flow for batch tool processing**
+
+When a specialist needs to process a collection (e.g., enrich 100 products),
+use Flow instead of sequential iteration:
+
+```elixir
+# Sequential (current):
+Enum.map(items, fn item -> Tool.execute(enricher, %{item: item}) end)
+
+# Flow (new):
+items
+|> Flow.from_enumerable(max_demand: 20)
+|> Flow.map(fn item ->
+     case Tool.execute(enricher, %{item: item}) do
+       {:ok, result} -> result
+       {:error, _} -> nil
+     end
+   end)
+|> Flow.filter(& &1)
+|> Enum.to_list()
+```
+
+This is exposed as a new option in `Sensing.dispatch/3`:
+
+```elixir
+# When a tool call has batch arguments, use Flow instead of single execution
+Sensing.sense(tool_agent, tool_calls,
+  batch: %{tool_name: "enrich", items_key: "items", max_demand: 20}
+)
+```
+
+### Module Design
+
+#### New Modules
+
+**`AgentEx.Orchestrator`** — GenStage producer + LLM scheduler
+
+The heart of the refactor. Replaces `Swarm.swarm_loop/5` as the primary
+orchestration mechanism. Maintains task queue, budget state, and completed
+results. After each specialist result, calls the LLM to re-evaluate.
+
+```elixir
+defmodule AgentEx.Orchestrator do
+  use GenStage
+
+  defstruct [
+    :goal,                          # Original user task
+    :model_client,                  # LLM client for planning
+    :model_fn,                      # Optional override
+    :memory,                        # Memory opts
+    queue: TaskQueue.new(),         # Pending tasks
+    budget: nil,                    # Budget tracker state
+    completed: [],                  # [{task_id, compressed_result}]
+    active: %{},                    # %{task_id => specialist_pid}
+    iteration: 0,                   # Planning iterations
+    max_iterations: 30,             # Safety limit
+    max_concurrency: 3,             # Max parallel specialists
+    specialists: %{},               # %{name => specialist_config}
+    status: :planning               # :planning | :dispatching | :converging | :done
+  ]
+
+  # -- Public API --
+
+  @spec start_link(keyword()) :: GenServer.on_start()
+  def start_link(opts)
+
+  @spec run(pid(), String.t(), keyword()) ::
+          {:ok, String.t(), summary()} | {:error, term()}
+  def run(orchestrator, goal, opts \\ [])
+
+  @spec add_result(pid(), task_id(), String.t(), usage()) :: :ok
+  def add_result(orchestrator, task_id, result, usage)
+
+  @spec stop(pid()) :: :ok
+  def stop(orchestrator)
+
+  # -- GenStage callbacks --
+
+  @impl true
+  def init(opts)
+
+  @impl true
+  def handle_demand(demand, state)
+  # Pops tasks from queue up to demand. If queue empty, buffers demand.
+
+  @impl true
+  def handle_cast({:result, task_id, result, usage}, state)
+  # 1. Record result + update budget
+  # 2. Call LLM planner to re-evaluate
+  # 3. Push new tasks to queue (triggers buffered demand)
+  # 4. If planner says CONVERGE, produce final synthesis
+
+  @impl true
+  def handle_info({:specialist_done, task_id, result, usage}, state)
+  # Alternative: specialists send results via message instead of cast
+end
+```
+
+**`AgentEx.Orchestrator.TaskQueue`** — Priority queue data structure
+
+```elixir
+defmodule AgentEx.Orchestrator.TaskQueue do
+  defstruct items: [], counter: 0
+
+  @type priority :: :high | :normal | :low
+  @type task :: %{
+    id: String.t(),
+    specialist: String.t(),           # Which specialist to dispatch to
+    input: String.t(),                # Task description
+    priority: priority(),
+    depends_on: [String.t()],         # Task IDs that must complete first
+    metadata: map()
+  }
+
+  @spec new() :: t()
+  @spec push(t(), task()) :: t()
+  @spec take(t(), pos_integer()) :: {[task()], t()}
+  @spec drop(t(), String.t()) :: t()
+  @spec reorder(t(), String.t(), priority()) :: t()
+  @spec pending_count(t()) :: non_neg_integer()
+  @spec has_ready_tasks?(t(), MapSet.t()) :: boolean()
+  # takes completed_ids to resolve depends_on
+end
+```
+
+**`AgentEx.Orchestrator.Planner`** — LLM-based task scheduling
+
+```elixir
+defmodule AgentEx.Orchestrator.Planner do
+  @type action ::
+    {:add, [TaskQueue.task()]}
+    | {:drop, [String.t()]}
+    | {:reorder, [{String.t(), TaskQueue.priority()}]}
+    | :converge
+    | {:refine, String.t()}  # Request more budget, with progress summary
+
+  @spec plan(state :: map()) :: {:ok, [action()]} | {:error, term()}
+  # Calls LLM with: goal + completed results + pending queue + budget state
+  # Parses structured response into actions
+
+  @spec initial_plan(goal :: String.t(), specialists :: [map()], budget :: map()) ::
+          {:ok, [TaskQueue.task()]} | {:error, term()}
+  # First planning call: decompose goal into initial task set
+
+  @spec converge(completed :: [{String.t(), String.t()}], goal :: String.t()) ::
+          {:ok, String.t()} | {:error, term()}
+  # Final synthesis: merge all completed results into final answer
+end
+```
+
+**`AgentEx.Orchestrator.BudgetTracker`** — Real-time budget intelligence
+
+```elixir
+defmodule AgentEx.Orchestrator.BudgetTracker do
+  defstruct [
+    :total,                        # Total budget (tokens)
+    used: 0,                       # Tokens consumed so far
+    task_count: 0,                 # Number of completed tasks
+    velocity: 0.0,                 # EMA of tokens per task
+    zone: :explore                 # :explore | :focused | :converge | :report
+  ]
+
+  @type zone :: :explore | :focused | :converge | :report
+
+  @spec new(total :: pos_integer()) :: t()
+  @spec record(t(), usage :: pos_integer()) :: t()
+  @spec remaining(t()) :: non_neg_integer()
+  @spec projected_tasks(t()) :: non_neg_integer()
+  @spec zone(t()) :: zone()
+  @spec max_concurrency_for_zone(t(), base :: pos_integer()) :: pos_integer()
+  # :explore → base, :focused → ceil(base/2), :converge → 1, :report → 0
+
+  @spec to_prompt(t()) :: String.t()
+  # Renders budget state as text for LLM system prompt injection
+end
+```
+
+**`AgentEx.Specialist`** — Task consumer with transparent delegation
+
+```elixir
+defmodule AgentEx.Specialist do
+  @moduledoc """
+  A specialist agent that consumes tasks from the Orchestrator.
+
+  Each specialist has:
+  - Its own tool set (via ToolAgent GenServer)
+  - Isolated memory scope (per-task, discarded after reporting)
+  - Ability to delegate to sub-specialists transparently
+  """
+
+  defstruct [
+    :name,
+    :system_message,
+    :model_client,                 # Can use different/cheaper model than orchestrator
+    tools: [],
+    plugins: [],
+    intervention: [],
+    max_iterations: 10,
+    can_delegate_to: [],           # Names of other specialists this one can spawn
+    compress_result: true          # Whether to compress before reporting back
+  ]
+
+  @type t :: %__MODULE__{}
+
+  @spec execute(t(), TaskQueue.task(), keyword()) ::
+          {:ok, String.t(), usage()} | {:error, term()}
+  # 1. Start ephemeral ToolAgent with specialist's tools
+  # 2. If can_delegate_to is non-empty, add delegation tools
+  # 3. Run ToolCallerLoop (existing, unchanged)
+  # 4. Compress result if enabled
+  # 5. Report {:specialist_result, task_id, result, usage} to orchestrator
+  # 6. Clean up ToolAgent
+end
+```
+
+**`AgentEx.Specialist.Pool`** — ConsumerSupervisor for specialist processes
+
+```elixir
+defmodule AgentEx.Specialist.Pool do
+  use ConsumerSupervisor
+
+  @spec start_link(keyword()) :: Supervisor.on_start()
+  def start_link(opts)
+  # Subscribes to Orchestrator (GenStage producer)
+  # max_demand controls parallelism (from BudgetTracker.max_concurrency_for_zone)
+
+  @impl true
+  def init(opts)
+  # subscribe_to: [{orchestrator_pid, max_demand: max_concurrency}]
+
+  @impl true
+  def handle_events(tasks, _from, state)
+  # For each task: spawn Specialist.Worker under DynamicSupervisor
+end
+```
+
+**`AgentEx.Specialist.Worker`** — Per-task process
+
+```elixir
+defmodule AgentEx.Specialist.Worker do
+  use GenServer, restart: :temporary
+
+  @spec start_link({specialist_config, task, orchestrator_pid, opts}) :: GenServer.on_start()
+  def start_link({specialist, task, report_to, opts})
+
+  @impl true
+  def init({specialist, task, report_to, opts})
+  # Starts ToolAgent, begins execution
+
+  @impl true
+  def handle_info(:execute, state)
+  # 1. Run Specialist.execute (ToolCallerLoop internally)
+  # 2. Send {:specialist_done, task_id, result, usage} to report_to
+  # 3. {:stop, :normal, state}
+
+  @impl true
+  def handle_info({:delegation_result, sub_task_id, result}, state)
+  # Receives results from sub-specialists
+end
+```
+
+**`AgentEx.Specialist.Delegation`** — Transparent sub-specialist spawning
+
+```elixir
+defmodule AgentEx.Specialist.Delegation do
+  @spec delegate(specialist_config :: Specialist.t(), task :: String.t(), keyword()) ::
+          {:ok, String.t(), usage()} | {:error, term()}
+  # Spawns sub-specialist under DelegationSupervisor
+  # Monitors process, collects result
+  # Returns compressed result to caller (the parent specialist)
+
+  @spec delegation_tools(can_delegate_to :: [String.t()], specialists :: %{String.t() => Specialist.t()}) ::
+          [Tool.t()]
+  # Generates delegate_to_<name> tools for a specialist's tool set
+  # When called, invokes delegate/3 synchronously
+end
+```
+
+#### Modified Modules
+
+**`mix.exs`** — Add GenStage and Flow dependencies
+
+```elixir
+# Add to deps:
+{:gen_stage, "~> 1.2"},
+{:flow, "~> 1.2"}
+```
+
+**`lib/agent_ex/application.ex`** — Add supervision tree entries
+
+```elixir
+# Add to children:
+{DynamicSupervisor, name: AgentEx.Specialist.DelegationSupervisor, strategy: :one_for_one}
+```
+
+Note: `Orchestrator`, `Specialist.Pool`, and `Specialist.Worker` are started
+dynamically per-run, not in the application supervisor. Only the
+`DelegationSupervisor` is global (shared across all runs for sub-specialist
+spawning).
+
+**`lib/agent_ex/sensing.ex`** — Add Flow-based batch dispatch option
+
+```elixir
+# New option in sense/3:
+# :batch — %{tool_name: String.t(), items_key: String.t(), max_demand: pos_integer()}
+# When a tool call's arguments contain a list under items_key,
+# split into individual calls and process via Flow
+
+defp maybe_batch_dispatch(tool_agent, call, batch_opts, timeout) do
+  args = Jason.decode!(call.arguments)
+  items = Map.get(args, batch_opts.items_key, [])
+
+  if length(items) > 1 do
+    items
+    |> Flow.from_enumerable(max_demand: batch_opts.max_demand)
+    |> Flow.map(fn item ->
+      individual_args = Map.put(args, batch_opts.items_key, item)
+      individual_call = %{call | arguments: Jason.encode!(individual_args)}
+      ToolAgent.execute(tool_agent, individual_call)
+    end)
+    |> Enum.to_list()
+  else
+    [ToolAgent.execute(tool_agent, call)]
+  end
+end
+```
+
+**`lib/agent_ex/tool_assembler.ex`** — Wire orchestrator tools for new dispatch
+
+The `assemble/4` function should generate orchestrator-compatible task tools
+that work with the new `Orchestrator.Planner`:
+
+```elixir
+# In assemble/4, replace delegate_to_* tools with specialist metadata
+# that the Planner can reference when generating tasks
+def orchestrator_specialists(user_id, project_id) do
+  AgentStore.list(user_id, project_id)
+  |> Enum.map(fn config ->
+    %{
+      name: config.name,
+      description: config.system_prompt,
+      capabilities: config.tool_ids,
+      can_delegate_to: config.can_delegate_to || []
+    }
+  end)
+end
+```
+
+**`lib/agent_ex/pipe.ex`** — Add `Pipe.orchestrate/4` entry point
+
+```elixir
+@doc """
+Run a budget-aware orchestrator with specialist pool.
+
+This is the GenStage-powered replacement for `through/4` with delegate tools.
+The orchestrator plans and dispatches tasks to specialists concurrently,
+re-evaluating after each result.
+
+## Options
+- `:budget` — total token budget for this run
+- `:max_concurrency` — max parallel specialists (default: 3)
+- `:specialists` — map of specialist configs
+- `:memory` — memory opts
+"""
+@spec orchestrate(String.t(), Agent.t(), ModelClient.t(), keyword()) ::
+        {:ok, String.t(), summary()} | {:error, term()}
+def orchestrate(goal, orchestrator_agent, model_client, opts \\ [])
+```
+
+### Data Flow: Complete Run Lifecycle
+
+```text
+1. User sends goal: "Analyze Q4 earnings for AAPL, MSFT, GOOGL"
+   │
+   ▼
+2. Pipe.orchestrate/4 starts Orchestrator GenStage + Specialist.Pool
+   │
+   ▼
+3. Orchestrator calls Planner.initial_plan/3
+   │ LLM sees: goal + available specialists + budget
+   │ LLM returns: [
+   │   {id: "t1", specialist: "researcher", input: "AAPL Q4 earnings", priority: :high},
+   │   {id: "t2", specialist: "researcher", input: "MSFT Q4 earnings", priority: :high},
+   │   {id: "t3", specialist: "researcher", input: "GOOGL Q4 earnings", priority: :high},
+   │   {id: "t4", specialist: "analyst", input: "Compare all three", depends_on: ["t1","t2","t3"]}
+   │ ]
+   ▼
+4. Orchestrator pushes tasks to queue. Pool demands 3 (max_concurrency).
+   │ t1, t2, t3 dispatched in parallel (t4 blocked by depends_on)
+   │
+   ├──► Specialist.Worker (researcher, t1: AAPL)
+   │     ├── ToolCallerLoop: web_search("AAPL Q4 earnings")
+   │     ├── ToolCallerLoop: fetch_url(earnings_report_url)
+   │     └── Reports: {:specialist_done, "t1", "AAPL: revenue $94B...", usage}
+   │
+   ├──► Specialist.Worker (researcher, t2: MSFT)
+   │     └── Reports: {:specialist_done, "t2", "MSFT: revenue $62B...", usage}
+   │
+   └──► Specialist.Worker (researcher, t3: GOOGL)
+         ├── Needs fact-checking → Delegation to fact_checker
+         │   └── Sub-specialist runs, reports back to researcher
+         └── Reports: {:specialist_done, "t3", "GOOGL: revenue $88B (verified)...", usage}
+   │
+   ▼
+5. After t1 arrives, Orchestrator calls Planner.plan/1
+   │ LLM sees: t1 done, t2/t3 pending, t4 blocked, budget 72% remaining
+   │ LLM returns: [{:add, [{id: "t5", specialist: "researcher",
+   │                 input: "Get AAPL guidance for next quarter", priority: :normal}]}]
+   │
+   ▼
+6. After t2, t3 arrive, t4 unblocked. Orchestrator dispatches t4, t5.
+   │
+   ├──► Specialist.Worker (analyst, t4: Compare)
+   │     └── Reports: {:specialist_done, "t4", "Comparative analysis...", usage}
+   │
+   └──► Specialist.Worker (researcher, t5: AAPL guidance)
+         └── Reports: {:specialist_done, "t5", "AAPL guidance: ...", usage}
+   │
+   ▼
+7. Budget at 30% (zone: :focused). Planner returns :converge
+   │
+   ▼
+8. Orchestrator calls Planner.converge/2
+   │ LLM synthesizes all completed results into final answer
+   │
+   ▼
+9. Returns {:ok, final_report, %{tasks: 5, budget_used: 70%, duration: 45s}}
+```
+
+### Interaction with Existing Modules
+
+The refactor is **additive** — existing modules continue to work unchanged.
+The new orchestrator is an alternative to `Swarm.run/4` and
+`Pipe.through/4`-with-delegate-tools, not a replacement.
+
+```text
+Existing (still works):                   New (Phase 5f):
+                                          
+Pipe.through(input, agent, client)        Same — unchanged
+Pipe.fan_out(input, agents, client)       Same — unchanged
+Pipe.delegate_tool(name, agent, client)   Same — unchanged
+Swarm.run(agents, client, messages)       Same — unchanged
+
+NEW:
+Pipe.orchestrate(goal, agent, client,     GenStage orchestrator with:
+  budget: 100_000,                        - Task queue + LLM scheduler
+  max_concurrency: 3,                     - Budget-aware dispatch
+  specialists: specialists                - Transparent delegation
+)                                         - Backpressure via GenStage
+```
+
+**Sensing.sense/3** is unchanged — specialists still use it internally for
+parallel tool dispatch. The refactor layers GenStage **above** the existing
+tool execution layer.
+
+**ToolCallerLoop.run/5** is unchanged — each specialist runs a standard
+ToolCallerLoop internally. The refactor wraps it in a supervised worker process.
+
+**Memory** integration is unchanged — each specialist gets its own memory scope.
+The orchestrator uses `orchestrator: true` mode (Tier 1 only) as it does today.
+
+### Implementation Steps
+
+```text
+5f-A: Dependencies + Foundation
+  │
+  ├─ mix.exs: add {:gen_stage, "~> 1.2"}, {:flow, "~> 1.2"}
+  ├─ TaskQueue: pure data structure (priority queue with depends_on)
+  ├─ BudgetTracker: pure struct with zone calculation
+  └─ Tests for TaskQueue and BudgetTracker (no GenStage yet)
+
+5f-B: Orchestrator GenStage
+  │
+  ├─ Orchestrator: GenStage producer (init, handle_demand, handle_cast)
+  ├─ Planner: LLM integration (initial_plan, plan, converge)
+  │   └─ Structured output parsing (JSON actions from LLM)
+  ├─ Tests with model_fn override (no real LLM calls)
+  └─ Integration test: Orchestrator produces tasks, collects manually
+
+5f-C: Specialist Pool
+  │
+  ├─ Specialist struct + execute/3
+  ├─ Specialist.Worker: GenServer (temporary, per-task)
+  ├─ Specialist.Pool: ConsumerSupervisor subscribed to Orchestrator
+  ├─ application.ex: add DelegationSupervisor
+  └─ Tests: Pool consumes from Orchestrator, workers execute and report
+
+5f-D: Transparent Delegation
+  │
+  ├─ Specialist.Delegation: spawn sub-specialist, monitor, collect
+  ├─ delegation_tools/2: generate delegate_to_* tools for specialists
+  ├─ Wire into Specialist.execute/3 (add delegation tools to tool set)
+  └─ Tests: specialist delegates, result bubbles up to orchestrator
+
+5f-E: Budget-Aware Scheduling
+  │
+  ├─ Wire BudgetTracker into Orchestrator state
+  ├─ Inject budget prompt into Planner calls
+  ├─ Adjust Pool max_demand based on zone
+  ├─ Converge/report behavior on low budget
+  └─ Tests: budget zones trigger correct behavior
+
+5f-F: Flow Batch Processing
+  │
+  ├─ Sensing: add batch dispatch option
+  ├─ Flow-based parallel processing for collection arguments
+  └─ Tests: batch tool execution via Flow
+
+5f-G: Pipe Integration + API Surface
+  │
+  ├─ Pipe.orchestrate/4: public entry point
+  ├─ Wire into ChatLive (optional: behind feature flag)
+  ├─ ToolAssembler: orchestrator_specialists/2 helper
+  └─ End-to-end test: goal → orchestrate → result
+```
+
+### Files
+
+| Action | File | Purpose |
+|---|---|---|
+| Create | `lib/agent_ex/orchestrator.ex` | GenStage producer + LLM scheduler |
+| Create | `lib/agent_ex/orchestrator/task_queue.ex` | Priority queue with dependency tracking |
+| Create | `lib/agent_ex/orchestrator/planner.ex` | LLM-based task planning + re-evaluation |
+| Create | `lib/agent_ex/orchestrator/budget_tracker.ex` | Real-time budget intelligence + zones |
+| Create | `lib/agent_ex/specialist.ex` | Specialist struct + execute/3 |
+| Create | `lib/agent_ex/specialist/worker.ex` | Per-task GenServer (temporary) |
+| Create | `lib/agent_ex/specialist/pool.ex` | ConsumerSupervisor for specialist processes |
+| Create | `lib/agent_ex/specialist/delegation.ex` | Transparent sub-specialist spawning |
+| Create | `test/agent_ex/orchestrator/task_queue_test.exs` | TaskQueue unit tests |
+| Create | `test/agent_ex/orchestrator/budget_tracker_test.exs` | BudgetTracker unit tests |
+| Create | `test/agent_ex/orchestrator_test.exs` | Orchestrator GenStage integration tests |
+| Create | `test/agent_ex/specialist_test.exs` | Specialist + delegation tests |
+| Create | `test/agent_ex/specialist/pool_test.exs` | Pool + Worker integration tests |
+| Modify | `mix.exs` | Add gen_stage + flow dependencies |
+| Modify | `lib/agent_ex/application.ex` | Add DelegationSupervisor to supervision tree |
+| Modify | `lib/agent_ex/sensing.ex` | Add Flow-based batch dispatch option |
+| Modify | `lib/agent_ex/pipe.ex` | Add `Pipe.orchestrate/4` entry point |
+| Modify | `lib/agent_ex/tool_assembler.ex` | Add `orchestrator_specialists/2` helper |
+
+### Testing Strategy
+
+**Unit tests (no LLM, no GenStage):**
+- `TaskQueue`: push/take/drop/reorder, priority ordering, depends_on resolution
+- `BudgetTracker`: zone transitions, velocity EMA, projected tasks
+
+**Integration tests (GenStage, no LLM):**
+- Orchestrator + Pool: tasks flow through, results reported back
+- model_fn overrides to simulate LLM decisions
+- Budget zone transitions affect max_demand
+
+**Delegation tests:**
+- Specialist spawns sub-specialist, receives result
+- Sub-specialist failure doesn't crash parent
+- Timeout handling for hung sub-specialists
+
+**End-to-end tests (with model_fn):**
+- Full `Pipe.orchestrate/4` run with mocked LLM
+- Budget exhaustion triggers convergence
+- depends_on blocks task until dependency completes
 
 ---
 
