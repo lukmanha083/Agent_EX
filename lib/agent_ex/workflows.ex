@@ -1,7 +1,7 @@
 defmodule AgentEx.Workflows do
   @moduledoc """
   Context for workflow CRUD operations.
-  Replaces the ETS/DETS WorkflowStore with Postgres-backed persistence.
+  Postgres-backed persistence with ON DELETE CASCADE from projects.
   """
 
   import Ecto.Query
@@ -23,7 +23,7 @@ defmodule AgentEx.Workflows do
     |> where([w], w.id == ^workflow_id and w.project_id == ^project_id)
     |> Repo.one()
     |> case do
-      nil -> :not_found
+      nil -> {:error, :not_found}
       workflow -> {:ok, Workflow.decode(workflow)}
     end
   end
@@ -52,9 +52,12 @@ defmodule AgentEx.Workflows do
 
   @doc "Delete a workflow by project_id and workflow_id."
   def delete_workflow(project_id, workflow_id) do
-    case get_workflow(project_id, workflow_id) do
-      {:ok, workflow} -> Repo.delete(workflow)
-      :not_found -> {:error, :not_found}
+    Workflow
+    |> where([w], w.id == ^workflow_id and w.project_id == ^project_id)
+    |> Repo.one()
+    |> case do
+      nil -> {:error, :not_found}
+      workflow -> Repo.delete(workflow)
     end
   end
 

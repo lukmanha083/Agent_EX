@@ -151,7 +151,13 @@ const WorkflowEditor = {
   /** Draw all edges by reading actual DOM port positions */
   drawEdges() {
     if (!this.edgeGroup) return
-    const edges = JSON.parse(this.el.getAttribute("data-edges") || "[]")
+    let edges = []
+    try {
+      edges = JSON.parse(this.el.getAttribute("data-edges") || "[]")
+    } catch (e) {
+      console.error("WorkflowEditor: failed to parse edge data", e)
+      return
+    }
     const ns = "http://www.w3.org/2000/svg"
 
     // Clear existing

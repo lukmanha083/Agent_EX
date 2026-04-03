@@ -20,7 +20,7 @@ defmodule AgentEx.Workflow.Tool do
     params = trigger_params_to_schema(workflow)
 
     AgentEx.Tool.new(
-      name: "workflow.#{workflow.id}",
+      name: "workflow_#{workflow.id}",
       description: workflow.description || "Run workflow: #{workflow.name}",
       kind: :write,
       parameters: params,

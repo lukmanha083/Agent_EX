@@ -249,13 +249,24 @@ defmodule AgentEx.Workflow.Operators do
   defp get_nested(value, []), do: value
 
   defp get_nested(map, [key | rest]) when is_map(map) do
-    value = Map.get(map, key) || Map.get(map, String.to_existing_atom(key), nil)
+    value =
+      case Map.fetch(map, key) do
+        {:ok, v} -> v
+        :error -> Map.get(map, safe_to_atom(key))
+      end
+
     get_nested(value, rest)
+  end
+
+  defp get_nested(_, _), do: nil
+
+  defp safe_to_atom(str) when is_binary(str) do
+    String.to_existing_atom(str)
   rescue
     ArgumentError -> nil
   end
 
-  defp get_nested(_, _), do: nil
+  defp safe_to_atom(_), do: nil
 
   defp put_nested(map, [key], value) when is_map(map), do: Map.put(map, key, value)
 
@@ -357,10 +368,82 @@ defmodule AgentEx.Workflow.Operators do
 
   defp try_decode_json(value), do: value
 
+  # Safe expression evaluator — parses the expression into AST and validates
+  # that only whitelisted modules/functions are called before evaluating.
+  # Blocks access to System, File, Port, :os, Code, Process, etc.
   defp evaluate_safe_expression(expression, input) do
-    {result, _bindings} = Code.eval_string(expression, [input: input], __ENV__)
-    {:ok, result}
+    case Code.string_to_quoted(expression) do
+      {:ok, ast} ->
+        case validate_ast(ast) do
+          :ok ->
+            {result, _} = Code.eval_quoted(ast, [input: input])
+            {:ok, result}
+
+          {:error, reason} ->
+            {:error, "blocked: #{reason}"}
+        end
+
+      {:error, {_line, msg, token}} ->
+        {:error, "syntax error: #{msg} #{token}"}
+    end
   rescue
     e -> {:error, "code evaluation error: #{Exception.message(e)}"}
+  end
+
+  @allowed_modules [Map, Enum, String, Kernel, List, Tuple, Access]
+  @blocked_atoms ~w(
+    System File Port Code IO Process Node
+    :os :erlang :persistent_term Application
+  )a
+
+  defp validate_ast({:., _, [{:__aliases__, _, _mod_parts} = mod, _func]}) do
+    case Macro.expand(mod, __ENV__) do
+      m when m in @allowed_modules -> :ok
+      m -> {:error, "module #{inspect(m)} is not allowed"}
+    end
+  rescue
+    _ -> {:error, "unknown module reference"}
+  end
+
+  defp validate_ast({:., _, [mod, _func]}) when is_atom(mod) do
+    if mod in @blocked_atoms do
+      {:error, "module #{inspect(mod)} is not allowed"}
+    else
+      :ok
+    end
+  end
+
+  defp validate_ast({:__aliases__, _, parts}) do
+    mod_name = Module.concat(parts)
+
+    if mod_name in @allowed_modules do
+      :ok
+    else
+      {:error, "module #{inspect(mod_name)} is not allowed"}
+    end
+  rescue
+    _ -> {:error, "invalid module reference"}
+  end
+
+  defp validate_ast({call, _, args}) when is_atom(call) and is_list(args) do
+    if call in @blocked_atoms do
+      {:error, "#{call} is not allowed"}
+    else
+      validate_ast_list(args)
+    end
+  end
+
+  defp validate_ast({left, right}), do: validate_ast_list([left, right])
+  defp validate_ast({a, b, c}), do: validate_ast_list([a, b, c])
+  defp validate_ast(list) when is_list(list), do: validate_ast_list(list)
+  defp validate_ast(_literal), do: :ok
+
+  defp validate_ast_list(items) do
+    Enum.reduce_while(items, :ok, fn item, :ok ->
+      case validate_ast(item) do
+        :ok -> {:cont, :ok}
+        error -> {:halt, error}
+      end
+    end)
   end
 end

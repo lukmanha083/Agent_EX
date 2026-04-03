@@ -119,14 +119,24 @@ defmodule AgentEx.Workflow.Expression do
   defp get_nested(value, []), do: value
 
   defp get_nested(map, [key | rest]) when is_map(map) do
-    # Try string key first, then atom key
-    value = Map.get(map, key) || Map.get(map, String.to_existing_atom(key), nil)
+    value =
+      case Map.fetch(map, key) do
+        {:ok, v} -> v
+        :error -> Map.get(map, safe_to_atom(key))
+      end
+
     get_nested(value, rest)
+  end
+
+  defp get_nested(_, _), do: nil
+
+  defp safe_to_atom(str) when is_binary(str) do
+    String.to_existing_atom(str)
   rescue
     ArgumentError -> nil
   end
 
-  defp get_nested(_, _), do: nil
+  defp safe_to_atom(_), do: nil
 
   defp format_value(nil), do: ""
   defp format_value(value) when is_binary(value), do: value

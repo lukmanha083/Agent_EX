@@ -57,7 +57,7 @@ defmodule AgentEx.Workflow.Runner do
 
         case result do
           {:ok, state} ->
-            output = collect_outputs(workflow.nodes, state.results)
+            output = collect_outputs(workflow.nodes, sorted_ids, state.results)
             broadcast(run_id, :workflow_complete, %{output: output})
             {:ok, %{run_id: run_id, results: state.results, output: output}}
 
@@ -173,16 +173,14 @@ defmodule AgentEx.Workflow.Runner do
 
   # --- Output Collection ---
 
-  defp collect_outputs(nodes, results) do
+  defp collect_outputs(nodes, sorted_ids, results) do
     output_nodes = Enum.filter(nodes, &(&1.type == :output))
 
     case output_nodes do
       [] ->
-        # No explicit output node — return last result
-        case Map.values(results) |> List.last() do
-          nil -> %{}
-          last -> last
-        end
+        # No explicit output node — return the topologically-last node's result
+        last_id = List.last(sorted_ids)
+        Map.get(results, last_id, %{})
 
       [single] ->
         Map.get(results, single.id, %{})

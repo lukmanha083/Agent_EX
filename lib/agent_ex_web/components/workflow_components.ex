@@ -137,27 +137,17 @@ defmodule AgentExWeb.WorkflowComponents do
             {@workflow.description}
           </p>
         </div>
-        <div class="flex items-center gap-1 ml-2 opacity-0 group-hover:opacity-100 transition-opacity">
-          <button
-            type="button"
-            phx-click="edit_workflow"
-            phx-value-id={@workflow.id}
-            class="p-1.5 rounded-md text-gray-500 hover:text-white hover:bg-gray-800 transition-colors"
-            aria-label="Edit workflow"
-          >
-            <.icon name="hero-pencil-square" class="w-3.5 h-3.5" />
-          </button>
-          <button
-            type="button"
-            phx-click="delete_workflow"
-            phx-value-id={@workflow.id}
-            data-confirm="Delete this workflow?"
-            class="p-1.5 rounded-md text-gray-500 hover:text-red-400 hover:bg-gray-800 transition-colors"
-            aria-label="Delete workflow"
-          >
-            <.icon name="hero-trash" class="w-3.5 h-3.5" />
-          </button>
-        </div>
+        <button
+          type="button"
+          phx-click="delete_workflow"
+          phx-value-id={@workflow.id}
+          data-confirm="Delete this workflow?"
+          class="p-1.5 rounded-md text-gray-400 hover:text-red-400 hover:bg-red-500/10 transition-colors shrink-0"
+          aria-label="Delete workflow"
+          onclick="event.stopPropagation();"
+        >
+          <.icon name="hero-trash" class="w-4 h-4" />
+        </button>
       </div>
       <div class="mt-3 flex items-center gap-3 text-[11px] text-gray-600">
         <span>{length(@workflow.nodes)} nodes</span>

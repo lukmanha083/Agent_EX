@@ -3,7 +3,7 @@ defmodule AgentEx.Workflow.Edge do
   A directed connection between two nodes in a workflow DAG.
 
   `source_port` identifies which output port of the source node to connect from
-  (e.g. "output", "true", "false", "case_1"). `target_port` is always "input".
+  (e.g. "output", "true", "false", "case_1"). `target_port` defaults to "input".
   """
 
   @enforce_keys [:id, :source_node_id, :target_node_id]
@@ -35,6 +35,9 @@ defmodule AgentEx.Workflow.Edge do
   end
 
   defp map_get(map, key) do
-    Map.get(map, key) || Map.get(map, to_string(key))
+    case Map.fetch(map, key) do
+      {:ok, val} -> val
+      :error -> Map.get(map, to_string(key))
+    end
   end
 end

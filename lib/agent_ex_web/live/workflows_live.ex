@@ -33,7 +33,8 @@ defmodule AgentExWeb.WorkflowsLive do
 
   @impl true
   def handle_params(%{"id" => id}, _uri, socket) do
-    project = socket.assigns.current_project
+    project = socket.assigns[:current_project]
+    unless project, do: throw(:noreply)
 
     case Workflows.get_workflow(project.id, id) do
       {:ok, workflow} ->
@@ -44,12 +45,14 @@ defmodule AgentExWeb.WorkflowsLive do
            run_result: nil
          )}
 
-      :not_found ->
+      {:error, :not_found} ->
         {:noreply,
          socket
          |> put_flash(:error, "Workflow not found")
          |> push_navigate(to: ~p"/workflows")}
     end
+  catch
+    :noreply -> {:noreply, push_navigate(socket, to: ~p"/workflows")}
   end
 
   def handle_params(_params, _uri, socket) do
@@ -90,7 +93,7 @@ defmodule AgentExWeb.WorkflowsLive do
   def handle_event("delete_workflow", %{"id" => id}, socket) do
     project = socket.assigns.current_project
 
-    case Workflows.delete_workflow(project.id, String.to_integer(id)) do
+    case Workflows.delete_workflow(project.id, id) do
       {:ok, _} ->
         workflows = Workflows.list_workflows(project.id)
 
@@ -238,14 +241,18 @@ defmodule AgentExWeb.WorkflowsLive do
     editing = socket.assigns.editing
     unless editing, do: throw(:noreply)
 
-    socket = assign(socket, run_loading: true, run_result: nil)
-
     task =
       Task.Supervisor.async_nolink(AgentEx.TaskSupervisor, fn ->
         Runner.run(editing, %{})
       end)
 
-    {:noreply, assign(socket, run_ref: task.ref, run_pid: task.pid)}
+    {:noreply,
+     assign(socket,
+       run_loading: true,
+       run_result: nil,
+       run_ref: task.ref,
+       run_pid: task.pid
+     )}
   catch
     :noreply -> {:noreply, socket}
   end

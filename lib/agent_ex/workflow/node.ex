@@ -69,6 +69,8 @@ defmodule AgentEx.Workflow.Node do
     end
   end
 
+  defp parse_type(type), do: raise("invalid node type: #{inspect(type)}")
+
   defp safe_to_atom(str) do
     {:ok, String.to_existing_atom(str)}
   rescue
@@ -76,6 +78,9 @@ defmodule AgentEx.Workflow.Node do
   end
 
   defp map_get(map, key) do
-    Map.get(map, key) || Map.get(map, to_string(key))
+    case Map.fetch(map, key) do
+      {:ok, val} -> val
+      :error -> Map.get(map, to_string(key))
+    end
   end
 end
