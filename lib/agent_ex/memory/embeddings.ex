@@ -73,11 +73,6 @@ defmodule AgentEx.Memory.Embeddings do
   end
 
   defp resolve_api_key(project_id) do
-    AgentEx.Vault.resolve_key(
-      project_id,
-      "embedding:openai",
-      :openai_api_key,
-      "OPENAI_API_KEY"
-    )
+    AgentEx.Vault.resolve_key(project_id, "embedding:openai")
   end
 end

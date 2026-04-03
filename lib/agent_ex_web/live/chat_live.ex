@@ -145,7 +145,17 @@ defmodule AgentExWeb.ChatLive do
 
   def handle_event("clear", _params, socket) do
     socket = cancel_active_run(socket)
-    {:noreply, push_patch(socket, to: ~p"/chat")}
+
+    if socket.assigns.conversation do
+      Chat.delete_conversation(socket.assigns.conversation)
+      user = socket.assigns.current_scope.user
+      project = socket.assigns.project
+      conversations = Chat.list_conversations(user.id, project.id)
+      socket = assign(socket, conversations: conversations)
+      {:noreply, push_patch(socket, to: ~p"/chat")}
+    else
+      {:noreply, push_patch(socket, to: ~p"/chat")}
+    end
   end
 
   def handle_event("delete_conversation", %{"id" => id}, socket) do
@@ -346,7 +356,8 @@ defmodule AgentExWeb.ChatLive do
         memory: agent_memory_opts,
         provider: socket.assigns.provider,
         disabled_builtins: project.disabled_builtins || [],
-        root_path: project.root_path
+        root_path: project.root_path,
+        run_id: run_id
       )
 
     # Refresh agents/prompt — assemble may have auto-created a default agent
@@ -365,7 +376,7 @@ defmodule AgentExWeb.ChatLive do
           memory: orchestrator_memory,
           context_window: orchestrator_memory.context_window,
           tool_timeout: 120_000,
-          reasoning_first: reasoning_capable?(socket.assigns.model),
+          reasoning_first: reasoning_capable?(socket.assigns.model) and needs_reasoning?(message),
           metadata: %{user_id: user.id}
         )
 
@@ -466,6 +477,7 @@ defmodule AgentExWeb.ChatLive do
   defp cancel_active_run(socket) do
     if socket.assigns.run_id do
       EventLoop.cancel(socket.assigns.run_id)
+      AgentEx.TaskList.clear(socket.assigns.run_id)
       Phoenix.PubSub.unsubscribe(AgentEx.PubSub, "run:#{socket.assigns.run_id}")
       assign(socket, run_id: nil, thinking: false)
     else
@@ -693,6 +705,7 @@ defmodule AgentExWeb.ChatLive do
       conversation_id: conversation && conversation.id,
       provider: socket.assigns.provider,
       model: socket.assigns.model,
+      source: "orchestrator",
       input_tokens: i,
       output_tokens: o
     })
@@ -716,4 +729,24 @@ defmodule AgentExWeb.ChatLive do
   end
 
   defp reasoning_capable?(_), do: false
+
+  # Skip reasoning for short/simple messages; use it for complex tasks
+  # that benefit from planning before tool use.
+  @planning_signals ~w[
+    plan build create implement design refactor migrate
+    analyze compare review audit investigate debug
+    step-by-step multi-step workflow pipeline setup
+    architecture structure organize integrate deploy
+  ]
+  @min_reasoning_words 15
+
+  defp needs_reasoning?(message) when is_binary(message) do
+    word_count = length(String.split(message))
+    lower = String.downcase(message)
+
+    word_count >= @min_reasoning_words or
+      Enum.any?(@planning_signals, &String.contains?(lower, &1))
+  end
+
+  defp needs_reasoning?(_), do: false
 end

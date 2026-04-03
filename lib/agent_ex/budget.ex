@@ -77,6 +77,51 @@ defmodule AgentEx.Budget do
     |> Enum.map(fn row -> Map.put(row, :total, row.input + row.output) end)
   end
 
+  @doc "Get usage breakdown by source (orchestrator vs agent) for a project this month."
+  @spec usage_by_source(integer()) :: %{orchestrator: map(), agent: map(), agent_models: [map()]}
+  def usage_by_source(project_id) do
+    now = DateTime.utc_now()
+    month_start = %{now | day: 1, hour: 0, minute: 0, second: 0, microsecond: {0, 6}}
+
+    empty = %{input: 0, output: 0, total: 0, calls: 0}
+
+    source_totals =
+      from(u in TokenUsage,
+        where: u.project_id == ^project_id and u.inserted_at >= ^month_start,
+        group_by: [u.source],
+        select: %{
+          source: u.source,
+          input: coalesce(sum(u.input_tokens), 0),
+          output: coalesce(sum(u.output_tokens), 0),
+          calls: count(u.id)
+        }
+      )
+      |> Repo.all()
+      |> Enum.map(fn row -> Map.put(row, :total, row.input + row.output) end)
+
+    orchestrator = Enum.find(source_totals, empty, &(&1.source == "orchestrator"))
+    agent = Enum.find(source_totals, empty, &(&1.source == "agent"))
+
+    agent_models =
+      from(u in TokenUsage,
+        where:
+          u.project_id == ^project_id and u.inserted_at >= ^month_start and u.source == "agent",
+        group_by: [u.provider, u.model],
+        select: %{
+          provider: u.provider,
+          model: u.model,
+          input: coalesce(sum(u.input_tokens), 0),
+          output: coalesce(sum(u.output_tokens), 0),
+          calls: count(u.id)
+        },
+        order_by: [desc: count(u.id)]
+      )
+      |> Repo.all()
+      |> Enum.map(fn row -> Map.put(row, :total, row.input + row.output) end)
+
+    %{orchestrator: orchestrator, agent: agent, agent_models: agent_models}
+  end
+
   @doc "Get remaining budget tokens. Returns `:unlimited` if no budget set."
   @spec budget_remaining(integer()) :: :unlimited | integer()
   def budget_remaining(project_id) do

@@ -182,10 +182,37 @@ defmodule AgentExWeb.AgentComponents do
             <%!-- Section: Provider/Model --%>
             <fieldset class="border-t border-gray-800 pt-4">
               <legend class="text-xs font-medium text-gray-500 uppercase tracking-wider">Model</legend>
-              <div class="grid grid-cols-2 gap-3 mt-3">
-                <.input type="select" name="provider" value={@form["provider"]} label="Provider" options={@provider_options} />
-                <.input type="select" name="model" value={@form["model"]} label="Model" options={@model_options} />
-              </div>
+              <%= if @agent do %>
+                <%!-- Locked after creation --%>
+                <input type="hidden" name="provider" value={@form["provider"]} />
+                <input type="hidden" name="model" value={@form["model"]} />
+                <div class="grid grid-cols-2 gap-3 mt-3">
+                  <div>
+                    <label class="block text-sm font-medium text-gray-300 mb-1">Provider</label>
+                    <div class="flex items-center gap-2 rounded-lg bg-gray-800/50 border border-gray-700 px-3 py-2 text-sm text-gray-400">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-3.5 h-3.5 text-gray-500 shrink-0">
+                        <path fill-rule="evenodd" d="M8 1a3.5 3.5 0 0 0-3.5 3.5V7A1.5 1.5 0 0 0 3 8.5v5A1.5 1.5 0 0 0 4.5 15h7a1.5 1.5 0 0 0 1.5-1.5v-5A1.5 1.5 0 0 0 11.5 7V4.5A3.5 3.5 0 0 0 8 1Zm2 6V4.5a2 2 0 1 0-4 0V7h4Z" clip-rule="evenodd" />
+                      </svg>
+                      {@form["provider"]}
+                    </div>
+                  </div>
+                  <div>
+                    <label class="block text-sm font-medium text-gray-300 mb-1">Model</label>
+                    <div class="flex items-center gap-2 rounded-lg bg-gray-800/50 border border-gray-700 px-3 py-2 text-sm text-gray-400">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-3.5 h-3.5 text-gray-500 shrink-0">
+                        <path fill-rule="evenodd" d="M8 1a3.5 3.5 0 0 0-3.5 3.5V7A1.5 1.5 0 0 0 3 8.5v5A1.5 1.5 0 0 0 4.5 15h7a1.5 1.5 0 0 0 1.5-1.5v-5A1.5 1.5 0 0 0 11.5 7V4.5A3.5 3.5 0 0 0 8 1Zm2 6V4.5a2 2 0 1 0-4 0V7h4Z" clip-rule="evenodd" />
+                      </svg>
+                      {@form["model"]}
+                    </div>
+                  </div>
+                </div>
+                <p class="text-[10px] text-gray-500 mt-2">Provider and model are locked after creation.</p>
+              <% else %>
+                <div class="grid grid-cols-2 gap-3 mt-3">
+                  <.input type="select" name="provider" value={@form["provider"]} label="Provider" options={@provider_options} />
+                  <.input type="select" name="model" value={@form["model"]} label="Model" options={@model_options} />
+                </div>
+              <% end %>
               <div :if={@context_window_display} class="flex items-center gap-2 rounded-md bg-gray-800/50 border border-gray-700 px-3 py-2 mt-3">
                 <span class="text-xs text-gray-400">Context window:</span>
                 <span class="text-xs font-mono text-white">{@context_window_display}</span>

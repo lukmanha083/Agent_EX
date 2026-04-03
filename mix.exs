@@ -49,6 +49,7 @@ defmodule AgentEx.MixProject do
 
       # UI Components
       {:salad_ui, "~> 1.0.0-beta.3"},
+      {:earmark, "~> 1.4"},
 
       # Assets
       {:tailwind, "~> 0.2", runtime: Mix.env() == :dev},

@@ -73,7 +73,14 @@ defmodule AgentEx.Pipe do
     Signature: `(messages, tools) -> {:ok, Message.t()} | {:error, term()}`
   """
   @spec through(String.t(), Agent.t(), ModelClient.t() | nil, keyword()) :: String.t()
-  def through(input, %Agent{} = agent, model_client, opts \\ []) do
+  def through(input, agent, model_client, opts \\ [])
+
+  # Handle chaining from a previous through() that returned {text, usage}
+  def through({text, _prev_usage}, %Agent{} = agent, model_client, opts) do
+    through(text, agent, model_client, opts)
+  end
+
+  def through(input, %Agent{} = agent, model_client, opts) when is_binary(input) do
     messages = [
       Message.system(agent.system_message),
       Message.user(input)
@@ -125,6 +132,10 @@ defmodule AgentEx.Pipe do
     end
   end
 
+  @doc "Extract the text result from through/4 (for backwards compatibility)."
+  def through_result({text, _usage}), do: text
+  def through_result(text) when is_binary(text), do: text
+
   @doc """
   Pass input through a tool. Returns the tool's output as string.
 
@@ -167,7 +178,8 @@ defmodule AgentEx.Pipe do
       ordered: true
     )
     |> Enum.map(fn
-      {:ok, result} -> result
+      {:ok, {result, _usage}} -> result
+      {:ok, result} when is_binary(result) -> result
       {:exit, reason} -> "Error: agent failed — #{inspect(reason)}"
     end)
   end
@@ -221,7 +233,24 @@ defmodule AgentEx.Pipe do
         "required" => ["task"]
       },
       function: fn %{"task" => task} ->
-        result = through(task, agent, model_client, opts)
+        {result, usage} = through(task, agent, model_client, opts)
+
+        Logger.info(
+          "Pipe.delegate_tool: agent=#{name} usage=#{inspect(usage)} project_id=#{inspect(model_client.project_id)}"
+        )
+
+        # Record specialist agent token usage
+        if model_client.project_id && (usage.input_tokens > 0 or usage.output_tokens > 0) do
+          AgentEx.Budget.record_usage(%{
+            project_id: model_client.project_id,
+            provider: to_string(model_client.provider),
+            model: model_client.model,
+            source: "agent",
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens
+          })
+        end
+
         report = build_memory_report(name, Keyword.put(opts, :semantic_query, task))
         {:ok, result <> report}
       end
@@ -249,23 +278,24 @@ defmodule AgentEx.Pipe do
   defp run_loop(ctx, messages, memory_opts) do
     messages = maybe_inject_memory(messages, memory_opts)
     ctx = Map.put(ctx, :input_messages, messages)
+    usage = %{input_tokens: 0, output_tokens: 0}
 
     case think(ctx, messages) do
-      {:ok, response} -> do_loop(ctx, [response], 0)
-      {:error, reason} -> "Error: #{inspect(reason)}"
+      {:ok, response} -> do_loop(ctx, [response], 0, add_usage(usage, response))
+      {:error, reason} -> {"Error: #{inspect(reason)}", usage}
     end
   end
 
-  defp do_loop(ctx, generated, iteration) do
+  defp do_loop(ctx, generated, iteration, usage) do
     last = List.last(generated)
 
     cond do
       not has_tool_calls?(last) ->
-        last.content || ""
+        {last.content || "", usage}
 
       iteration >= ctx.max_iterations ->
         Logger.warning("Pipe: hit max_iterations (#{ctx.max_iterations})")
-        last.content || ""
+        {last.content || "", usage}
 
       true ->
         {:ok, result_message, _observations} =
@@ -279,13 +309,24 @@ defmodule AgentEx.Pipe do
 
         case think(ctx, all_messages) do
           {:ok, response} ->
-            do_loop(ctx, generated ++ [result_message, response], iteration + 1)
+            do_loop(
+              ctx,
+              generated ++ [result_message, response],
+              iteration + 1,
+              add_usage(usage, response)
+            )
 
           {:error, reason} ->
-            "Error: #{inspect(reason)}"
+            {"Error: #{inspect(reason)}", usage}
         end
     end
   end
+
+  defp add_usage(acc, %Message{usage: %{input_tokens: i, output_tokens: o}}) do
+    %{acc | input_tokens: acc.input_tokens + i, output_tokens: acc.output_tokens + o}
+  end
+
+  defp add_usage(acc, _), do: acc
 
   # Dispatch to model_fn override or ModelClient.create
   defp think(%{model_fn: fun, tools: tools}, messages) when is_function(fun, 2) do

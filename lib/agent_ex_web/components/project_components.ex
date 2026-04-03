@@ -5,9 +5,6 @@ defmodule AgentExWeb.ProjectComponents do
 
   use AgentExWeb, :html
 
-  import AgentExWeb.CoreComponents, except: [button: 1]
-  import SaladUI.Button
-
   @doc "Renders a grid of project cards with a 'New Project' button."
   attr(:projects, :list, required: true)
 
@@ -52,18 +49,6 @@ defmodule AgentExWeb.ProjectComponents do
         <div class="flex gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-within:opacity-100 transition-opacity">
           <button
             type="button"
-            phx-click="edit_project"
-            phx-value-id={@project.id}
-            class="p-1.5 rounded-md text-gray-400 hover:text-white hover:bg-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 transition-colors"
-            aria-label="Edit project"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-3.5 h-3.5">
-              <path d="M13.488 2.513a1.75 1.75 0 0 0-2.475 0L6.75 6.774a2.75 2.75 0 0 0-.596.892l-.848 2.047a.75.75 0 0 0 .98.98l2.047-.848a2.75 2.75 0 0 0 .892-.596l4.261-4.262a1.75 1.75 0 0 0 0-2.474Z" />
-              <path d="M4.75 3.5c-.69 0-1.25.56-1.25 1.25v6.5c0 .69.56 1.25 1.25 1.25h6.5c.69 0 1.25-.56 1.25-1.25V9A.75.75 0 0 1 14 9v2.5A2.75 2.75 0 0 1 11.25 14h-6.5A2.75 2.75 0 0 1 2 11.25v-6.5A2.75 2.75 0 0 1 4.75 2H7a.75.75 0 0 1 0 1.5H4.75Z" />
-            </svg>
-          </button>
-          <button
-            type="button"
             phx-click="delete_project"
             phx-value-id={@project.id}
             data-confirm="Delete this project and all its agents, conversations, and memory?"
@@ -86,74 +71,6 @@ defmodule AgentExWeb.ProjectComponents do
         <.badge :if={@project.model} variant="secondary" class="text-[10px]">
           {@project.model}
         </.badge>
-      </div>
-    </div>
-    """
-  end
-
-  @doc "Renders the project editor dialog."
-  attr(:project, :map, default: nil)
-  attr(:form, :map, required: true)
-  attr(:show, :boolean, default: false)
-  attr(:provider_options, :list, default: [])
-  attr(:model_options, :list, default: [])
-  attr(:context_window_display, :string, default: nil)
-
-  def project_editor_dialog(assigns) do
-    ~H"""
-    <div :if={@show} class="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true" phx-window-keydown="close_editor" phx-key="Escape">
-      <div class="fixed inset-0 bg-black/60" phx-click="close_editor"></div>
-      <div data-testid="project-editor" class="relative z-10 w-full max-w-md mx-4 rounded-lg border border-gray-800 bg-gray-900 p-6 shadow-xl">
-        <div class="mb-4">
-          <h2 class="text-lg font-semibold text-white">
-            {if @project, do: "Edit Project", else: "New Project"}
-          </h2>
-          <p class="text-sm text-gray-400 mt-1">
-            Projects group agents, conversations, tools, and memory into isolated workspaces.
-          </p>
-        </div>
-
-        <.form for={@form} phx-submit="save_project" phx-change="validate_project" class="space-y-4">
-          <.input type="text" name="name" value={@form["name"]} label="Name" placeholder="e.g. Stock Research" required />
-          <.input type="text" name="description" value={@form["description"]} label="Description" placeholder="What this project is for" />
-          <.input type="text" name="root_path" value={@form["root_path"]} label="Sandbox Root Path" placeholder="e.g. ~/projects/trading" />
-          <p class="text-[10px] text-gray-500 -mt-2">
-            Agents in this project will be confined to this directory.
-          </p>
-
-          <%!-- Provider/Model: editable on create, read-only on edit --%>
-          <%= if @project do %>
-            <fieldset class="border-t border-gray-800 pt-4">
-              <legend class="text-xs font-medium text-gray-500 uppercase tracking-wider">Model (locked)</legend>
-              <div class="mt-2 rounded-md bg-gray-800/50 border border-gray-700 px-3 py-2">
-                <span class="text-sm text-white">{@project.provider} / {@project.model}</span>
-              </div>
-              <p class="text-[10px] text-gray-500 mt-1">Provider and model cannot be changed after project creation.</p>
-            </fieldset>
-          <% else %>
-            <fieldset class="border-t border-gray-800 pt-4">
-              <legend class="text-xs font-medium text-gray-500 uppercase tracking-wider">LLM Provider</legend>
-              <div class="grid grid-cols-2 gap-3 mt-3">
-                <.input type="select" name="provider" value={@form["provider"]} label="Provider" options={@provider_options} />
-                <.input type="select" name="model" value={@form["model"]} label="Model" options={@model_options} />
-              </div>
-              <div :if={@context_window_display} class="flex items-center gap-2 rounded-md bg-gray-800/50 border border-gray-700 px-3 py-2 mt-3">
-                <span class="text-xs text-gray-400">Context window:</span>
-                <span class="text-xs font-mono text-white">{@context_window_display}</span>
-                <span class="text-xs text-gray-500">tokens</span>
-              </div>
-            </fieldset>
-          <% end %>
-
-          <div class="flex justify-end gap-2 pt-2">
-            <.button type="button" variant="outline" phx-click="close_editor" class="border-gray-700 text-gray-300 hover:bg-gray-800">
-              Cancel
-            </.button>
-            <.button type="submit" class="bg-indigo-600 hover:bg-indigo-500 text-white">
-              {if @project, do: "Save Changes", else: "Create Project"}
-            </.button>
-          </div>
-        </.form>
       </div>
     </div>
     """

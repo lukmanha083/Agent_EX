@@ -81,29 +81,113 @@ defmodule AgentExWeb.BudgetLive do
             </p>
           </div>
 
-          <%!-- Usage by model --%>
+          <%!-- Usage by source: Orchestrator vs Agent --%>
           <div class="rounded-lg border border-gray-800 bg-gray-900 p-4">
-            <h2 class="text-sm font-medium text-white mb-3">Usage by Model (this month)</h2>
-            <%= if @model_breakdown == [] do %>
-              <p class="text-sm text-gray-500 py-2">No usage recorded yet.</p>
-            <% else %>
-              <div class="space-y-2">
-                <div
-                  :for={row <- @model_breakdown}
-                  class="flex items-center justify-between rounded-md bg-gray-800/50 px-3 py-2"
-                >
-                  <div>
-                    <span class="text-sm text-white">{row.model}</span>
-                    <span class="text-xs text-gray-500 ml-2">{row.provider}</span>
+            <h2 class="text-sm font-medium text-white mb-3">Usage by Role (this month)</h2>
+            <div class="space-y-3">
+              <%!-- Orchestrator --%>
+              <div class="rounded-md bg-gray-800/50 px-3 py-3">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2">
+                    <span class="inline-flex items-center justify-center w-2 h-2 rounded-full bg-indigo-400" />
+                    <span class="text-sm font-medium text-white">Orchestrator</span>
+                    <span class="text-xs text-gray-500">{@project.provider}/{@project.model}</span>
                   </div>
                   <div class="text-right">
-                    <span class="text-sm font-mono text-white">{format_number(row.total)}</span>
+                    <span class="text-sm font-mono text-white">{format_number(@source_usage.orchestrator.total)}</span>
                     <span class="text-xs text-gray-500 ml-1">tokens</span>
-                    <span class="text-xs text-gray-600 ml-2">({row.calls} calls)</span>
+                    <span class="text-xs text-gray-600 ml-2">({@source_usage.orchestrator.calls} calls)</span>
                   </div>
                 </div>
+                <div class="flex gap-4 mt-1.5 pl-4">
+                  <span class="text-xs text-gray-500">
+                    In: <span class="font-mono text-gray-400">{format_number(@source_usage.orchestrator.input)}</span>
+                  </span>
+                  <span class="text-xs text-gray-500">
+                    Out: <span class="font-mono text-gray-400">{format_number(@source_usage.orchestrator.output)}</span>
+                  </span>
+                </div>
               </div>
-            <% end %>
+
+              <%!-- Specialist Agents --%>
+              <div class="rounded-md bg-gray-800/50 px-3 py-3">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2">
+                    <span class="inline-flex items-center justify-center w-2 h-2 rounded-full bg-emerald-400" />
+                    <span class="text-sm font-medium text-white">Specialist Agents</span>
+                  </div>
+                  <div class="text-right">
+                    <span class="text-sm font-mono text-white">{format_number(@source_usage.agent.total)}</span>
+                    <span class="text-xs text-gray-500 ml-1">tokens</span>
+                    <span class="text-xs text-gray-600 ml-2">({@source_usage.agent.calls} calls)</span>
+                  </div>
+                </div>
+                <div class="flex gap-4 mt-1.5 pl-4">
+                  <span class="text-xs text-gray-500">
+                    In: <span class="font-mono text-gray-400">{format_number(@source_usage.agent.input)}</span>
+                  </span>
+                  <span class="text-xs text-gray-500">
+                    Out: <span class="font-mono text-gray-400">{format_number(@source_usage.agent.output)}</span>
+                  </span>
+                </div>
+
+                <%!-- Agent model breakdown --%>
+                <%= if @source_usage.agent_models != [] do %>
+                  <div class="mt-2 pt-2 border-t border-gray-700/50 space-y-2">
+                    <p class="text-[10px] text-gray-500 uppercase tracking-wider pl-4">By model</p>
+                    <div
+                      :for={row <- @source_usage.agent_models}
+                      class="rounded bg-gray-800/80 px-3 py-2 ml-4"
+                    >
+                      <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-1.5">
+                          <span class="inline-flex w-1.5 h-1.5 rounded-full bg-emerald-400/60" />
+                          <span class="text-xs font-medium text-white">{row.model}</span>
+                          <span class="text-[10px] text-gray-500">{row.provider}</span>
+                        </div>
+                        <div class="text-right">
+                          <span class="text-xs font-mono text-white">{format_number(row.total)}</span>
+                          <span class="text-[10px] text-gray-500 ml-1">({row.calls} calls)</span>
+                        </div>
+                      </div>
+                      <div class="flex gap-4 mt-1 pl-3">
+                        <span class="text-[10px] text-gray-500">
+                          In: <span class="font-mono text-gray-400">{format_number(row.input)}</span>
+                        </span>
+                        <span class="text-[10px] text-gray-500">
+                          Out: <span class="font-mono text-gray-400">{format_number(row.output)}</span>
+                        </span>
+                        <%= if @source_usage.agent.total > 0 do %>
+                          <span class="text-[10px] text-gray-600">
+                            {source_pct(row.total, @source_usage.agent.total)}% of agent usage
+                          </span>
+                        <% end %>
+                      </div>
+                    </div>
+                  </div>
+                <% end %>
+              </div>
+
+              <%!-- Proportion bar --%>
+              <%= if @monthly_usage.total > 0 do %>
+                <div class="pt-1">
+                  <div class="flex w-full h-2 rounded-full overflow-hidden bg-gray-800">
+                    <div class="bg-indigo-400 transition-all" style={"width: #{source_pct(@source_usage.orchestrator.total, @monthly_usage.total)}%"} />
+                    <div class="bg-emerald-400 transition-all" style={"width: #{source_pct(@source_usage.agent.total, @monthly_usage.total)}%"} />
+                  </div>
+                  <div class="flex justify-between mt-1">
+                    <span class="text-[10px] text-gray-500 flex items-center gap-1">
+                      <span class="inline-block w-1.5 h-1.5 rounded-full bg-indigo-400" />
+                      Orchestrator {source_pct(@source_usage.orchestrator.total, @monthly_usage.total)}%
+                    </span>
+                    <span class="text-[10px] text-gray-500 flex items-center gap-1">
+                      <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                      Agents {source_pct(@source_usage.agent.total, @monthly_usage.total)}%
+                    </span>
+                  </div>
+                </div>
+              <% end %>
+            </div>
           </div>
 
           <%!-- All time total --%>
@@ -161,7 +245,7 @@ defmodule AgentExWeb.BudgetLive do
     monthly = Budget.usage_this_month(project.id)
     total = Budget.total_usage(project.id)
     remaining = Budget.budget_remaining(project.id)
-    breakdown = Budget.usage_by_model(project.id)
+    source_usage = Budget.usage_by_source(project.id)
 
     usage_pct =
       if project.token_budget && project.token_budget > 0,
@@ -173,7 +257,7 @@ defmodule AgentExWeb.BudgetLive do
       monthly_usage: monthly,
       total_usage: total,
       remaining: remaining,
-      model_breakdown: breakdown,
+      source_usage: source_usage,
       usage_pct: usage_pct,
       budget_form: %{"token_budget" => project.token_budget && to_string(project.token_budget)}
     )
@@ -196,4 +280,7 @@ defmodule AgentExWeb.BudgetLive do
   defp budget_bar_color(pct) when pct >= 90, do: "bg-red-500"
   defp budget_bar_color(pct) when pct >= 70, do: "bg-amber-500"
   defp budget_bar_color(_), do: "bg-indigo-500"
+
+  defp source_pct(_, 0), do: 0
+  defp source_pct(part, total), do: round(part / total * 100)
 end

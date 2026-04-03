@@ -22,12 +22,12 @@ defmodule AgentExWeb.VaultLive do
           <%!-- Add secret form --%>
           <div class="rounded-lg border border-gray-800 bg-gray-900 p-4">
             <h2 class="text-sm font-medium text-white mb-3">Add Secret</h2>
-            <.form for={@form} phx-submit="save_secret" class="space-y-3">
+            <.form for={@form} phx-submit="save_secret" class="space-y-3" id={"secret-form-#{@form_key}"}>
               <div class="grid grid-cols-2 gap-3">
-                <.input type="select" name="key" value={@form["key"]} label="Key" options={key_options()} />
-                <.input type="text" name="label" value={@form["label"]} label="Label (optional)" placeholder="e.g. Production key" />
+                <.input type="select" name="key" value={@form["key"]} label="Key" options={key_options()} id={"secret-key-#{@form_key}"} />
+                <.input type="text" name="label" value={@form["label"]} label="Label (optional)" placeholder="e.g. Production key" id={"secret-label-#{@form_key}"} />
               </div>
-              <.input type="password" name="value" value="" label="Value" placeholder="sk-..." required autocomplete="off" />
+              <.input type="password" name="value" value="" label="Value" placeholder="sk-..." required autocomplete="off" id={"secret-value-#{@form_key}"} />
               <p class="text-[10px] text-gray-500">
                 Values are encrypted at rest (AES-256-GCM). You cannot view the full value after saving.
               </p>
@@ -81,7 +81,8 @@ defmodule AgentExWeb.VaultLive do
      assign(socket,
        project: project,
        secrets: Vault.list_secrets(project.id),
-       form: empty_form()
+       form: empty_form(),
+       form_key: System.unique_integer()
      )}
   end
 
@@ -99,7 +100,11 @@ defmodule AgentExWeb.VaultLive do
         {:ok, _} ->
           {:noreply,
            socket
-           |> assign(secrets: Vault.list_secrets(project.id), form: empty_form())
+           |> assign(
+             secrets: Vault.list_secrets(project.id),
+             form: empty_form(),
+             form_key: System.unique_integer()
+           )
            |> put_flash(:info, "Secret '#{key}' saved")}
 
         {:error, changeset} when is_struct(changeset, Ecto.Changeset) ->
@@ -135,10 +140,10 @@ defmodule AgentExWeb.VaultLive do
 
   defp key_options do
     [
-      {"LLM: Anthropic", "llm:anthropic"},
-      {"LLM: OpenAI", "llm:openai"},
-      {"LLM: Moonshot", "llm:moonshot"},
-      {"Embedding: OpenAI", "embedding:openai"}
+      {"llm:anthropic", "LLM: Anthropic"},
+      {"llm:openai", "LLM: OpenAI"},
+      {"llm:moonshot", "LLM: Moonshot"},
+      {"embedding:openai", "Embedding: OpenAI"}
     ]
   end
 

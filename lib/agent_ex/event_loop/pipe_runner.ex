@@ -57,7 +57,7 @@ defmodule AgentEx.EventLoop.PipeRunner do
   def through(run_id, input, agent, model_client, opts \\ []) do
     broadcast(run_id, :stage_start, %{agent: agent.name})
 
-    result = Pipe.through(input, agent, model_client, opts)
+    {result, _usage} = Pipe.through(input, agent, model_client, opts)
 
     broadcast(run_id, :stage_complete, %{
       agent: agent.name,

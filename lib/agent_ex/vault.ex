@@ -75,29 +75,21 @@ defmodule AgentEx.Vault do
   end
 
   @doc """
-  Resolve an API key from the vault, falling back to app config then env var.
+  Resolve an API key from the vault.
 
   Used by ModelClient and Embeddings to get the appropriate key.
+  Returns an empty string if no key is found.
   """
-  @spec resolve_key(integer() | nil, String.t(), atom(), String.t()) :: String.t()
-  def resolve_key(project_id, vault_key, app_config_key, env_var) do
-    vault_value =
-      if project_id do
-        case get_value(project_id, vault_key) do
-          {:ok, value} -> value
-          _ -> nil
-        end
+  @spec resolve_key(integer() | nil, String.t()) :: String.t()
+  def resolve_key(project_id, vault_key) do
+    if project_id do
+      case get_value(project_id, vault_key) do
+        {:ok, value} when is_binary(value) and value != "" -> String.trim(value)
+        _ -> ""
       end
-
-    [
-      vault_value,
-      Application.get_env(:agent_ex, app_config_key),
-      System.get_env(env_var)
-    ]
-    |> Enum.find("", fn
-      nil -> false
-      val -> String.trim(val) != ""
-    end)
+    else
+      ""
+    end
   end
 
   # Mask the value for display — show first 4 chars + ****

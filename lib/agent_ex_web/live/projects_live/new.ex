@@ -16,24 +16,21 @@ defmodule AgentExWeb.ProjectsLive.New do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="min-h-screen flex items-center justify-center p-4 bg-gray-950">
-      <div class="w-full max-w-lg">
-        <div class="text-center mb-8">
-          <div class="flex items-center justify-center gap-2 mb-4">
-            <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-600">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-white">
-                <path d="M3.75 3A1.75 1.75 0 0 0 2 4.75v3.26a3.235 3.235 0 0 1 1.75-.51h12.5c.644 0 1.245.188 1.75.51V6.75A1.75 1.75 0 0 0 16.25 5h-4.836a.25.25 0 0 1-.177-.073L9.823 3.513A1.75 1.75 0 0 0 8.586 3H3.75ZM3.75 9A1.75 1.75 0 0 0 2 10.75v4.5c0 .966.784 1.75 1.75 1.75h12.5A1.75 1.75 0 0 0 18 15.25v-4.5A1.75 1.75 0 0 0 16.25 9H3.75Z" />
-              </svg>
-            </div>
-            <h1 class="text-2xl font-bold text-white">Create a Project</h1>
+    <div class="h-full overflow-y-auto bg-gray-950">
+      <div class="flex min-h-full items-center justify-center px-3 py-6 md:p-6 lg:p-8">
+      <div class="w-full max-w-lg lg:max-w-xl">
+        <div class="text-center mb-6 md:mb-8">
+          <div class="flex flex-col items-center gap-3 mb-3 md:mb-4">
+            <img src={~p"/images/logo-icon.svg"} alt="AgentEx" class="h-10 w-10 md:h-12 md:w-12" />
+            <h1 class="text-xl md:text-2xl font-bold text-white">Create a Project</h1>
           </div>
-          <p class="text-gray-400 text-sm">
+          <p class="text-gray-400 text-xs md:text-sm px-2 md:px-0">
             Projects organize your agents, conversations, tools, and memory into isolated workspaces.
             Choose your LLM provider and model — these are locked after creation.
           </p>
         </div>
 
-        <div class="rounded-lg border border-gray-800 bg-gray-900 p-6">
+        <div class="rounded-lg border border-gray-800 bg-gray-900 p-4 md:p-6">
           <.form for={@form} phx-submit="create_project" phx-change="validate" class="space-y-4">
             <.input type="text" name="name" value={@form["name"]} label="Project Name" placeholder="e.g. Stock Research" required />
             <.input type="text" name="description" value={@form["description"]} label="Description" placeholder="What this project is for" />
@@ -44,7 +41,7 @@ defmodule AgentExWeb.ProjectsLive.New do
 
             <fieldset class="border-t border-gray-800 pt-4">
               <legend class="text-xs font-medium text-gray-500 uppercase tracking-wider">LLM Provider</legend>
-              <div class="grid grid-cols-2 gap-3 mt-3">
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
                 <.input type="select" name="provider" value={@form["provider"]} label="Provider" options={@provider_options} />
                 <.input type="select" name="model" value={@form["model"]} label="Model" options={@model_options} />
               </div>
@@ -66,6 +63,7 @@ defmodule AgentExWeb.ProjectsLive.New do
             Back to projects
           </.link>
         </p>
+      </div>
       </div>
     </div>
     """
@@ -141,7 +139,7 @@ defmodule AgentExWeb.ProjectsLive.New do
         {:noreply,
          socket
          |> put_flash(:info, "Project '#{project.name}' created!")
-         |> redirect(to: ~p"/projects/switch/#{project.id}")}
+         |> redirect(to: ~p"/chat")}
 
       {:error, changeset} ->
         {:noreply, put_flash(socket, :error, "Failed: #{format_errors(changeset)}")}

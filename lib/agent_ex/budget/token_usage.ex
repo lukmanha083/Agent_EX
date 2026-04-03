@@ -8,6 +8,7 @@ defmodule AgentEx.Budget.TokenUsage do
 
     field(:provider, :string)
     field(:model, :string)
+    field(:source, :string, default: "orchestrator")
     field(:input_tokens, :integer, default: 0)
     field(:output_tokens, :integer, default: 0)
 
@@ -21,10 +22,12 @@ defmodule AgentEx.Budget.TokenUsage do
       :conversation_id,
       :provider,
       :model,
+      :source,
       :input_tokens,
       :output_tokens
     ])
     |> validate_required([:project_id, :provider, :model])
+    |> validate_inclusion(:source, ~w[orchestrator agent])
     |> validate_number(:input_tokens, greater_than_or_equal_to: 0)
     |> validate_number(:output_tokens, greater_than_or_equal_to: 0)
     |> foreign_key_constraint(:project_id)

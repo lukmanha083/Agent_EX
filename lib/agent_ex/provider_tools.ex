@@ -27,24 +27,14 @@ defmodule AgentEx.ProviderTools do
 
   # Anthropic Messages API builtins — all work with our ModelClient
   # computer_use omitted: requires display_width_px/display_height_px config
+  # text_editor and code_execution omitted: we have local equivalents
+  # (TextEditor plugin and ShellExec plugin) that work on the user's machine
   @anthropic_builtins [
     %{
       name: "web_search",
       type: "web_search_20250305",
       description: "Search the web for current information",
       kind: :read
-    },
-    %{
-      name: "code_execution",
-      type: "code_execution_20250522",
-      description: "Execute Python code in a sandboxed environment",
-      kind: :write
-    },
-    %{
-      name: "text_editor",
-      type: "text_editor_20250429",
-      description: "View and edit text files with find-and-replace",
-      kind: :write
     }
   ]
 

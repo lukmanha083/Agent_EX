@@ -78,7 +78,7 @@ defmodule AgentEx.ModelClient do
     headers = request_headers(client)
     url = request_url(client)
 
-    case Req.post(url, json: body, headers: headers) do
+    case Req.post(url, json: body, headers: headers, receive_timeout: 120_000) do
       {:ok, %{status: 200, body: resp_body}} ->
         with {:ok, message} <- parse_response(resp_body, client.provider) do
           usage = extract_usage(resp_body, client.provider)
@@ -245,15 +245,15 @@ defmodule AgentEx.ModelClient do
   defp resolve_api_key(%{api_key: key}) when is_binary(key) and key != "", do: key
 
   defp resolve_api_key(%{provider: :anthropic, project_id: pid}) do
-    AgentEx.Vault.resolve_key(pid, "llm:anthropic", :anthropic_api_key, "ANTHROPIC_API_KEY")
+    AgentEx.Vault.resolve_key(pid, "llm:anthropic")
   end
 
   defp resolve_api_key(%{provider: :moonshot, project_id: pid}) do
-    AgentEx.Vault.resolve_key(pid, "llm:moonshot", :moonshot_api_key, "MOONSHOT_API_KEY")
+    AgentEx.Vault.resolve_key(pid, "llm:moonshot")
   end
 
   defp resolve_api_key(%{project_id: pid}) do
-    AgentEx.Vault.resolve_key(pid, "llm:openai", :openai_api_key, "OPENAI_API_KEY")
+    AgentEx.Vault.resolve_key(pid, "llm:openai")
   end
 
   # -- Usage extraction --

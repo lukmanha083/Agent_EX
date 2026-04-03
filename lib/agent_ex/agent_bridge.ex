@@ -6,7 +6,16 @@ defmodule AgentEx.AgentBridge do
   Stateless module — reads AgentStore and builds tools on demand.
   """
 
-  alias AgentEx.{AgentConfig, AgentStore, HttpTool, HttpToolStore, Pipe, ProviderTools, Tool}
+  alias AgentEx.{
+    AgentConfig,
+    AgentStore,
+    HttpTool,
+    HttpToolStore,
+    ModelClient,
+    Pipe,
+    ProviderTools,
+    Tool
+  }
 
   require Logger
 
@@ -21,7 +30,13 @@ defmodule AgentEx.AgentBridge do
     end)
   end
 
-  defp delegate_tool_from_config(%AgentConfig{} = config, user_id, project_id, model_client, opts) do
+  defp delegate_tool_from_config(
+         %AgentConfig{} = config,
+         user_id,
+         project_id,
+         _model_client,
+         opts
+       ) do
     system_message = AgentConfig.build_system_messages(config)
 
     system_message =
@@ -38,6 +53,14 @@ defmodule AgentEx.AgentBridge do
         system_message: system_message,
         tools: agent_tools ++ builtin_tools,
         intervention: resolve_intervention(config)
+      )
+
+    # Build a model_client from the agent's own provider/model
+    agent_model_client =
+      ModelClient.new(
+        model: config.model,
+        provider: AgentEx.ProviderHelpers.provider_to_atom(config.provider),
+        project_id: project_id
       )
 
     # Resolve context_window from agent's own model
@@ -60,7 +83,7 @@ defmodule AgentEx.AgentBridge do
 
     pipe_opts = if memory_opts, do: [memory: memory_opts], else: []
 
-    Pipe.delegate_tool(config.name, pipe_agent, model_client, pipe_opts)
+    Pipe.delegate_tool(config.name, pipe_agent, agent_model_client, pipe_opts)
   end
 
   # Empty tool_ids = all available tools (wildcard).

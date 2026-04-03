@@ -42,7 +42,3 @@ config :logger, :console, format: "[$level] $message\n"
 
 # Initialize plug at runtime for faster development compilation
 config :phoenix, :plug_init_mode, :runtime
-
-if File.exists?(Path.expand("dev.secret.exs", __DIR__)) do
-  import_config "dev.secret.exs"
-end
