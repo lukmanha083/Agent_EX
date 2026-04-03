@@ -125,44 +125,39 @@ defmodule AgentExWeb.WorkflowComponents do
 
   def workflow_card(assigns) do
     ~H"""
-    <div
-      phx-click="edit_workflow"
-      phx-value-id={@workflow.id}
-      class="group relative rounded-lg border border-gray-800 bg-gray-900/50 p-4 hover:border-gray-700 transition-colors cursor-pointer"
-    >
-      <div class="flex items-start justify-between">
-        <div class="flex-1 min-w-0">
-          <h3 class="text-sm font-medium text-white truncate">{@workflow.name}</h3>
-          <p :if={@workflow.description} class="mt-1 text-xs text-gray-500 line-clamp-2">
-            {@workflow.description}
-          </p>
+    <div class="group relative rounded-lg border border-gray-800 bg-gray-900/50 hover:border-gray-700 transition-colors">
+      <!-- Clickable body to open editor -->
+      <div phx-click="edit_workflow" phx-value-id={@workflow.id} class="p-4 cursor-pointer">
+        <h3 class="text-sm font-medium text-white truncate">{@workflow.name}</h3>
+        <p :if={@workflow.description} class="mt-1 text-xs text-gray-500 line-clamp-2">
+          {@workflow.description}
+        </p>
+        <div class="mt-3 flex items-center gap-3 text-[11px] text-gray-600">
+          <span>{length(@workflow.nodes)} nodes</span>
+          <span>{length(@workflow.edges)} edges</span>
         </div>
-        <button
-          type="button"
-          phx-click="delete_workflow"
-          phx-value-id={@workflow.id}
-          data-confirm="Delete this workflow?"
-          class="p-1.5 rounded-md text-gray-400 hover:text-red-400 hover:bg-red-500/10 transition-colors shrink-0"
-          aria-label="Delete workflow"
-          onclick="event.stopPropagation();"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4">
-            <path fill-rule="evenodd" d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 1 0 .23 1.482l.149-.022.841 10.518A2.75 2.75 0 0 0 7.596 19h4.807a2.75 2.75 0 0 0 2.742-2.53l.841-10.52.149.023a.75.75 0 0 0 .23-1.482A41.03 41.03 0 0 0 14 4.193V3.75A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.5.06l.3 7.5a.75.75 0 1 0 1.5-.06l-.3-7.5Zm4.34.06a.75.75 0 1 0-1.5-.06l-.3 7.5a.75.75 0 1 0 1.5.06l.3-7.5Z" clip-rule="evenodd" />
-          </svg>
-        </button>
+        <div class="mt-2 flex gap-1 flex-wrap">
+          <span
+            :for={type <- unique_node_types(@workflow.nodes)}
+            class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-800 text-gray-400"
+          >
+            {type}
+          </span>
+        </div>
       </div>
-      <div class="mt-3 flex items-center gap-3 text-[11px] text-gray-600">
-        <span>{length(@workflow.nodes)} nodes</span>
-        <span>{length(@workflow.edges)} edges</span>
-      </div>
-      <div class="mt-2 flex gap-1 flex-wrap">
-        <span
-          :for={type <- unique_node_types(@workflow.nodes)}
-          class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-800 text-gray-400"
-        >
-          {type}
-        </span>
-      </div>
+      <!-- Delete button — separate from the clickable body -->
+      <button
+        type="button"
+        phx-click="delete_workflow"
+        phx-value-id={@workflow.id}
+        data-confirm="Delete this workflow?"
+        class="absolute top-3 right-3 p-1.5 rounded-md text-gray-400 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+        aria-label="Delete workflow"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4">
+          <path fill-rule="evenodd" d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 1 0 .23 1.482l.149-.022.841 10.518A2.75 2.75 0 0 0 7.596 19h4.807a2.75 2.75 0 0 0 2.742-2.53l.841-10.52.149.023a.75.75 0 0 0 .23-1.482A41.03 41.03 0 0 0 14 4.193V3.75A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.5.06l.3 7.5a.75.75 0 1 0 1.5-.06l-.3-7.5Zm4.34.06a.75.75 0 1 0-1.5-.06l-.3 7.5a.75.75 0 1 0 1.5.06l.3-7.5Z" clip-rule="evenodd" />
+        </svg>
+      </button>
     </div>
     """
   end
