@@ -49,22 +49,18 @@ defmodule AgentEx.Vault do
         label: label
       }
 
-      case Repo.get_by(Secret, project_id: project_id, key: key) do
-        nil ->
-          %Secret{}
-          |> Secret.changeset(attrs)
-          |> Repo.insert()
-
-        existing ->
-          existing
-          |> Secret.changeset(attrs)
-          |> Repo.update()
-      end
+      %Secret{}
+      |> Secret.changeset(attrs)
+      |> Repo.insert(
+        on_conflict: {:replace, [:encrypted_value, :label, :updated_at]},
+        conflict_target: [:project_id, :key],
+        returning: true
+      )
     end
   end
 
   @doc "Delete a secret."
-  @spec delete_secret(integer(), String.t()) :: :ok | :not_found
+  @spec delete_secret(integer(), String.t()) :: :ok | :not_found | {:error, term()}
   def delete_secret(project_id, key) do
     case Repo.get_by(Secret, project_id: project_id, key: key) do
       nil ->
@@ -88,15 +84,20 @@ defmodule AgentEx.Vault do
     vault_value =
       if project_id do
         case get_value(project_id, vault_key) do
-          {:ok, value} when value != "" -> value
+          {:ok, value} -> value
           _ -> nil
         end
       end
 
-    vault_value ||
-      Application.get_env(:agent_ex, app_config_key) ||
-      System.get_env(env_var) ||
-      ""
+    [
+      vault_value,
+      Application.get_env(:agent_ex, app_config_key),
+      System.get_env(env_var)
+    ]
+    |> Enum.find("", fn
+      nil -> false
+      val -> String.trim(val) != ""
+    end)
   end
 
   # Mask the value for display — show first 4 chars + ****

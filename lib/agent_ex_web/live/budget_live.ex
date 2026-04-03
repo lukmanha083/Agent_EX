@@ -133,7 +133,8 @@ defmodule AgentExWeb.BudgetLive do
 
     budget =
       case Integer.parse(params["token_budget"] || "") do
-        {n, _} when n > 0 -> n
+        {n, ""} when n > 0 -> n
+        {0, ""} -> nil
         _ -> nil
       end
 

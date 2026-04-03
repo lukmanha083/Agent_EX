@@ -28,5 +28,6 @@ defmodule AgentEx.Budget.TokenUsage do
     |> validate_number(:input_tokens, greater_than_or_equal_to: 0)
     |> validate_number(:output_tokens, greater_than_or_equal_to: 0)
     |> foreign_key_constraint(:project_id)
+    |> foreign_key_constraint(:conversation_id)
   end
 end

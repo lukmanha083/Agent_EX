@@ -41,6 +41,12 @@ if config_env() == :prod do
     System.get_env("LIVE_VIEW_SIGNING_SALT") ||
       raise "LIVE_VIEW_SIGNING_SALT env var is required in production (generate with: mix phx.gen.secret 32)"
 
+  vault_key =
+    System.get_env("VAULT_KEY") ||
+      raise "VAULT_KEY env var is required in production (generate with: :crypto.strong_rand_bytes(32) |> Base.encode64())"
+
+  config :agent_ex, vault_key: vault_key
+
   config :agent_ex, AgentExWeb.Endpoint,
     url: [host: host, port: 443, scheme: "https"],
     http: [ip: {0, 0, 0, 0}, port: port],

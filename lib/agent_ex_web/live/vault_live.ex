@@ -123,6 +123,9 @@ defmodule AgentExWeb.VaultLive do
 
       :not_found ->
         {:noreply, put_flash(socket, :error, "Secret not found")}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to delete secret")}
     end
   end
 
@@ -132,10 +135,10 @@ defmodule AgentExWeb.VaultLive do
 
   defp key_options do
     [
-      {"llm:anthropic", "LLM: Anthropic"},
-      {"llm:openai", "LLM: OpenAI"},
-      {"llm:moonshot", "LLM: Moonshot"},
-      {"embedding:openai", "Embedding: OpenAI"}
+      {"LLM: Anthropic", "llm:anthropic"},
+      {"LLM: OpenAI", "llm:openai"},
+      {"LLM: Moonshot", "llm:moonshot"},
+      {"Embedding: OpenAI", "embedding:openai"}
     ]
   end
 

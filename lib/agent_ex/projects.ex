@@ -39,7 +39,15 @@ defmodule AgentEx.Projects do
     with {:ok, deleted} <- Repo.delete(project) do
       AgentEx.AgentStore.delete_by_project(project.user_id, project.id)
       AgentEx.HttpToolStore.delete_by_project(project.user_id, project.id)
-      Task.start(fn -> AgentEx.Memory.delete_project_data(project.user_id, project.id) end)
+
+      Task.Supervisor.start_child(AgentEx.TaskSupervisor, fn ->
+        try do
+          AgentEx.Memory.delete_project_data(project.user_id, project.id)
+        rescue
+          e -> Logger.error("Failed to delete memory data for project #{project.id}: #{Exception.message(e)}")
+        end
+      end)
+
       {:ok, deleted}
     end
   end

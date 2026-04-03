@@ -27,7 +27,8 @@ defmodule AgentEx.Projects.Project do
       :root_path,
       :provider,
       :model,
-      :disabled_builtins
+      :disabled_builtins,
+      :token_budget
     ])
     |> validate_required([:user_id, :name, :provider, :model])
     |> validate_inclusion(:provider, AgentEx.ProviderHelpers.valid_providers())
