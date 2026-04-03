@@ -202,7 +202,7 @@ defmodule AgentEx.PipeTest do
         Pipe.Agent.new(name: "lead", system_message: "Consolidate research results")
 
       results = ["Source A: bullish", "Source B: strong buy"]
-      result = Pipe.merge(results, consolidator, nil, model_fn: consolidator_fn)
+      {result, _usage} = Pipe.merge(results, consolidator, nil, model_fn: consolidator_fn)
       assert result =~ "Combined report"
     end
   end
@@ -232,7 +232,7 @@ defmodule AgentEx.PipeTest do
           end
         )
 
-      assert result == "Finance analysis complete"
+      assert result == {"Finance analysis complete", %{input_tokens: 0, output_tokens: 0}}
     end
   end
 

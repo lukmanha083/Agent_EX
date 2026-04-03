@@ -235,20 +235,21 @@ defmodule AgentEx.Pipe do
       function: fn %{"task" => task} ->
         {result, usage} = through(task, agent, model_client, opts)
 
-        Logger.info(
-          "Pipe.delegate_tool: agent=#{name} usage=#{inspect(usage)} project_id=#{inspect(model_client.project_id)}"
-        )
+        if model_client do
+          Logger.info(
+            "Pipe.delegate_tool: agent=#{name} usage=#{inspect(usage)} project_id=#{inspect(model_client.project_id)}"
+          )
 
-        # Record specialist agent token usage
-        if model_client.project_id && (usage.input_tokens > 0 or usage.output_tokens > 0) do
-          AgentEx.Budget.record_usage(%{
-            project_id: model_client.project_id,
-            provider: to_string(model_client.provider),
-            model: model_client.model,
-            source: "agent",
-            input_tokens: usage.input_tokens,
-            output_tokens: usage.output_tokens
-          })
+          if model_client.project_id && (usage.input_tokens > 0 or usage.output_tokens > 0) do
+            AgentEx.Budget.record_usage(%{
+              project_id: model_client.project_id,
+              provider: to_string(model_client.provider),
+              model: model_client.model,
+              source: "agent",
+              input_tokens: usage.input_tokens,
+              output_tokens: usage.output_tokens
+            })
+          end
         end
 
         report = build_memory_report(name, Keyword.put(opts, :semantic_query, task))

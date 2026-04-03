@@ -30,7 +30,7 @@ defmodule AgentExWeb.ProjectsLive.New do
           </p>
         </div>
 
-        <div class="rounded-lg border border-gray-800 bg-gray-900 p-4 md:p-6">
+        <div data-testid="project-editor" class="rounded-lg border border-gray-800 bg-gray-900 p-4 md:p-6">
           <.form for={@form} phx-submit="create_project" phx-change="validate" class="space-y-4">
             <.input type="text" name="name" value={@form["name"]} label="Project Name" placeholder="e.g. Stock Research" required />
             <.input type="text" name="description" value={@form["description"]} label="Description" placeholder="What this project is for" />

@@ -82,19 +82,19 @@ defmodule AgentEx.TaskList do
     else
       tasks
       |> Enum.with_index(1)
-      |> Enum.map_join("\n", fn {t, i} ->
-        status_icon =
-          case t.status do
-            :pending -> "[ ]"
-            :in_progress -> "[~]"
-            :completed -> "[x]"
-            :failed -> "[!]"
-          end
-
-        agent_info = if t.agent, do: " (#{t.agent})", else: ""
-        result_info = if t.result, do: "\n   Result: #{t.result}", else: ""
-        "#{i}. #{status_icon} #{t.title}#{agent_info}#{result_info}"
-      end)
+      |> Enum.map_join("\n", &format_task_line/1)
     end
   end
+
+  defp format_task_line({t, i}) do
+    icon = status_icon(t.status)
+    agent_info = if t.agent, do: " (#{t.agent})", else: ""
+    result_info = if t.result, do: "\n   Result: #{t.result}", else: ""
+    "#{i}. #{icon} #{t.title}#{agent_info}#{result_info}"
+  end
+
+  defp status_icon(:pending), do: "[ ]"
+  defp status_icon(:in_progress), do: "[~]"
+  defp status_icon(:completed), do: "[x]"
+  defp status_icon(:failed), do: "[!]"
 end

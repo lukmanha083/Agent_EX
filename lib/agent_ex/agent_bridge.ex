@@ -55,7 +55,6 @@ defmodule AgentEx.AgentBridge do
         intervention: resolve_intervention(config)
       )
 
-    # Build a model_client from the agent's own provider/model
     agent_model_client =
       ModelClient.new(
         model: config.model,

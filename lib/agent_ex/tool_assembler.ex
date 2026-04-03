@@ -58,8 +58,7 @@ defmodule AgentEx.ToolAssembler do
 
     read_tools =
       available
-      |> Enum.filter(&AgentEx.Tool.read?/1)
-      |> Enum.filter(&(&1.name in orchestrator_tools))
+      |> Enum.filter(&(AgentEx.Tool.read?(&1) and &1.name in orchestrator_tools))
 
     # Provider builtins — orchestrator only gets read-kind (e.g. web_search, not code_execution)
     provider_read = if provider, do: ProviderTools.read_only_tools(provider, disabled), else: []
