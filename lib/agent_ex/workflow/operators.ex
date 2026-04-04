@@ -155,13 +155,21 @@ defmodule AgentEx.Workflow.Operators do
     results = Map.get(ctx, :results, %{})
     merged = Map.merge(results, %{"input" => input})
 
-    method = (config["method"] || "GET") |> String.downcase() |> String.to_existing_atom()
-    url = Expression.interpolate(config["url"] || "", merged)
-    headers = resolve_headers(config["headers"] || %{}, merged)
+    allowed = ~w(get post put patch delete head options)a
+    raw_method = (config["method"] || "GET") |> String.downcase()
 
-    case AgentEx.NetworkPolicy.validate(url) do
-      {:error, reason} -> {:error, "SSRF blocked: #{reason}"}
-      :ok -> do_http_request(method, url, headers, config, input, merged)
+    case safe_to_method(raw_method, allowed) do
+      {:ok, method} ->
+        url = Expression.interpolate(config["url"] || "", merged)
+        headers = resolve_headers(config["headers"] || %{}, merged)
+
+        case AgentEx.NetworkPolicy.validate(url) do
+          {:error, reason} -> {:error, "SSRF blocked: #{reason}"}
+          :ok -> do_http_request(method, url, headers, config, input, merged)
+        end
+
+      :error ->
+        {:error, "invalid HTTP method: #{inspect(raw_method)}"}
     end
   end
 
@@ -174,9 +182,9 @@ defmodule AgentEx.Workflow.Operators do
         {:error, "tool not found: #{tool_name}"}
 
       tool ->
-        param_mapping = config["param_mapping"] || %{}
         results = Map.get(ctx, :results, %{})
-        args = resolve_tool_args(param_mapping, input, results)
+
+        args = resolve_tool_input(config, input, results)
 
         case tool.function.(args) do
           {:ok, result} ->
@@ -206,6 +214,9 @@ defmodule AgentEx.Workflow.Operators do
           {:ok, result} -> {:ok, result}
           {:error, reason} -> {:error, "agent #{agent_id} failed: #{inspect(reason)}"}
         end
+
+      other ->
+        {:error, "invalid agent_runner: expected function/2, got #{inspect(other)}"}
     end
   end
 
@@ -321,6 +332,8 @@ defmodule AgentEx.Workflow.Operators do
   defp compare_filter(a, "<", b) when is_number(a) and is_number(b), do: a < b
   defp compare_filter(a, ">=", b) when is_number(a) and is_number(b), do: a >= b
   defp compare_filter(a, "<=", b) when is_number(a) and is_number(b), do: a <= b
+  defp compare_filter(a, "==", b) when is_number(a) and is_number(b), do: a == b
+  defp compare_filter(a, "!=", b) when is_number(a) and is_number(b), do: a != b
   defp compare_filter(a, "==", b), do: to_string(a) == to_string(b)
   defp compare_filter(a, "!=", b), do: to_string(a) != to_string(b)
   defp compare_filter(_, _, _), do: false
@@ -330,9 +343,15 @@ defmodule AgentEx.Workflow.Operators do
   defp parse_value("false"), do: false
 
   defp parse_value(str) do
-    case Float.parse(str) do
-      {num, ""} -> num
-      _ -> str
+    case Integer.parse(str) do
+      {int, ""} ->
+        int
+
+      _ ->
+        case Float.parse(str) do
+          {num, ""} -> num
+          _ -> str
+        end
     end
   end
 
@@ -360,6 +379,14 @@ defmodule AgentEx.Workflow.Operators do
     Map.new(headers, fn {k, v} -> {k, Expression.interpolate(v, results)} end)
   end
 
+  defp resolve_tool_input(config, input, results) do
+    if Map.has_key?(config, "param_mapping") do
+      resolve_tool_args(config["param_mapping"], input, results)
+    else
+      if is_map(input), do: input, else: %{}
+    end
+  end
+
   defp resolve_tool_args(mapping, input, results) when is_map(mapping) do
     merged = Map.merge(results, %{"input" => input})
 
@@ -380,6 +407,13 @@ defmodule AgentEx.Workflow.Operators do
   end
 
   defp try_decode_json(value), do: value
+
+  defp safe_to_method(str, allowed) do
+    atom = String.to_existing_atom(str)
+    if atom in allowed, do: {:ok, atom}, else: :error
+  rescue
+    ArgumentError -> :error
+  end
 
   # Safe expression evaluator — parses the expression into AST and validates
   # that only whitelisted modules/functions are called before evaluating.
@@ -404,11 +438,19 @@ defmodule AgentEx.Workflow.Operators do
   end
 
   @allowed_modules [Map, Enum, String, Kernel, List, Tuple, Access]
-  @blocked_atoms ~w(
-    System File Port Code IO Process Node
-    :os :erlang :persistent_term Application
+  @allowed_kernel_fns ~w(
+    + - * / div rem abs round trunc ceil floor
+    == != === !== > < >= <= and or not
+    && || ! in
+    is_nil is_binary is_number is_integer is_float is_boolean is_map is_list is_atom
+    to_string to_charlist inspect
+    hd tl length elem tuple_size map_size
+    min max
+    if unless cond case
   )a
+  @blocked_calls ~w(spawn spawn_link spawn_monitor apply send receive import require use)a
 
+  # Remote call: Module.func(...)
   defp validate_ast({:., _, [{:__aliases__, _, _mod_parts} = mod, _func]}) do
     case Macro.expand(mod, __ENV__) do
       m when m in @allowed_modules -> :ok
@@ -418,14 +460,15 @@ defmodule AgentEx.Workflow.Operators do
     _ -> {:error, "unknown module reference"}
   end
 
+  # Atom module call: :erlang.func(...) — block all
   defp validate_ast({:., _, [mod, _func]}) when is_atom(mod) do
-    if mod in @blocked_atoms do
-      {:error, "module #{inspect(mod)} is not allowed"}
-    else
-      :ok
-    end
+    {:error, "module #{inspect(mod)} is not allowed"}
   end
 
+  # Dynamic dispatch / anonymous call — block
+  defp validate_ast({:., _, _}), do: {:error, "dynamic dispatch is not allowed"}
+
+  # Module reference
   defp validate_ast({:__aliases__, _, parts}) do
     mod_name = Module.concat(parts)
 
@@ -438,11 +481,27 @@ defmodule AgentEx.Workflow.Operators do
     _ -> {:error, "invalid module reference"}
   end
 
+  # Block capture operator and anonymous functions
+  defp validate_ast({:&, _, _}), do: {:error, "capture operator is not allowed"}
+  defp validate_ast({:fn, _, _}), do: {:error, "anonymous functions are not allowed"}
+
+  # Named function calls
   defp validate_ast({call, _, args}) when is_atom(call) and is_list(args) do
-    if call in @blocked_atoms do
-      {:error, "#{call} is not allowed"}
-    else
-      validate_ast_list(args)
+    cond do
+      call in @blocked_calls ->
+        {:error, "#{call} is not allowed"}
+
+      call in @allowed_kernel_fns ->
+        validate_ast_list(args)
+
+      # Allow variable bindings and pipe operator
+      call in ~w(= |> for with)a ->
+        validate_ast_list(args)
+
+      # Unknown bare call — allow (likely a variable reference or Kernel function)
+      # but validate args recursively
+      true ->
+        validate_ast_list(args)
     end
   end
 

@@ -62,11 +62,14 @@ defmodule AgentEx.Workflow do
 
   @doc "Decode JSONB nodes/edges into structs after loading from DB."
   def decode(%__MODULE__{} = workflow) do
-    %{
-      workflow
-      | nodes: Enum.map(workflow.nodes || [], &Node.from_map/1),
-        edges: Enum.map(workflow.edges || [], &Edge.from_map/1)
-    }
+    {:ok,
+     %{
+       workflow
+       | nodes: Enum.map(workflow.nodes || [], &Node.from_map/1),
+         edges: Enum.map(workflow.edges || [], &Edge.from_map/1)
+     }}
+  rescue
+    e -> {:error, {:invalid_workflow, Exception.message(e)}}
   end
 
   # Encode Node/Edge structs back to plain maps for JSONB storage.

@@ -53,7 +53,7 @@ const WorkflowEditor = {
     })
 
     // --- Mouse move ---
-    document.addEventListener("mousemove", (e) => {
+    this._onMouseMove = (e) => {
       const canvasRect = this.el.getBoundingClientRect()
 
       // Node dragging — move node AND redraw edges live
@@ -82,10 +82,11 @@ const WorkflowEditor = {
           portIn.classList.add("ring-2", "ring-indigo-400")
         }
       }
-    })
+    }
+    document.addEventListener("mousemove", this._onMouseMove)
 
     // --- Mouse up ---
-    document.addEventListener("mouseup", (e) => {
+    this._onMouseUp = (e) => {
       if (this.dragging) {
         const canvasRect = this.el.getBoundingClientRect()
         const x = Math.max(0, Math.round(e.clientX - canvasRect.left - this.offset.x + this.el.scrollLeft))
@@ -118,7 +119,13 @@ const WorkflowEditor = {
         })
         this.connecting = null
       }
-    })
+    }
+    document.addEventListener("mouseup", this._onMouseUp)
+  },
+
+  destroyed() {
+    document.removeEventListener("mousemove", this._onMouseMove)
+    document.removeEventListener("mouseup", this._onMouseUp)
   },
 
   updated() {

@@ -20,10 +20,16 @@ defmodule AgentEx.Workflow.Expression do
   def interpolate(template, _results) when not is_binary(template), do: template
 
   def interpolate(template, results) do
-    Regex.replace(~r/\{\{([\w]+)\.([\w.]+)\}\}/, template, fn _match, node_id, path ->
-      keys = String.split(path, ".")
-      value = get_nested(results, [node_id | keys])
-      format_value(value)
+    Regex.replace(~r/\{\{([\w]+(?:\.[\w.]+)?)\}\}/, template, fn _match, ref ->
+      case String.split(ref, ".") do
+        [single] ->
+          value = Map.get(results, single)
+          format_value(value)
+
+        [node_id | keys] ->
+          value = get_nested(results, [node_id | keys])
+          format_value(value)
+      end
     end)
   end
 
@@ -42,10 +48,12 @@ defmodule AgentEx.Workflow.Expression do
 
   @doc "Extract a single value from results given a `{{node_id.path}}` reference."
   def extract_value(ref, results) when is_binary(ref) do
-    case Regex.run(~r/^\{\{([\w]+)\.([\w.]+)\}\}$/, ref) do
-      [_, node_id, path] ->
-        keys = String.split(path, ".")
-        get_nested(results, [node_id | keys])
+    case Regex.run(~r/^\{\{([\w]+(?:\.[\w.]+)?)\}\}$/, ref) do
+      [_, inner] ->
+        case String.split(inner, ".") do
+          [single] -> Map.get(results, single)
+          [node_id | keys] -> get_nested(results, [node_id | keys])
+        end
 
       _ ->
         # Not a reference, try interpolation in case it's a mixed string
@@ -87,10 +95,19 @@ defmodule AgentEx.Workflow.Expression do
   defp compare(value, "==", expected), do: to_comparable(value) == to_comparable(expected)
   defp compare(value, "!=", expected), do: to_comparable(value) != to_comparable(expected)
 
-  defp compare(value, ">", expected), do: to_number(value) > to_number(expected)
-  defp compare(value, "<", expected), do: to_number(value) < to_number(expected)
-  defp compare(value, ">=", expected), do: to_number(value) >= to_number(expected)
-  defp compare(value, "<=", expected), do: to_number(value) <= to_number(expected)
+  defp compare(value, op, expected) when op in ~w(> < >= <=) do
+    with {:ok, a} <- safe_to_number(value),
+         {:ok, b} <- safe_to_number(expected) do
+      case op do
+        ">" -> a > b
+        "<" -> a < b
+        ">=" -> a >= b
+        "<=" -> a <= b
+      end
+    else
+      :error -> false
+    end
+  end
 
   defp compare(value, "contains", expected) when is_binary(value) and is_binary(expected) do
     String.contains?(value, expected)
@@ -153,16 +170,16 @@ defmodule AgentEx.Workflow.Expression do
 
   defp to_comparable(value), do: value
 
-  defp to_number(value) when is_number(value), do: value
+  defp safe_to_number(value) when is_number(value), do: {:ok, value}
 
-  defp to_number(value) when is_binary(value) do
+  defp safe_to_number(value) when is_binary(value) do
     case Float.parse(value) do
-      {num, _} -> num
-      :error -> 0
+      {num, _} -> {:ok, num}
+      :error -> :error
     end
   end
 
-  defp to_number(_), do: 0
+  defp safe_to_number(_), do: :error
 
   defp empty?(nil), do: true
   defp empty?(""), do: true

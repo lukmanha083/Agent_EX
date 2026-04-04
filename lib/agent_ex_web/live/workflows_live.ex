@@ -118,25 +118,23 @@ defmodule AgentExWeb.WorkflowsLive do
     end
   end
 
-  def handle_event("save_workflow", params, socket) do
+  def handle_event("update_workflow_name", %{"value" => name}, socket) do
     editing = socket.assigns.editing
     unless editing, do: throw(:noreply)
 
-    name = String.trim(params["name"] || editing.name)
-    description = params["description"]
+    name = String.trim(name)
+    if name == "" or name == editing.name, do: throw(:noreply)
 
-    case Workflows.update_workflow(editing, %{name: name, description: description}) do
-      {:ok, saved} ->
-        workflows = Workflows.list_workflows(saved.project_id)
+    save_editing(socket, %{name: name}, socket.assigns.selected_node_id)
+  catch
+    :noreply -> {:noreply, socket}
+  end
 
-        {:noreply,
-         socket
-         |> assign(editing: saved, workflows: workflows)
-         |> put_flash(:info, "Workflow saved")}
+  def handle_event("update_workflow_description", %{"value" => desc}, socket) do
+    editing = socket.assigns.editing
+    unless editing, do: throw(:noreply)
 
-      {:error, changeset} ->
-        {:noreply, put_flash(socket, :error, "Save failed: #{inspect(changeset.errors)}")}
-    end
+    save_editing(socket, %{description: desc}, socket.assigns.selected_node_id)
   catch
     :noreply -> {:noreply, socket}
   end
@@ -273,6 +271,9 @@ defmodule AgentExWeb.WorkflowsLive do
     editing = socket.assigns.editing
     unless editing, do: throw(:noreply)
 
+    # Cancel any in-flight run
+    socket = maybe_shutdown_run(socket)
+
     task =
       Task.Supervisor.async_nolink(AgentEx.TaskSupervisor, fn ->
         Runner.run(editing, %{})
@@ -324,7 +325,24 @@ defmodule AgentExWeb.WorkflowsLive do
     end
   end
 
+  @impl true
+  def terminate(_reason, socket) do
+    maybe_shutdown_run(socket)
+    :ok
+  end
+
   # --- Private ---
+
+  defp maybe_shutdown_run(socket) do
+    case socket.assigns[:run_pid] do
+      pid when is_pid(pid) ->
+        Task.shutdown(pid, :brutal_kill)
+        assign(socket, run_pid: nil, run_ref: nil, run_loading: false)
+
+      _ ->
+        socket
+    end
+  end
 
   defp update_node(socket, id, update_fn) do
     editing = socket.assigns.editing

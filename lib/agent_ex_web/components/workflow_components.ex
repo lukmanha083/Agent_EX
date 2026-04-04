@@ -544,7 +544,20 @@ defmodule AgentExWeb.WorkflowComponents do
     [{"true", "T", "top-[8px]"}, {"false", "F", "bottom-[8px]"}]
   end
 
-  defp output_ports(%{type: :switch}), do: [{"output", "Output", "top-1/2 -translate-y-1/2"}]
+  defp output_ports(%{type: :switch, config: config}) do
+    cases = config["cases"] || []
+
+    if cases == [] do
+      [{"default", "Default", "top-1/2 -translate-y-1/2"}]
+    else
+      cases
+      |> Enum.with_index()
+      |> Enum.map(fn {c, _i} ->
+        {"case_#{c}", to_string(c), "top-1/2 -translate-y-1/2"}
+      end)
+      |> Kernel.++([{"default", "Default", "top-1/2 -translate-y-1/2"}])
+    end
+  end
 
   defp output_ports(_node), do: [{"output", "Output", "top-1/2 -translate-y-1/2"}]
 

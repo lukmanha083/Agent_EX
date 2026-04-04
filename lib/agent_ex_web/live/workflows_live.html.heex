@@ -38,13 +38,11 @@
           <input
             type="text"
             value={@editing.name}
-            phx-blur="save_workflow"
-            name="name"
+            phx-blur="update_workflow_name"
             class="w-full rounded-md bg-gray-800 border border-gray-700 text-sm text-white px-2 py-1 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
           />
           <textarea
-            phx-blur="save_workflow"
-            name="description"
+            phx-blur="update_workflow_description"
             rows="2"
             placeholder="Description..."
             class="w-full rounded-md bg-gray-800 border border-gray-700 text-xs text-gray-400 px-2 py-1 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 resize-none"

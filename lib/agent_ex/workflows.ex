@@ -24,7 +24,7 @@ defmodule AgentEx.Workflows do
     |> Repo.one()
     |> case do
       nil -> {:error, :not_found}
-      workflow -> {:ok, Workflow.decode(workflow)}
+      workflow -> Workflow.decode(workflow)
     end
   end
 
@@ -34,7 +34,12 @@ defmodule AgentEx.Workflows do
     |> where([w], w.project_id == ^project_id)
     |> order_by([w], desc: w.inserted_at)
     |> Repo.all()
-    |> Enum.map(&Workflow.decode/1)
+    |> Enum.flat_map(fn wf ->
+      case Workflow.decode(wf) do
+        {:ok, decoded} -> [decoded]
+        {:error, _} -> []
+      end
+    end)
   end
 
   @doc "Update an existing workflow."
@@ -61,6 +66,6 @@ defmodule AgentEx.Workflows do
     end
   end
 
-  defp decode_result({:ok, workflow}), do: {:ok, Workflow.decode(workflow)}
+  defp decode_result({:ok, workflow}), do: Workflow.decode(workflow)
   defp decode_result(error), do: error
 end

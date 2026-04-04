@@ -149,16 +149,29 @@ defmodule AgentEx.Workflow.Runner do
   defp skip_untaken_branches(node_id, taken_port, edges_src, nodes, state) do
     outgoing = Map.get(edges_src, node_id, [])
 
+    # Compute nodes reachable via the taken branch
+    taken_edges = Enum.filter(outgoing, &(&1.source_port == taken_port))
+
+    taken_reachable =
+      Enum.reduce(taken_edges, MapSet.new(), fn edge, acc ->
+        downstream = collect_downstream(edge.target_node_id, edges_src, nodes)
+        Enum.reduce(downstream, acc, &MapSet.put(&2, &1))
+      end)
+
     # Find edges whose port was NOT taken
     skipped_edges = Enum.filter(outgoing, &(&1.source_port != taken_port))
 
-    # Collect all downstream nodes from skipped edges
+    # Collect downstream from skipped edges, but exclude nodes also reachable via taken
     skipped_ids =
       Enum.flat_map(skipped_edges, fn edge ->
         collect_downstream(edge.target_node_id, edges_src, nodes)
       end)
 
-    skipped_set = Enum.reduce(skipped_ids, state.skipped, &MapSet.put(&2, &1))
+    skipped_set =
+      skipped_ids
+      |> Enum.reject(&MapSet.member?(taken_reachable, &1))
+      |> Enum.reduce(state.skipped, &MapSet.put(&2, &1))
+
     %{state | skipped: skipped_set}
   end
 
