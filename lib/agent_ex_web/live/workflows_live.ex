@@ -71,8 +71,18 @@ defmodule AgentExWeb.WorkflowsLive do
       project_id: project.id,
       name: "Workflow #{suffix}",
       nodes: [
-        %Node{id: gen_node_id(), type: :trigger, label: "Trigger", position: %{"x" => 50, "y" => 100}},
-        %Node{id: gen_node_id(), type: :output, label: "Output", position: %{"x" => 350, "y" => 100}}
+        %Node{
+          id: gen_node_id(),
+          type: :trigger,
+          label: "Trigger",
+          position: %{"x" => 50, "y" => 100}
+        },
+        %Node{
+          id: gen_node_id(),
+          type: :output,
+          label: "Output",
+          position: %{"x" => 350, "y" => 100}
+        }
       ],
       edges: []
     }
@@ -118,7 +128,11 @@ defmodule AgentExWeb.WorkflowsLive do
     case Workflows.update_workflow(editing, %{name: name, description: description}) do
       {:ok, saved} ->
         workflows = Workflows.list_workflows(saved.project_id)
-        {:noreply, socket |> assign(editing: saved, workflows: workflows) |> put_flash(:info, "Workflow saved")}
+
+        {:noreply,
+         socket
+         |> assign(editing: saved, workflows: workflows)
+         |> put_flash(:info, "Workflow saved")}
 
       {:error, changeset} ->
         {:noreply, put_flash(socket, :error, "Save failed: #{inspect(changeset.errors)}")}
@@ -185,14 +199,26 @@ defmodule AgentExWeb.WorkflowsLive do
     end)
   end
 
-  def handle_event("update_node_config_value", %{"id" => id, "key" => key, "value" => value}, socket) do
+  def handle_event(
+        "update_node_config_value",
+        %{"id" => id, "key" => key, "value" => value},
+        socket
+      ) do
     update_node(socket, id, fn node ->
-      parsed = if key == "paths", do: String.split(value, "\n", trim: true) |> Enum.map(&String.trim/1), else: value
+      parsed =
+        if key == "paths",
+          do: String.split(value, "\n", trim: true) |> Enum.map(&String.trim/1),
+          else: value
+
       %{node | config: Map.put(node.config, key, parsed)}
     end)
   end
 
-  def handle_event("update_node_config_json", %{"id" => id, "key" => key, "value" => json}, socket) do
+  def handle_event(
+        "update_node_config_json",
+        %{"id" => id, "key" => key, "value" => json},
+        socket
+      ) do
     case Jason.decode(json) do
       {:ok, parsed} ->
         update_node(socket, id, fn node -> %{node | config: Map.put(node.config, key, parsed)} end)
@@ -264,8 +290,11 @@ defmodule AgentExWeb.WorkflowsLive do
 
       run_result =
         case result do
-          {:ok, %{output: output}} -> %{status: :ok, output: output}
-          {:error, %{node_id: node_id, reason: reason}} -> %{status: :error, node_id: node_id, reason: reason}
+          {:ok, %{output: output}} ->
+            %{status: :ok, output: output}
+
+          {:error, %{node_id: node_id, reason: reason}} ->
+            %{status: :error, node_id: node_id, reason: reason}
         end
 
       {:noreply,
@@ -295,7 +324,9 @@ defmodule AgentExWeb.WorkflowsLive do
     editing = socket.assigns.editing
     unless editing, do: throw(:noreply)
 
-    nodes = Enum.map(editing.nodes, fn node -> if node.id == id, do: update_fn.(node), else: node end)
+    nodes =
+      Enum.map(editing.nodes, fn node -> if node.id == id, do: update_fn.(node), else: node end)
+
     save_editing(socket, %{nodes: nodes}, socket.assigns.selected_node_id)
   catch
     :noreply -> {:noreply, socket}

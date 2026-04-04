@@ -235,13 +235,26 @@ defmodule AgentEx.Workflow.Operators do
   defp do_http_request(method, url, headers, config, input, merged) do
     body = if config["body"], do: Expression.resolve(config["body"], merged), else: input
 
-    req_opts = [method: method, url: url, headers: headers, receive_timeout: 15_000, redirect: false]
-    req_opts = if method in [:post, :put, :patch], do: Keyword.put(req_opts, :json, body), else: req_opts
+    req_opts = [
+      method: method,
+      url: url,
+      headers: headers,
+      receive_timeout: 15_000,
+      redirect: false
+    ]
+
+    req_opts =
+      if method in [:post, :put, :patch], do: Keyword.put(req_opts, :json, body), else: req_opts
 
     case Req.request(req_opts) do
-      {:ok, %{status: status, body: resp_body}} when status in 200..299 -> {:ok, resp_body}
-      {:ok, %{status: status, body: resp_body}} -> {:error, "HTTP #{status}: #{inspect(resp_body)}"}
-      {:error, exception} -> {:error, "HTTP error: #{inspect(exception)}"}
+      {:ok, %{status: status, body: resp_body}} when status in 200..299 ->
+        {:ok, resp_body}
+
+      {:ok, %{status: status, body: resp_body}} ->
+        {:error, "HTTP #{status}: #{inspect(resp_body)}"}
+
+      {:error, exception} ->
+        {:error, "HTTP error: #{inspect(exception)}"}
     end
   end
 
@@ -376,7 +389,7 @@ defmodule AgentEx.Workflow.Operators do
       {:ok, ast} ->
         case validate_ast(ast) do
           :ok ->
-            {result, _} = Code.eval_quoted(ast, [input: input])
+            {result, _} = Code.eval_quoted(ast, input: input)
             {:ok, result}
 
           {:error, reason} ->

@@ -51,9 +51,13 @@ defmodule AgentEx.Workflow.Runner do
           agent_runner: opts[:agent_runner]
         }
 
-        broadcast(run_id, :workflow_start, %{workflow_id: workflow.id, node_count: length(sorted_ids)})
+        broadcast(run_id, :workflow_start, %{
+          workflow_id: workflow.id,
+          node_count: length(sorted_ids)
+        })
 
-        result = execute_dag(sorted_ids, node_map, edges_by_source, edges_by_target, trigger_data, state)
+        result =
+          execute_dag(sorted_ids, node_map, edges_by_source, edges_by_target, trigger_data, state)
 
         case result do
           {:ok, state} ->
@@ -167,7 +171,10 @@ defmodule AgentEx.Workflow.Runner do
       # Don't skip merge nodes — they wait for all branches
       []
     else
-      [node_id | Enum.flat_map(downstream, &collect_downstream(&1.target_node_id, edges_src, nodes))]
+      [
+        node_id
+        | Enum.flat_map(downstream, &collect_downstream(&1.target_node_id, edges_src, nodes))
+      ]
     end
   end
 
@@ -199,7 +206,9 @@ defmodule AgentEx.Workflow.Runner do
     # Build adjacency + in-degree
     {adj, in_degree} =
       Enum.reduce(edges, {%{}, Map.new(node_ids, &{&1, 0})}, fn edge, {adj, deg} ->
-        adj = Map.update(adj, edge.source_node_id, [edge.target_node_id], &[edge.target_node_id | &1])
+        adj =
+          Map.update(adj, edge.source_node_id, [edge.target_node_id], &[edge.target_node_id | &1])
+
         deg = Map.update(deg, edge.target_node_id, 1, &(&1 + 1))
         {adj, deg}
       end)

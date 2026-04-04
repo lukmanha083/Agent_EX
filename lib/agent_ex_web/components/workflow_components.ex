@@ -45,7 +45,13 @@ defmodule AgentExWeb.WorkflowComponents do
       category: "data",
       color: "amber"
     },
-    %{type: "set", label: "Set Values", icon: "hero-pencil-square", category: "data", color: "amber"},
+    %{
+      type: "set",
+      label: "Set Values",
+      icon: "hero-pencil-square",
+      category: "data",
+      color: "amber"
+    },
     %{type: "code", label: "Code", icon: "hero-code-bracket", category: "data", color: "amber"},
     %{
       type: "if_branch",
@@ -71,7 +77,13 @@ defmodule AgentExWeb.WorkflowComponents do
     %{type: "merge", label: "Merge", icon: "hero-inbox-stack", category: "flow", color: "purple"},
     %{type: "agent", label: "Agent", icon: "hero-cpu-chip", category: "io", color: "rose"},
     %{type: "tool", label: "Tool", icon: "hero-wrench", category: "io", color: "blue"},
-    %{type: "output", label: "Output", icon: "hero-arrow-down-tray", category: "io", color: "emerald"}
+    %{
+      type: "output",
+      label: "Output",
+      icon: "hero-arrow-down-tray",
+      category: "io",
+      color: "emerald"
+    }
   ]
 
   @doc "Renders the workflow list page."

@@ -96,6 +96,9 @@ defmodule AgentEx.Workflow do
 
   defp stringify_value(%{__struct__: _} = s), do: Map.from_struct(s) |> stringify_keys()
   defp stringify_value(v) when is_map(v), do: stringify_keys(v)
-  defp stringify_value(v) when is_atom(v) and not is_nil(v) and not is_boolean(v), do: Atom.to_string(v)
+
+  defp stringify_value(v) when is_atom(v) and not is_nil(v) and not is_boolean(v),
+    do: Atom.to_string(v)
+
   defp stringify_value(v), do: v
 end
