@@ -48,6 +48,9 @@ Companion to the Python learning project at `../agent/`.
 | HTTP fetch tools | `AgentEx.Plugins.WebFetch` (fetch_url, fetch_json + SSRF protection) |
 | System introspection | `AgentEx.Plugins.SystemInfo` (env_var, cwd, datetime, disk_usage) |
 | Diff/compare tools | `AgentEx.Plugins.Diff` (compare_files, compare_text) |
+| Workflow engine | `AgentEx.Workflow` + `Runner` + `Operators` + `Expression` |
+| Workflow storage | `AgentEx.Workflows` context (Postgres) |
+| Workflow-as-tool | `AgentEx.Workflow.Tool` (wrap workflow as `Tool.t()`) |
 
 ## Documentation
 - `docs/overview.md` — Project overview, motivation, and quick start
@@ -94,6 +97,14 @@ Companion to the Python learning project at `../agent/`.
 - `lib/agent_ex/agent_bridge.ex` — Convert AgentStore agents → delegate tools for orchestrator
 - `lib/agent_ex/tool_assembler.ex` — Assemble all tool sources into unified `[Tool]` list per user/project
 - `lib/agent_ex/provider_tools.ex` — Hardcoded registry of provider built-in tools (Anthropic, OpenAI, Moonshot)
+- `lib/agent_ex/workflow.ex` — Workflow struct (DAG of typed operator nodes + edges)
+- `lib/agent_ex/workflow/node.ex` — Workflow node struct (typed operators: trigger, http, extract, branch, etc.)
+- `lib/agent_ex/workflow/edge.ex` — Workflow edge struct (directed node connections with ports)
+- `lib/agent_ex/workflows.ex` — Postgres-backed context for workflow CRUD
+- `lib/agent_ex/workflow/runner.ex` — Static DAG execution engine (topological sort, branch/merge)
+- `lib/agent_ex/workflow/operators.ex` — Built-in operator implementations (data, flow, I/O)
+- `lib/agent_ex/workflow/expression.ex` — `{{node.path}}` template interpolation + condition evaluation
+- `lib/agent_ex/workflow/tool.ex` — Wrap workflow as `Tool.t()` for chat orchestrator composability
 - `lib/agent_ex/network_policy.ex` — SSRF protection: blocks requests to loopback, private, link-local, Fly.io internal
 - `lib/agent_ex/example.ex` — Usage example
 

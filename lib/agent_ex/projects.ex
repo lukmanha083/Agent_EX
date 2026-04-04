@@ -39,6 +39,7 @@ defmodule AgentEx.Projects do
     with {:ok, deleted} <- Repo.delete(project) do
       AgentEx.AgentStore.delete_by_project(project.user_id, project.id)
       AgentEx.HttpToolStore.delete_by_project(project.user_id, project.id)
+      # Workflows: ON DELETE CASCADE from projects table handles cleanup
       schedule_memory_cleanup(project)
       {:ok, deleted}
     end

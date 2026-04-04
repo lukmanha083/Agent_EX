@@ -1,0 +1,110 @@
+<div class="flex flex-col h-full">
+  <!-- Header -->
+  <header class="flex items-center justify-between px-4 md:px-6 h-14 border-b border-gray-800 bg-gray-900/50 shrink-0">
+    <div>
+      <h1 class="text-base font-semibold text-white">Workflows</h1>
+      <p class="text-xs text-gray-500">
+        <span :if={assigns[:current_project]} class="text-indigo-400">{@current_project.name}</span>
+        <span :if={assigns[:current_project]}> — </span>Static pipelines for deterministic data transforms
+      </p>
+    </div>
+  </header>
+
+  <!-- Content -->
+  <%= if @editing do %>
+    <!-- Editor Mode -->
+    <div class="flex-1 flex overflow-hidden">
+      <!-- Left panel: node palette + config -->
+      <div class="w-64 border-r border-gray-800 bg-gray-900/50 flex flex-col overflow-y-auto shrink-0">
+        <!-- Workflow metadata -->
+        <div class="p-3 border-b border-gray-800 space-y-2">
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              phx-click="back_to_list"
+              class="flex-1 rounded-md bg-white/10 py-1.5 text-xs font-medium text-white text-center hover:bg-white/20 transition-colors"
+            >
+              Back
+            </button>
+            <button
+              type="button"
+              phx-click="run_workflow"
+              disabled={@run_loading}
+              class="flex-1 rounded-md bg-white/10 py-1.5 text-xs font-medium text-white text-center hover:bg-emerald-600 transition-colors disabled:opacity-50"
+            >
+              Run
+            </button>
+          </div>
+          <input
+            type="text"
+            value={@editing.name}
+            phx-blur="update_workflow_name"
+            class="w-full rounded-md bg-gray-800 border border-gray-700 text-sm text-white px-2 py-1 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+          />
+          <textarea
+            phx-blur="update_workflow_description"
+            rows="2"
+            placeholder="Description..."
+            class="w-full rounded-md bg-gray-800 border border-gray-700 text-xs text-gray-400 px-2 py-1 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 resize-none"
+          >{@editing.description || ""}</textarea>
+        </div>
+
+        <!-- Node palette -->
+        <div class="p-3 border-b border-gray-800">
+          <.node_palette />
+        </div>
+
+        <!-- Node config panel -->
+        <div class="p-3 flex-1">
+          <.node_config_panel
+            node={selected_node(@editing, @selected_node_id)}
+            agents={@agents}
+            tools={[]}
+          />
+        </div>
+
+        <!-- Run result -->
+        <div :if={@run_result} class="p-3 border-t border-gray-800">
+          <div class={[
+            "rounded-md p-2 text-xs",
+            @run_result.status == :ok && "bg-emerald-900/30 text-emerald-400 border border-emerald-800" ||
+              "bg-red-900/30 text-red-400 border border-red-800"
+          ]}>
+            <p class="font-medium mb-1">
+              {if @run_result.status == :ok, do: "Success", else: "Error at #{@run_result[:node_id]}"}
+            </p>
+            <pre class="whitespace-pre-wrap break-all text-[11px] max-h-32 overflow-y-auto">{format_result(@run_result)}</pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- Canvas -->
+      <div class="flex-1 relative">
+        <.workflow_canvas
+          nodes={@editing.nodes}
+          edges={@editing.edges}
+          selected_node_id={@selected_node_id}
+        />
+
+        <!-- Loading overlay -->
+        <div
+          :if={@run_loading}
+          class="absolute inset-0 bg-gray-950/60 flex items-center justify-center z-10"
+        >
+          <div class="flex items-center gap-2 text-sm text-white">
+            <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none" />
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+            Running workflow...
+          </div>
+        </div>
+      </div>
+    </div>
+  <% else %>
+    <!-- List Mode -->
+    <div class="flex-1 overflow-y-auto p-4 md:p-6">
+      <.workflow_list workflows={@workflows} />
+    </div>
+  <% end %>
+</div>
