@@ -267,7 +267,9 @@ defmodule AgentEx.Workflow.Runner do
       {event_type, payload}
     )
   rescue
-    _ -> :ok
+    err ->
+      Logger.debug("Workflow.Runner.broadcast/3 failed: #{Exception.format(:error, err)}")
+      :ok
   end
 
   defp summarize(output) when is_binary(output) and byte_size(output) > 200 do

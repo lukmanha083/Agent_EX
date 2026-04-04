@@ -151,20 +151,26 @@ defmodule AgentExWeb.WorkflowsLive do
     editing = socket.assigns.editing
     unless editing, do: throw(:noreply)
 
-    max_y =
-      editing.nodes
-      |> Enum.map(&((&1.position["y"] || 0) + 60))
-      |> Enum.max(fn -> 50 end)
+    valid_types = Enum.map(Node.valid_types(), &Atom.to_string/1)
 
-    node = %Node{
-      id: gen_node_id(),
-      type: String.to_existing_atom(type),
-      label: type_label(type),
-      config: %{},
-      position: %{"x" => 200, "y" => max_y}
-    }
+    if type in valid_types do
+      max_y =
+        editing.nodes
+        |> Enum.map(&((&1.position["y"] || 0) + 60))
+        |> Enum.max(fn -> 50 end)
 
-    save_editing(socket, %{nodes: editing.nodes ++ [node]}, node.id)
+      node = %Node{
+        id: gen_node_id(),
+        type: String.to_existing_atom(type),
+        label: type_label(type),
+        config: %{},
+        position: %{"x" => 200, "y" => max_y}
+      }
+
+      save_editing(socket, %{nodes: editing.nodes ++ [node]}, node.id)
+    else
+      {:noreply, socket}
+    end
   catch
     :noreply -> {:noreply, socket}
   end
