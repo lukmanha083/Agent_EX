@@ -438,6 +438,19 @@ defmodule AgentEx.Workflow.Operators do
   end
 
   @allowed_modules [Map, Enum, String, Kernel, List, Tuple, Access]
+  @allowed_module_fns %{
+    Map =>
+      ~w(get put delete merge keys values has_key? new from_struct drop take split update get_and_update pop fetch fetch!)a,
+    Enum =>
+      ~w(map filter reject reduce flat_map sort sort_by reverse count any? all? find member? empty? at chunk_every zip uniq uniq_by join min max min_by max_by sum each into group_by frequencies map_reduce take drop slice with_index)a,
+    String =>
+      ~w(split join trim trim_leading trim_trailing replace upcase downcase capitalize contains? starts_with? ends_with? length slice at pad_leading pad_trailing reverse to_integer to_float)a,
+    Kernel =>
+      ~w(+ - * / div rem abs round trunc ceil floor == != === !== > < >= <= and or not && || ! in is_nil is_binary is_number is_integer is_float is_boolean is_map is_list is_atom to_string to_charlist inspect hd tl length elem tuple_size map_size min max if unless)a,
+    List => ~w(first last flatten wrap delete_at insert_at update_at zip keyfind keystore)a,
+    Tuple => ~w(to_list append delete_at insert_at)a,
+    Access => ~w(get at key key! elem all)a
+  }
   @allowed_kernel_fns ~w(
     + - * / div rem abs round trunc ceil floor
     == != === !== > < >= <= and or not
@@ -451,10 +464,19 @@ defmodule AgentEx.Workflow.Operators do
   @blocked_calls ~w(spawn spawn_link spawn_monitor apply send receive import require use)a
 
   # Remote call: Module.func(...)
-  defp validate_ast({:., _, [{:__aliases__, _, _mod_parts} = mod, _func]}) do
+  defp validate_ast({:., _, [{:__aliases__, _, _mod_parts} = mod, func]}) do
     case Macro.expand(mod, __ENV__) do
-      m when m in @allowed_modules -> :ok
-      m -> {:error, "module #{inspect(m)} is not allowed"}
+      m when m in @allowed_modules ->
+        allowed_fns = Map.get(@allowed_module_fns, m, [])
+
+        if func in allowed_fns do
+          :ok
+        else
+          {:error, "#{inspect(m)}.#{func} is not allowed"}
+        end
+
+      m ->
+        {:error, "module #{inspect(m)} is not allowed"}
     end
   rescue
     _ -> {:error, "unknown module reference"}
@@ -498,10 +520,13 @@ defmodule AgentEx.Workflow.Operators do
       call in ~w(= |> for with)a ->
         validate_ast_list(args)
 
-      # Unknown bare call — allow (likely a variable reference or Kernel function)
-      # but validate args recursively
+      # Unknown bare call — reject unless zero-arity (variable reference)
       true ->
-        validate_ast_list(args)
+        if args == [] do
+          :ok
+        else
+          {:error, "#{call} is not allowed"}
+        end
     end
   end
 
