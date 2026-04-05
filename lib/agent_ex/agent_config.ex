@@ -168,6 +168,66 @@ defmodule AgentEx.AgentConfig do
 
   def new(attrs) when is_list(attrs), do: new(Map.new(attrs))
 
+  @doc """
+  Import an agent config from an external JSON map (e.g., kidkazz distill output).
+
+  Strips keys prefixed with `_` (like `_distill_metadata`), converts string keys
+  to atoms, handles `execution_mode` string→atom conversion, and injects the
+  required `user_id` and `project_id`.
+
+  ## Example
+
+      json = File.read!("agent.json") |> Jason.decode!()
+      config = AgentConfig.from_map(json, user_id: 1, project_id: 1)
+  """
+  @known_fields MapSet.new([
+    :id, :user_id, :project_id, :name, :description,
+    :role, :expertise, :personality,
+    :goal, :success_criteria,
+    :constraints, :scope,
+    :tool_ids, :tool_guidance, :tool_examples,
+    :output_format, :system_prompt,
+    :provider, :model, :context_window, :disabled_builtins,
+    :intervention_pipeline, :sandbox, :execution_mode, :budget,
+    :inserted_at, :updated_at
+  ])
+
+  def from_map(attrs, opts) when is_map(attrs) and is_list(opts) do
+    user_id = Keyword.fetch!(opts, :user_id)
+    project_id = Keyword.fetch!(opts, :project_id)
+
+    atom_attrs =
+      attrs
+      |> Enum.reject(fn {k, _v} -> String.starts_with?(to_string(k), "_") end)
+      |> Enum.map(fn {k, v} -> {safe_to_atom(to_string(k)), v} end)
+      |> Enum.filter(fn {k, _v} -> MapSet.member?(@known_fields, k) end)
+      |> Map.new()
+      |> Map.put(:user_id, user_id)
+      |> Map.put(:project_id, project_id)
+      |> coerce_execution_mode()
+
+    new(atom_attrs)
+  end
+
+  defp safe_to_atom(str) do
+    String.to_existing_atom(str)
+  rescue
+    ArgumentError -> String.to_atom(str)
+  end
+
+  defp coerce_execution_mode(%{execution_mode: mode} = attrs) when is_binary(mode) do
+    atom_mode =
+      case mode do
+        "interactive" -> :interactive
+        "autonomous" -> :autonomous
+        _ -> :interactive
+      end
+
+    %{attrs | execution_mode: atom_mode}
+  end
+
+  defp coerce_execution_mode(attrs), do: attrs
+
   @doc "Update an existing agent config, bumping the updated_at timestamp."
   def update(%__MODULE__{} = config, attrs) when is_map(attrs) do
     config

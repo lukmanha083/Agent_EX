@@ -41,6 +41,7 @@ defmodule AgentExWeb.AgentsLive do
          agents: agents,
          editing: nil,
          show_editor: false,
+         show_import: false,
          form: empty_form(),
          intervention_pipeline: [],
          sandbox: %{},
@@ -100,6 +101,45 @@ defmodule AgentExWeb.AgentsLive do
 
   def handle_event("close_editor", _params, socket) do
     {:noreply, assign(socket, show_editor: false, editing: nil)}
+  end
+
+  # -- Import JSON events --
+
+  def handle_event("show_import", _params, socket) do
+    {:noreply, assign(socket, show_import: true)}
+  end
+
+  def handle_event("close_import", _params, socket) do
+    {:noreply, assign(socket, show_import: false)}
+  end
+
+  def handle_event("import_agent", %{"json_content" => json_content}, socket) do
+    user = socket.assigns.current_scope.user
+    project = socket.assigns.project
+
+    case Jason.decode(json_content) do
+      {:ok, attrs} when is_map(attrs) ->
+        config = AgentConfig.from_map(attrs, user_id: user.id, project_id: project.id)
+
+        case AgentStore.save(config) do
+          {:ok, _config} ->
+            agents = AgentStore.list(user.id, project.id)
+
+            {:noreply,
+             socket
+             |> assign(agents: agents, show_import: false)
+             |> put_flash(:info, "Agent imported: #{config.name}")}
+
+          {:error, reason} ->
+            {:noreply, put_flash(socket, :error, "Failed to save imported agent: #{inspect(reason)}")}
+        end
+
+      {:ok, _} ->
+        {:noreply, put_flash(socket, :error, "JSON must be an object, not an array or primitive")}
+
+      {:error, %Jason.DecodeError{} = err} ->
+        {:noreply, put_flash(socket, :error, "Invalid JSON: #{Exception.message(err)}")}
+    end
   end
 
   def handle_event("validate_agent", params, socket) do

@@ -32,6 +32,19 @@ defmodule AgentExWeb.AgentComponents do
         <span class="text-sm font-medium">New Agent</span>
       </button>
 
+      <button
+        type="button"
+        phx-click="show_import"
+        data-testid="import-agent-btn"
+        class="flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-gray-700 p-6 text-gray-400 hover:border-emerald-500 hover:text-emerald-400 transition-colors min-h-[160px]"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-8 h-8">
+          <path d="M9.25 13.25a.75.75 0 0 0 1.5 0V4.636l2.955 3.129a.75.75 0 0 0 1.09-1.03l-4.25-4.5a.75.75 0 0 0-1.09 0l-4.25 4.5a.75.75 0 1 0 1.09 1.03L9.25 4.636v8.614Z" />
+          <path d="M3.5 12.75a.75.75 0 0 0-1.5 0v2.5A2.75 2.75 0 0 0 4.75 18h10.5A2.75 2.75 0 0 0 18 15.25v-2.5a.75.75 0 0 0-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5Z" />
+        </svg>
+        <span class="text-sm font-medium">Import JSON</span>
+      </button>
+
       <.agent_card :for={agent <- @agents} agent={agent} project_root_path={@project_root_path} />
     </div>
     """
@@ -326,4 +339,42 @@ defmodule AgentExWeb.AgentComponents do
   end
 
   defp sandbox_configured?(_, _), do: false
+
+  @doc "Renders a dialog for importing an agent config from JSON."
+  attr(:show, :boolean, default: false)
+
+  def import_agent_dialog(assigns) do
+    ~H"""
+    <div :if={@show} class="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true" phx-window-keydown="close_import" phx-key="Escape">
+      <div class="fixed inset-0 bg-black/60" phx-click="close_import"></div>
+      <div class="relative z-10 w-full max-w-lg mx-4 max-h-[90vh] rounded-lg border border-gray-800 bg-gray-900 shadow-xl flex flex-col">
+        <div class="p-6 pb-0 shrink-0">
+          <h2 class="text-lg font-semibold text-white">Import Agent from JSON</h2>
+          <p class="text-sm text-gray-400 mt-1">
+            Paste the JSON output from <code class="text-emerald-400">kidkazz distill generate</code>
+          </p>
+        </div>
+        <form phx-submit="import_agent" class="flex flex-col flex-1 overflow-hidden">
+          <div class="flex-1 overflow-y-auto p-6 space-y-4">
+            <textarea
+              name="json_content"
+              rows="16"
+              placeholder='{"name": "...", "role": "...", ...}'
+              class="w-full rounded-md border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 font-mono"
+              required
+            ></textarea>
+          </div>
+          <div class="flex justify-end gap-3 p-6 pt-0 shrink-0">
+            <button type="button" phx-click="close_import" class="rounded-md px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors">
+              Cancel
+            </button>
+            <button type="submit" class="rounded-md bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500 transition-colors">
+              Import
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+    """
+  end
 end
