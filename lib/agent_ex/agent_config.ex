@@ -180,39 +180,42 @@ defmodule AgentEx.AgentConfig do
       json = File.read!("agent.json") |> Jason.decode!()
       config = AgentConfig.from_map(json, user_id: 1, project_id: 1)
   """
-  @known_fields MapSet.new([
-    :id, :user_id, :project_id, :name, :description,
-    :role, :expertise, :personality,
-    :goal, :success_criteria,
-    :constraints, :scope,
-    :tool_ids, :tool_guidance, :tool_examples,
-    :output_format, :system_prompt,
-    :provider, :model, :context_window, :disabled_builtins,
-    :intervention_pipeline, :sandbox, :execution_mode, :budget,
-    :inserted_at, :updated_at
+  # String versions of known fields — used to filter BEFORE atomizing
+  # (prevents atom table exhaustion from arbitrary JSON keys)
+  @known_field_strings MapSet.new([
+    "id", "user_id", "project_id", "name", "description",
+    "role", "expertise", "personality",
+    "goal", "success_criteria",
+    "constraints", "scope",
+    "tool_ids", "tool_guidance", "tool_examples",
+    "output_format", "system_prompt",
+    "provider", "model", "context_window", "disabled_builtins",
+    "intervention_pipeline", "sandbox", "execution_mode", "budget",
+    "inserted_at", "updated_at"
   ])
 
   def from_map(attrs, opts) when is_map(attrs) and is_list(opts) do
     user_id = Keyword.fetch!(opts, :user_id)
     project_id = Keyword.fetch!(opts, :project_id)
 
+    name = attrs["name"]
+
+    if !is_binary(name) or String.trim(name) == "" do
+      raise ArgumentError, ~s(imported JSON must include a non-empty "name" field)
+    end
+
+    # Filter on string keys first (safe), then atomize only known fields
     atom_attrs =
       attrs
       |> Enum.reject(fn {k, _v} -> String.starts_with?(to_string(k), "_") end)
-      |> Enum.map(fn {k, v} -> {safe_to_atom(to_string(k)), v} end)
-      |> Enum.filter(fn {k, _v} -> MapSet.member?(@known_fields, k) end)
+      |> Enum.filter(fn {k, _v} -> MapSet.member?(@known_field_strings, to_string(k)) end)
+      |> Enum.map(fn {k, v} -> {String.to_existing_atom(to_string(k)), v} end)
       |> Map.new()
       |> Map.put(:user_id, user_id)
       |> Map.put(:project_id, project_id)
       |> coerce_execution_mode()
 
     new(atom_attrs)
-  end
-
-  defp safe_to_atom(str) do
-    String.to_existing_atom(str)
-  rescue
-    ArgumentError -> String.to_atom(str)
   end
 
   defp coerce_execution_mode(%{execution_mode: mode} = attrs) when is_binary(mode) do

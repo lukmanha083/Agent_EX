@@ -105,12 +105,19 @@ defmodule AgentExWeb.AgentsLive do
 
   # -- Import JSON events --
 
+  @max_import_size 65_536
+
   def handle_event("show_import", _params, socket) do
-    {:noreply, assign(socket, show_import: true)}
+    {:noreply, assign(socket, show_import: true, show_editor: false)}
   end
 
   def handle_event("close_import", _params, socket) do
     {:noreply, assign(socket, show_import: false)}
+  end
+
+  def handle_event("import_agent", %{"json_content" => json_content}, socket)
+      when byte_size(json_content) > @max_import_size do
+    {:noreply, put_flash(socket, :error, "JSON too large (max 64 KB)")}
   end
 
   def handle_event("import_agent", %{"json_content" => json_content}, socket) do
@@ -140,6 +147,9 @@ defmodule AgentExWeb.AgentsLive do
       {:error, %Jason.DecodeError{} = err} ->
         {:noreply, put_flash(socket, :error, "Invalid JSON: #{Exception.message(err)}")}
     end
+  rescue
+    e in ArgumentError ->
+      {:noreply, put_flash(socket, :error, Exception.message(e))}
   end
 
   def handle_event("validate_agent", params, socket) do

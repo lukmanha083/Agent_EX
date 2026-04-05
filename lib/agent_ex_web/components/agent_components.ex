@@ -359,6 +359,7 @@ defmodule AgentExWeb.AgentComponents do
             <textarea
               name="json_content"
               rows="16"
+              maxlength="65536"
               placeholder='{"name": "...", "role": "...", ...}'
               class="w-full rounded-md border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 font-mono"
               required
