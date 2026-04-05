@@ -31,6 +31,7 @@ defmodule AgentEx.Projects.Project do
       :token_budget
     ])
     |> validate_required([:user_id, :name, :provider, :model])
+    |> validate_root_path()
     |> validate_inclusion(:provider, AgentEx.ProviderHelpers.valid_providers())
     |> validate_model_for_provider()
     |> unique_constraint([:user_id, :name])
@@ -42,8 +43,28 @@ defmodule AgentEx.Projects.Project do
     project
     |> cast(attrs, [:name, :description, :root_path, :disabled_builtins, :token_budget])
     |> validate_required([:name])
+    |> validate_root_path()
     |> validate_number(:token_budget, greater_than_or_equal_to: 0)
     |> unique_constraint([:user_id, :name])
+  end
+
+  defp validate_root_path(changeset) do
+    case get_change(changeset, :root_path) do
+      nil ->
+        changeset
+
+      path when is_binary(path) ->
+        cond do
+          String.contains?(path, "~") ->
+            add_error(changeset, :root_path, "must be an absolute path (no ~ allowed), e.g. /home/user/project")
+
+          not String.starts_with?(path, "/") ->
+            add_error(changeset, :root_path, "must be an absolute path starting with /")
+
+          true ->
+            changeset
+        end
+    end
   end
 
   defp validate_model_for_provider(changeset) do

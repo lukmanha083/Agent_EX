@@ -34,9 +34,9 @@ defmodule AgentExWeb.ProjectsLive.New do
           <.form for={@form} phx-submit="create_project" phx-change="validate" class="space-y-4">
             <.input type="text" name="name" value={@form["name"]} label="Project Name" placeholder="e.g. Stock Research" required />
             <.input type="text" name="description" value={@form["description"]} label="Description" placeholder="What this project is for" />
-            <.input type="text" name="root_path" value={@form["root_path"]} label="Sandbox Root Path" placeholder="e.g. ~/projects/trading" />
+            <.input type="text" name="root_path" value={@form["root_path"]} label="Sandbox Root Path" placeholder="e.g. /home/user/projects/trading" />
             <p class="text-[10px] text-gray-500 -mt-2">
-              Agents in this project will be confined to this directory.
+              Absolute path required (no ~). Agents will be confined to this directory.
             </p>
 
             <fieldset class="border-t border-gray-800 pt-4">

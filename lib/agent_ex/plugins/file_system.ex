@@ -118,19 +118,23 @@ defmodule AgentEx.Plugins.FileSystem do
   end
 
   defp safe_path(root, relative) do
-    joined = Path.join(root, relative)
-    expanded = Path.expand(joined)
-    root_prefix = String.trim_trailing(root, "/") <> "/"
+    if String.starts_with?(relative, "/") do
+      {:error, "absolute paths not allowed, use a path relative to sandbox root: #{relative}"}
+    else
+      joined = Path.join(root, relative)
+      expanded = Path.expand(joined)
+      root_prefix = String.trim_trailing(root, "/") <> "/"
 
-    cond do
-      not (expanded == root or String.starts_with?(expanded, root_prefix)) ->
-        {:error, "path traversal attempt: #{relative}"}
+      cond do
+        not (expanded == root or String.starts_with?(expanded, root_prefix)) ->
+          {:error, "path traversal attempt: #{relative}"}
 
-      contains_symlink?(expanded, root) ->
-        {:error, "symlinks not allowed in sandbox: #{relative}"}
+        contains_symlink?(expanded, root) ->
+          {:error, "symlinks not allowed in sandbox: #{relative}"}
 
-      true ->
-        {:ok, expanded}
+        true ->
+          {:ok, expanded}
+      end
     end
   end
 
