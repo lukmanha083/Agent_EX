@@ -29,14 +29,16 @@ defmodule AgentExWeb.WorkflowComponents do
       label: "Transform",
       icon: "hero-arrows-right-left",
       category: "data",
-      color: "amber"
+      color: "amber",
+      hidden: true
     },
     %{
       type: "json_filter",
       label: "Filter",
       icon: "hero-adjustments-horizontal",
       category: "data",
-      color: "amber"
+      color: "amber",
+      hidden: true
     },
     %{
       type: "json_merge",
@@ -52,7 +54,14 @@ defmodule AgentExWeb.WorkflowComponents do
       category: "data",
       color: "amber"
     },
-    %{type: "code", label: "Code", icon: "hero-code-bracket", category: "data", color: "amber"},
+    %{
+      type: "code",
+      label: "Code",
+      icon: "hero-code-bracket",
+      category: "data",
+      color: "amber",
+      hidden: true
+    },
     %{
       type: "if_branch",
       label: "IF",
@@ -76,7 +85,14 @@ defmodule AgentExWeb.WorkflowComponents do
     },
     %{type: "merge", label: "Merge", icon: "hero-inbox-stack", category: "flow", color: "purple"},
     %{type: "agent", label: "Agent", icon: "hero-cpu-chip", category: "io", color: "rose"},
-    %{type: "tool", label: "Tool", icon: "hero-wrench", category: "io", color: "blue"},
+    %{
+      type: "tool",
+      label: "Tool",
+      icon: "hero-wrench",
+      category: "io",
+      color: "blue",
+      hidden: true
+    },
     %{
       type: "output",
       label: "Output",
@@ -139,7 +155,12 @@ defmodule AgentExWeb.WorkflowComponents do
     ~H"""
     <div class="group relative rounded-lg border border-gray-800 bg-gray-900/50 hover:border-gray-700 transition-colors">
       <!-- Clickable body to open editor -->
-      <div phx-click="edit_workflow" phx-value-id={@workflow.id} class="p-4 cursor-pointer">
+      <button
+        type="button"
+        phx-click="edit_workflow"
+        phx-value-id={@workflow.id}
+        class="w-full p-4 cursor-pointer text-left"
+      >
         <h3 class="text-sm font-medium text-white truncate">{@workflow.name}</h3>
         <p :if={@workflow.description} class="mt-1 text-xs text-gray-500 line-clamp-2">
           {@workflow.description}
@@ -156,7 +177,7 @@ defmodule AgentExWeb.WorkflowComponents do
             {type}
           </span>
         </div>
-      </div>
+      </button>
       <!-- Delete button — separate from the clickable body -->
       <button
         type="button"
@@ -185,7 +206,7 @@ defmodule AgentExWeb.WorkflowComponents do
       </p>
       <div class="grid grid-cols-2 gap-1.5">
         <.palette_item
-          :for={node <- Enum.filter(@node_types, &(&1.category == "io"))}
+          :for={node <- Enum.filter(@node_types, &(&1.category == "io" && !&1[:hidden]))}
           node={node}
         />
       </div>
@@ -195,7 +216,7 @@ defmodule AgentExWeb.WorkflowComponents do
       </p>
       <div class="grid grid-cols-2 gap-1.5">
         <.palette_item
-          :for={node <- Enum.filter(@node_types, &(&1.category == "data"))}
+          :for={node <- Enum.filter(@node_types, &(&1.category == "data" && !&1[:hidden]))}
           node={node}
         />
       </div>
@@ -205,7 +226,7 @@ defmodule AgentExWeb.WorkflowComponents do
       </p>
       <div class="grid grid-cols-2 gap-1.5">
         <.palette_item
-          :for={node <- Enum.filter(@node_types, &(&1.category == "flow"))}
+          :for={node <- Enum.filter(@node_types, &(&1.category == "flow" && !&1[:hidden]))}
           node={node}
         />
       </div>
@@ -550,12 +571,19 @@ defmodule AgentExWeb.WorkflowComponents do
     if cases == [] do
       [{"default", "Default", "top-1/2 -translate-y-1/2"}]
     else
-      cases
-      |> Enum.with_index()
-      |> Enum.map(fn {c, _i} ->
-        {"case_#{c}", to_string(c), "top-1/2 -translate-y-1/2"}
-      end)
-      |> Kernel.++([{"default", "Default", "top-1/2 -translate-y-1/2"}])
+      # +1 for the default port at the end
+      total = length(cases) + 1
+
+      case_ports =
+        cases
+        |> Enum.with_index()
+        |> Enum.map(fn {c, i} ->
+          pct = round((i + 1) / (total + 1) * 100)
+          {"case_#{c}", to_string(c), "top-[#{pct}%] -translate-y-1/2"}
+        end)
+
+      default_pct = round(total / (total + 1) * 100)
+      case_ports ++ [{"default", "Default", "top-[#{default_pct}%] -translate-y-1/2"}]
     end
   end
 

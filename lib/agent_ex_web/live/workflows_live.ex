@@ -50,6 +50,12 @@ defmodule AgentExWeb.WorkflowsLive do
          socket
          |> put_flash(:error, "Workflow not found")
          |> push_navigate(to: ~p"/workflows")}
+
+      {:error, {:invalid_workflow, reason}} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Invalid workflow: #{reason || "corrupted data"}")
+         |> push_navigate(to: ~p"/workflows")}
     end
   catch
     :noreply -> {:noreply, push_navigate(socket, to: ~p"/workflows")}
@@ -242,15 +248,29 @@ defmodule AgentExWeb.WorkflowsLive do
     editing = socket.assigns.editing
     unless editing, do: throw(:noreply)
 
-    edge = %Edge{
-      id: gen_edge_id(),
-      source_node_id: source,
-      target_node_id: target,
-      source_port: params["source_port"] || "output",
-      target_port: params["target_port"] || "input"
-    }
+    node_ids = MapSet.new(editing.nodes, & &1.id)
 
-    save_editing(socket, %{edges: editing.edges ++ [edge]}, socket.assigns.selected_node_id)
+    cond do
+      source == target ->
+        {:noreply, put_flash(socket, :error, "Cannot connect a node to itself")}
+
+      not MapSet.member?(node_ids, source) or not MapSet.member?(node_ids, target) ->
+        {:noreply, put_flash(socket, :error, "Invalid node reference")}
+
+      would_create_cycle?(source, target, editing.edges) ->
+        {:noreply, put_flash(socket, :error, "This edge would create a cycle")}
+
+      true ->
+        edge = %Edge{
+          id: gen_edge_id(),
+          source_node_id: source,
+          target_node_id: target,
+          source_port: params["source_port"] || "output",
+          target_port: params["target_port"] || "input"
+        }
+
+        save_editing(socket, %{edges: editing.edges ++ [edge]}, socket.assigns.selected_node_id)
+    end
   catch
     :noreply -> {:noreply, socket}
   end
@@ -284,7 +304,7 @@ defmodule AgentExWeb.WorkflowsLive do
        run_loading: true,
        run_result: nil,
        run_ref: task.ref,
-       run_pid: task.pid
+       run_task: task
      )}
   catch
     :noreply -> {:noreply, socket}
@@ -305,7 +325,7 @@ defmodule AgentExWeb.WorkflowsLive do
         end
 
       {:noreply,
-       assign(socket, run_result: run_result, run_loading: false, run_ref: nil, run_pid: nil)}
+       assign(socket, run_result: run_result, run_loading: false, run_ref: nil, run_task: nil)}
     else
       {:noreply, socket}
     end
@@ -318,7 +338,7 @@ defmodule AgentExWeb.WorkflowsLive do
          run_result: %{status: :error, node_id: nil, reason: inspect(reason)},
          run_loading: false,
          run_ref: nil,
-         run_pid: nil
+         run_task: nil
        )}
     else
       {:noreply, socket}
@@ -334,10 +354,10 @@ defmodule AgentExWeb.WorkflowsLive do
   # --- Private ---
 
   defp maybe_shutdown_run(socket) do
-    case socket.assigns[:run_pid] do
-      pid when is_pid(pid) ->
-        Task.shutdown(pid, :brutal_kill)
-        assign(socket, run_pid: nil, run_ref: nil, run_loading: false)
+    case socket.assigns[:run_task] do
+      %Task{} = task ->
+        Task.shutdown(task, :brutal_kill)
+        assign(socket, run_task: nil, run_ref: nil, run_loading: false)
 
       _ ->
         socket
@@ -379,9 +399,35 @@ defmodule AgentExWeb.WorkflowsLive do
   end
 
   defp format_result(%{status: :ok, output: output}) when is_binary(output), do: output
-  defp format_result(%{status: :ok, output: output}), do: Jason.encode!(output, pretty: true)
+
+  defp format_result(%{status: :ok, output: output}) do
+    case Jason.encode(output, pretty: true) do
+      {:ok, json} -> json
+      {:error, _} -> inspect(output, pretty: true)
+    end
+  end
+
   defp format_result(%{status: :error, reason: reason}), do: inspect(reason)
   defp format_result(_), do: ""
+
+  defp would_create_cycle?(source, target, edges) do
+    adj = Enum.group_by(edges, & &1.source_node_id, & &1.target_node_id)
+    reachable?(target, source, adj, MapSet.new())
+  end
+
+  defp reachable?(from, to, _adj, _visited) when from == to, do: true
+
+  defp reachable?(from, to, adj, visited) do
+    if MapSet.member?(visited, from) do
+      false
+    else
+      visited = MapSet.put(visited, from)
+
+      adj
+      |> Map.get(from, [])
+      |> Enum.any?(&reachable?(&1, to, adj, visited))
+    end
+  end
 
   defp gen_node_id, do: "n-#{Base.url_encode64(:crypto.strong_rand_bytes(6), padding: false)}"
   defp gen_edge_id, do: "e-#{Base.url_encode64(:crypto.strong_rand_bytes(6), padding: false)}"

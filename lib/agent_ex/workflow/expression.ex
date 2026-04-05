@@ -174,8 +174,8 @@ defmodule AgentEx.Workflow.Expression do
 
   defp safe_to_number(value) when is_binary(value) do
     case Float.parse(value) do
-      {num, _} -> {:ok, num}
-      :error -> :error
+      {num, ""} -> {:ok, num}
+      _ -> :error
     end
   end
 
