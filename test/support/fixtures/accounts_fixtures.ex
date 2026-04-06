@@ -42,14 +42,17 @@ defmodule AgentEx.AccountsFixtures do
   end
 
   def project_fixture(user, attrs \\ %{}) do
+    unique = System.unique_integer([:positive])
+
     {:ok, project} =
       AgentEx.Projects.create_project(
         Map.merge(
           %{
             user_id: user.id,
-            name: "Test Project #{System.unique_integer([:positive])}",
+            name: "Test Project #{unique}",
             provider: "anthropic",
-            model: "claude-sonnet-4-6"
+            model: "claude-sonnet-4-6",
+            root_path: "/tmp/agent_ex_test/project_#{unique}"
           },
           attrs
         )

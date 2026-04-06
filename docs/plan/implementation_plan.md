@@ -32,7 +32,18 @@ Runner (topological sort DAG execution), Operators (data/flow/IO),
 Expression engine ({{node.path}} interpolation), Workflow.Tool (workflow-as-tool composability),
 WorkflowsLive (list + visual editor), sidebar nav integration.
 Workflows use Postgres (not DETS) — server-side definitions with ON DELETE CASCADE from projects.
-Phase 5d (Per-Project DETS Storage) next.
+Project-Bound Refactor implemented (2026-04-02):
+provider/model bound to project (immutable after creation), default project removed,
+onboarding flow (/projects/new + split router), Vault (AES-256-GCM encrypted project secrets
+with llm:/embedding: scopes, fallback chain vault→config→env), Token Budget per project
+(project_token_usage table, usage extraction from API responses, budget enforcement in ChatLive,
+/budget LiveView). Migrations: 20260402010000–20260402050000.
+Phase 5d (Per-Project DETS Storage) implemented (2026-04-06):
+DetsManager (lazy per-project DETS lifecycle), stores no longer open DETS at boot (instant start),
+hydrate_project on first project access, evict_project on deletion, root_path mandatory,
+.agent_ex/ directory scaffolding, directory-based project deletion (rm -rf .agent_ex/),
+mix agent_ex.migrate_dets task for global→per-project migration. Loaders removed.
+Phase 5e (Migrate HelixDB → pgvector) next.
 Phase 5f (Orchestration Engine — GenStage + Task Queue + Budget-Aware Dispatch) designed (2026-04-04):
 GenStage producer/consumer for orchestrator→specialist backpressure, LLM-as-scheduler
 with reactive task queue, transparent specialist-to-specialist delegation (Option B),

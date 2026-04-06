@@ -1,14 +1,27 @@
 defmodule AgentEx.Memory.ProceduralMemory.StoreTest do
   use ExUnit.Case, async: false
 
+  alias AgentEx.DetsManager
   alias AgentEx.Memory.ProceduralMemory.{Skill, Store}
 
   @test_uid "test-user"
   @test_pid "test-project"
   @agent "test-agent"
+  @test_root "/tmp/agent_ex_test/procedural_memory_store"
 
   setup do
+    File.mkdir_p!(Path.join(@test_root, ".agent_ex"))
+    DetsManager.register_project(@test_uid, @test_pid, @test_root)
+
     Store.delete_by_project(@test_uid, @test_pid)
+
+    on_exit(fn ->
+      Store.evict_project(@test_uid, @test_pid)
+      DetsManager.close_all(@test_root)
+      DetsManager.unregister_project(@test_uid, @test_pid)
+      File.rm_rf!(Path.join(@test_root, ".agent_ex"))
+    end)
+
     :ok
   end
 
@@ -133,7 +146,6 @@ defmodule AgentEx.Memory.ProceduralMemory.StoreTest do
       assert Store.all(@test_uid, @test_pid, "agent_a") == []
       assert length(Store.all(@test_uid, @test_pid, "agent_b")) == 1
 
-      # cleanup
       Store.delete_all(@test_uid, @test_pid, "agent_b")
     end
   end
@@ -189,10 +201,26 @@ defmodule AgentEx.Memory.ProceduralMemory.StoreTest do
       Process.exit(pid, :kill)
       Process.sleep(100)
 
-      # Wait for supervisor restart
+      # Rehydrate after restart
+      Store.hydrate_project(@test_root)
+
       assert {:ok, retrieved} = Store.get(@test_uid, @test_pid, @agent, "persistent_skill")
       assert retrieved.name == "persistent_skill"
       assert retrieved.confidence == 0.99
+    end
+  end
+
+  describe "evict and hydrate" do
+    test "evict_project removes data from ETS, hydrate restores it" do
+      Store.put(@test_uid, @test_pid, @agent, make_skill("evict_test"))
+      assert {:ok, _} = Store.get(@test_uid, @test_pid, @agent, "evict_test")
+
+      Store.evict_project(@test_uid, @test_pid)
+      assert :not_found = Store.get(@test_uid, @test_pid, @agent, "evict_test")
+
+      Store.hydrate_project(@test_root)
+      assert {:ok, s} = Store.get(@test_uid, @test_pid, @agent, "evict_test")
+      assert s.name == "evict_test"
     end
   end
 end

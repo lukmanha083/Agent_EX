@@ -23,27 +23,32 @@ defmodule AgentExWeb.ProjectComponents do
         <span class="text-sm font-medium">New Project</span>
       </button>
 
-      <.project_card :for={project <- @projects} project={project} />
+      <.project_card :for={project <- @projects} project={project} available={AgentEx.Projects.project_available?(project)} />
     </div>
     """
   end
 
   @doc "Renders a single project card."
   attr(:project, :map, required: true)
+  attr(:available, :boolean, default: true)
 
   def project_card(assigns) do
     ~H"""
-    <div data-testid={"project-card-#{@project.id}"} class="group relative flex flex-col rounded-lg border border-gray-800 bg-gray-900 p-4 hover:border-gray-700 transition-colors min-h-[140px]">
+    <div data-testid={"project-card-#{@project.id}"} class={"group relative flex flex-col rounded-lg border p-4 transition-colors min-h-[140px] #{if @available, do: "border-gray-800 bg-gray-900 hover:border-gray-700", else: "border-amber-900/50 bg-gray-900/60 opacity-60"}"}>
       <div class="flex items-start justify-between mb-2">
         <div class="flex items-center gap-2">
-          <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600/20 text-indigo-400">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4">
+          <div class={"flex h-8 w-8 items-center justify-center rounded-lg #{if @available, do: "bg-indigo-600/20 text-indigo-400", else: "bg-amber-600/20 text-amber-400"}"}>
+            <svg :if={@available} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4">
               <path d="M3.75 3A1.75 1.75 0 0 0 2 4.75v3.26a3.235 3.235 0 0 1 1.75-.51h12.5c.644 0 1.245.188 1.75.51V6.75A1.75 1.75 0 0 0 16.25 5h-4.836a.25.25 0 0 1-.177-.073L9.823 3.513A1.75 1.75 0 0 0 8.586 3H3.75ZM3.75 9A1.75 1.75 0 0 0 2 10.75v4.5c0 .966.784 1.75 1.75 1.75h12.5A1.75 1.75 0 0 0 18 15.25v-4.5A1.75 1.75 0 0 0 16.25 9H3.75Z" />
+            </svg>
+            <svg :if={!@available} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4">
+              <path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495ZM10 5a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 10 5Zm0 9a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clip-rule="evenodd" />
             </svg>
           </div>
           <div>
             <h3 class="text-sm font-semibold text-white">{@project.name}</h3>
             <p :if={@project.root_path && @project.root_path != ""} class="text-[10px] text-gray-500 font-mono truncate max-w-[180px]">{@project.root_path}</p>
+            <p :if={!@available} class="text-[10px] text-amber-400 font-medium">Unavailable on this machine</p>
           </div>
         </div>
         <div class="flex gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-within:opacity-100 transition-opacity">

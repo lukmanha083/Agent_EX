@@ -14,6 +14,7 @@ defmodule AgentExWeb.Features.ToolsMcpTest do
       Projects.create_project(%{
         user_id: user.id,
         name: "Tools Project",
+        root_path: "/tmp/agent_ex_test/tools_mcp",
         provider: "anthropic",
         model: "claude-sonnet-4-6"
       })

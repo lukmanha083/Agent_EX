@@ -11,6 +11,7 @@ defmodule AgentEx.Projects do
   def create_project(attrs) do
     with {:ok, project} <- %Project{} |> Project.creation_changeset(attrs) |> Repo.insert() do
       ensure_root_path_dir(project)
+      scaffold_project_dirs(project)
       {:ok, project}
     end
   end
@@ -37,9 +38,28 @@ defmodule AgentEx.Projects do
 
   def delete_project(%Project{} = project) do
     with {:ok, deleted} <- Repo.delete(project) do
-      AgentEx.AgentStore.delete_by_project(project.user_id, project.id)
-      AgentEx.HttpToolStore.delete_by_project(project.user_id, project.id)
+      # Close all DETS handles for this project
+      if project.root_path && project.root_path != "" do
+        AgentEx.DetsManager.close_all(project.root_path)
+      end
+
+      # Evict project data from ETS
+      AgentEx.AgentStore.evict_project(project.user_id, project.id)
+      AgentEx.HttpToolStore.evict_project(project.user_id, project.id)
+      AgentEx.Memory.PersistentMemory.Store.evict_project(project.user_id, project.id)
+      AgentEx.Memory.ProceduralMemory.Store.evict_project(project.user_id, project.id)
+
+      # Unregister project path mapping
+      AgentEx.DetsManager.unregister_project(project.user_id, project.id)
+
+      # Delete the .agent_ex directory — all DETS data gone instantly
+      if project.root_path && project.root_path != "" do
+        agent_ex_dir = Path.join(Path.expand(project.root_path), ".agent_ex")
+        File.rm_rf(agent_ex_dir)
+      end
+
       # Workflows: ON DELETE CASCADE from projects table handles cleanup
+      # Async cleanup for SemanticMemory + KnowledgeGraph (HelixDB, best-effort)
       schedule_memory_cleanup(project)
       {:ok, deleted}
     end
@@ -67,6 +87,67 @@ defmodule AgentEx.Projects do
         )
 
         cleanup_fn.()
+    end
+  end
+
+  defp scaffold_project_dirs(%Project{root_path: root_path})
+       when is_binary(root_path) and root_path != "" do
+    expanded = Path.expand(root_path)
+    agent_ex_dir = Path.join(expanded, ".agent_ex")
+    memory_dir = Path.join(expanded, ".memory")
+
+    File.mkdir_p!(agent_ex_dir)
+    File.mkdir_p!(memory_dir)
+
+    gitignore_path = Path.join(agent_ex_dir, ".gitignore")
+
+    unless File.exists?(gitignore_path) do
+      File.write!(gitignore_path, "# AgentEx project data — do not commit\n*.dets\n")
+    end
+
+    :ok
+  end
+
+  defp scaffold_project_dirs(_), do: :ok
+
+  @doc """
+  Check if a project's root_path exists on this machine.
+  Returns false if root_path is nil/empty or the directory doesn't exist.
+  """
+  def project_available?(%Project{root_path: root_path})
+      when is_binary(root_path) and root_path != "" do
+    File.dir?(Path.expand(root_path))
+  end
+
+  def project_available?(_), do: false
+
+  @doc """
+  Hydrate all DETS-backed stores for a project. Called on first project access.
+  Registers the project's root_path in DetsManager and loads DETS data into ETS.
+
+  Returns `:ok` on success, `:unavailable` if root_path doesn't exist on this machine.
+  """
+  def hydrate_project(%Project{} = project) do
+    root_path = project.root_path
+
+    cond do
+      is_nil(root_path) or root_path == "" ->
+        :unavailable
+
+      not project_available?(project) ->
+        :unavailable
+
+      AgentEx.DetsManager.root_path_for(project.user_id, project.id) != nil ->
+        :ok
+
+      true ->
+        AgentEx.DetsManager.register_project(project.user_id, project.id, root_path)
+        scaffold_project_dirs(project)
+        AgentEx.AgentStore.hydrate_project(root_path)
+        AgentEx.HttpToolStore.hydrate_project(root_path)
+        AgentEx.Memory.PersistentMemory.Store.hydrate_project(root_path)
+        AgentEx.Memory.ProceduralMemory.Store.hydrate_project(root_path)
+        :ok
     end
   end
 

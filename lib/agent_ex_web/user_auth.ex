@@ -298,26 +298,31 @@ defmodule AgentExWeb.UserAuth do
 
     socket
     |> Phoenix.Component.assign_new(:current_project, fn ->
-      resolve_project(user.id, selected_id)
+      user.id |> resolve_project(selected_id) |> hydrate_or_nil()
     end)
     |> Phoenix.Component.assign_new(:projects, fn ->
       AgentEx.Projects.list_projects(user.id)
     end)
   end
 
+  defp hydrate_or_nil(nil), do: nil
+
+  defp hydrate_or_nil(project) do
+    if AgentEx.Projects.hydrate_project(project) == :ok, do: project, else: nil
+  end
+
   defp resolve_project(user_id, selected_id) do
     project = if selected_id, do: AgentEx.Projects.get_user_project(user_id, selected_id)
 
     case project do
-      %AgentEx.Projects.Project{} ->
-        project
+      %AgentEx.Projects.Project{} = p ->
+        if AgentEx.Projects.project_available?(p), do: p, else: nil
 
       _ ->
-        # No fallback to default — pick first project or nil
-        case AgentEx.Projects.list_projects(user_id) do
-          [first | _] -> first
-          [] -> nil
-        end
+        # Pick first available project
+        user_id
+        |> AgentEx.Projects.list_projects()
+        |> Enum.find(&AgentEx.Projects.project_available?/1)
     end
   end
 

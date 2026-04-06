@@ -30,7 +30,7 @@ defmodule AgentEx.Projects.Project do
       :disabled_builtins,
       :token_budget
     ])
-    |> validate_required([:user_id, :name, :provider, :model])
+    |> validate_required([:user_id, :name, :provider, :model, :root_path])
     |> validate_root_path()
     |> validate_inclusion(:provider, AgentEx.ProviderHelpers.valid_providers())
     |> validate_model_for_provider()
@@ -38,12 +38,11 @@ defmodule AgentEx.Projects.Project do
     |> foreign_key_constraint(:user_id)
   end
 
-  @doc "Changeset for updating an existing project. Provider and model cannot be changed."
+  @doc "Changeset for updating an existing project. Provider, model, and root_path cannot be changed."
   def update_changeset(project, attrs) do
     project
-    |> cast(attrs, [:name, :description, :root_path, :disabled_builtins, :token_budget])
+    |> cast(attrs, [:name, :description, :disabled_builtins, :token_budget])
     |> validate_required([:name])
-    |> validate_root_path()
     |> validate_number(:token_budget, greater_than_or_equal_to: 0)
     |> unique_constraint([:user_id, :name])
   end
@@ -64,6 +63,9 @@ defmodule AgentEx.Projects.Project do
 
           not String.starts_with?(path, "/") ->
             add_error(changeset, :root_path, "must be an absolute path starting with /")
+
+          not File.dir?(Path.dirname(Path.expand(path))) ->
+            add_error(changeset, :root_path, "parent directory does not exist")
 
           true ->
             changeset

@@ -22,10 +22,13 @@ defmodule AgentEx.Application do
       # Plugin system: DynamicSupervisor for stateful plugins
       {DynamicSupervisor, name: AgentEx.PluginSupervisor, strategy: :one_for_one},
 
-      # Agent config store (ETS/DETS for agent definitions)
+      # Per-project DETS lifecycle manager (must start before stores)
+      AgentEx.DetsManager,
+
+      # Agent config store (ETS + lazy per-project DETS)
       AgentEx.AgentStore,
 
-      # HTTP tool config store (ETS/DETS for REST API tool definitions)
+      # HTTP tool config store (ETS + lazy per-project DETS)
       AgentEx.HttpToolStore,
 
       # EventLoop: ETS-based run tracking
