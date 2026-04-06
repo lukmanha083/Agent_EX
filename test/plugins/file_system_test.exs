@@ -140,5 +140,50 @@ defmodule AgentEx.Plugins.FileSystemTest do
 
       assert msg =~ "path traversal"
     end
+
+    test "blocks absolute path on read_file", %{tmp_dir: tmp_dir} do
+      {:ok, tools} = FileSystem.init(%{"root_path" => tmp_dir})
+      read_tool = Enum.find(tools, &(&1.name == "read_file"))
+
+      assert {:error, msg} = Tool.execute(read_tool, %{"path" => "/etc/passwd"})
+      assert msg =~ "absolute paths not allowed"
+      assert msg =~ "/etc/passwd"
+    end
+
+    test "blocks absolute path on list_dir", %{tmp_dir: tmp_dir} do
+      {:ok, tools} = FileSystem.init(%{"root_path" => tmp_dir})
+      list_tool = Enum.find(tools, &(&1.name == "list_dir"))
+
+      assert {:error, msg} = Tool.execute(list_tool, %{"path" => "/etc"})
+      assert msg =~ "absolute paths not allowed"
+      assert msg =~ "/etc"
+    end
+
+    test "blocks absolute path on write_file", %{tmp_dir: tmp_dir} do
+      {:ok, tools} = FileSystem.init(%{"root_path" => tmp_dir, "allow_write" => true})
+      write_tool = Enum.find(tools, &(&1.name == "write_file"))
+
+      assert {:error, msg} =
+               Tool.execute(write_tool, %{"path" => "/tmp/escape.txt", "content" => "bad"})
+
+      assert msg =~ "absolute paths not allowed"
+      assert msg =~ "/tmp/escape.txt"
+    end
+
+    test "blocks symlink that escapes sandbox on read_file", %{tmp_dir: tmp_dir} do
+      outside =
+        Path.join(System.tmp_dir!(), "agent_ex_outside_#{System.unique_integer([:positive])}")
+
+      File.write!(outside, "secret")
+      on_exit(fn -> File.rm(outside) end)
+
+      File.ln_s!(outside, Path.join(tmp_dir, "escape_link"))
+
+      {:ok, tools} = FileSystem.init(%{"root_path" => tmp_dir})
+      read_tool = Enum.find(tools, &(&1.name == "read_file"))
+
+      assert {:error, msg} = Tool.execute(read_tool, %{"path" => "escape_link"})
+      assert msg =~ "symlink"
+    end
   end
 end

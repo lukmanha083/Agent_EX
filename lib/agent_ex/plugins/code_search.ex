@@ -262,18 +262,22 @@ defmodule AgentEx.Plugins.CodeSearch do
   end
 
   defp safe_path(root, relative) do
-    joined = Path.join(root, relative)
-    expanded = Path.expand(joined)
+    if String.starts_with?(relative, "/") do
+      {:error, "absolute paths not allowed, use a path relative to sandbox root: #{relative}"}
+    else
+      joined = Path.join(root, relative)
+      expanded = Path.expand(joined)
 
-    cond do
-      not within_root?(expanded, root) ->
-        {:error, "path traversal attempt: #{relative}"}
+      cond do
+        not within_root?(expanded, root) ->
+          {:error, "path traversal attempt: #{relative}"}
 
-      symlink_in_path?(expanded, root) ->
-        {:error, "symlinks not allowed in sandbox: #{relative}"}
+        symlink_in_path?(expanded, root) ->
+          {:error, "symlinks not allowed in sandbox: #{relative}"}
 
-      true ->
-        {:ok, expanded}
+        true ->
+          {:ok, expanded}
+      end
     end
   end
 

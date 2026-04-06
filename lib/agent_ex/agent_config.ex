@@ -168,6 +168,115 @@ defmodule AgentEx.AgentConfig do
 
   def new(attrs) when is_list(attrs), do: new(Map.new(attrs))
 
+  @doc """
+  Import an agent config from an external JSON map (e.g., kidkazz distill output).
+
+  Strips keys prefixed with `_` (like `_distill_metadata`), converts string keys
+  to atoms, handles `execution_mode` string→atom conversion, and injects the
+  required `user_id` and `project_id`.
+
+  ## Example
+
+      json = File.read!("agent.json") |> Jason.decode!()
+      config = AgentConfig.from_map(json, user_id: 1, project_id: 1)
+  """
+  # String versions of known fields — used to filter BEFORE atomizing
+  # (prevents atom table exhaustion from arbitrary JSON keys)
+  # Excluded: "id", "inserted_at", "updated_at" — always generated locally by new/1
+  @known_field_strings MapSet.new([
+                         "user_id",
+                         "project_id",
+                         "name",
+                         "description",
+                         "role",
+                         "expertise",
+                         "personality",
+                         "goal",
+                         "success_criteria",
+                         "constraints",
+                         "scope",
+                         "tool_ids",
+                         "tool_guidance",
+                         "tool_examples",
+                         "output_format",
+                         "system_prompt",
+                         "provider",
+                         "model",
+                         "context_window",
+                         "disabled_builtins",
+                         "intervention_pipeline",
+                         "sandbox",
+                         "execution_mode",
+                         "budget"
+                       ])
+
+  def from_map(attrs, opts) when is_map(attrs) and is_list(opts) do
+    user_id = Keyword.fetch!(opts, :user_id)
+    project_id = Keyword.fetch!(opts, :project_id)
+
+    name = attrs["name"]
+
+    if !is_binary(name) or String.trim(name) == "" do
+      raise ArgumentError, ~s(imported JSON must include a non-empty "name" field)
+    end
+
+    # Filter on string keys first (safe), then atomize only known fields
+    atom_attrs =
+      attrs
+      |> Enum.reject(fn {k, _v} -> String.starts_with?(to_string(k), "_") end)
+      |> Enum.filter(fn {k, _v} -> MapSet.member?(@known_field_strings, to_string(k)) end)
+      |> Enum.map(fn {k, v} -> {String.to_existing_atom(to_string(k)), v} end)
+      |> Map.new()
+      |> Map.put(:user_id, user_id)
+      |> Map.put(:project_id, project_id)
+      |> coerce_execution_mode()
+      |> normalize_composite_fields()
+
+    new(atom_attrs)
+  end
+
+  defp coerce_execution_mode(%{execution_mode: mode} = attrs) when is_binary(mode) do
+    atom_mode =
+      case mode do
+        "interactive" -> :interactive
+        "autonomous" -> :autonomous
+        _ -> :interactive
+      end
+
+    %{attrs | execution_mode: atom_mode}
+  end
+
+  defp coerce_execution_mode(attrs), do: attrs
+
+  defp normalize_composite_fields(attrs) do
+    attrs
+    |> coerce_list(:expertise)
+    |> coerce_list(:constraints)
+    |> coerce_list(:tool_ids)
+    |> coerce_list(:tool_examples)
+    |> coerce_list(:disabled_builtins)
+    |> coerce_list(:intervention_pipeline)
+    |> coerce_map(:sandbox)
+    |> coerce_map(:budget)
+  end
+
+  defp coerce_list(attrs, key) do
+    case Map.fetch(attrs, key) do
+      {:ok, val} when is_list(val) -> attrs
+      {:ok, val} when is_binary(val) and val != "" -> Map.put(attrs, key, [val])
+      {:ok, _} -> Map.put(attrs, key, [])
+      :error -> attrs
+    end
+  end
+
+  defp coerce_map(attrs, key) do
+    case Map.fetch(attrs, key) do
+      {:ok, val} when is_map(val) -> attrs
+      {:ok, _} -> Map.put(attrs, key, %{})
+      :error -> attrs
+    end
+  end
+
   @doc "Update an existing agent config, bumping the updated_at timestamp."
   def update(%__MODULE__{} = config, attrs) when is_map(attrs) do
     config
