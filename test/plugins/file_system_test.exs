@@ -171,7 +171,9 @@ defmodule AgentEx.Plugins.FileSystemTest do
     end
 
     test "blocks symlink that escapes sandbox on read_file", %{tmp_dir: tmp_dir} do
-      outside = Path.join(System.tmp_dir!(), "agent_ex_outside_#{System.unique_integer([:positive])}")
+      outside =
+        Path.join(System.tmp_dir!(), "agent_ex_outside_#{System.unique_integer([:positive])}")
+
       File.write!(outside, "secret")
       on_exit(fn -> File.rm(outside) end)
 
