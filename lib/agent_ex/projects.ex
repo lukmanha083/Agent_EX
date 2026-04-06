@@ -152,6 +152,7 @@ defmodule AgentEx.Projects do
              {:ok, _} <- AgentEx.HttpToolStore.hydrate_project(root_path),
              {:ok, _} <- AgentEx.Memory.PersistentMemory.Store.hydrate_project(root_path),
              {:ok, _} <- AgentEx.Memory.ProceduralMemory.Store.hydrate_project(root_path) do
+          AgentEx.Defaults.seed_project(project.user_id, project.id, provider: project.provider)
           :ok
         else
           {:error, reason} ->

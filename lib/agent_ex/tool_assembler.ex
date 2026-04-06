@@ -49,9 +49,6 @@ defmodule AgentEx.ToolAssembler do
     # Full tool pool — specialist agents get assigned from this via tool_ids
     available = available_tools(user_id, project_id, root_path)
 
-    # Auto-create default agent if project has none
-    ensure_default_agent(user_id, project_id, available, provider: provider)
-
     # Orchestrator gets a minimal set of read-only tools for observation.
     # Most work should be delegated to specialist agents.
     orchestrator_tools = ~w[search_find_files search_grep editor_read system_specs]
@@ -412,100 +409,6 @@ defmodule AgentEx.ToolAssembler do
       [] -> "specialist agent"
       _ -> Enum.join(parts, ". ")
     end
-  end
-
-  @doc """
-  Auto-create a default agent if the project has no agents.
-  The default agent gets access to all available builtin plugin tools.
-  """
-  def ensure_default_agent(user_id, project_id, available_tools, opts \\ []) do
-    case AgentStore.list(user_id, project_id) do
-      [] ->
-        tool_ids = Enum.map(available_tools, & &1.name)
-
-        config =
-          AgentConfig.new(%{
-            user_id: user_id,
-            project_id: project_id,
-            name: "computer_use",
-            description:
-              "General-purpose computer use agent that can read/write files, " <>
-                "search code, run shell commands, fetch web content, and inspect system state",
-            role: "computer use agent",
-            personality: "methodical and thorough",
-            goal:
-              "Execute tasks by using the right tools: search before editing, " <>
-                "read before writing, verify after changing",
-            constraints: [
-              "Always read a file before editing it",
-              "Verify changes after writing files",
-              "Use search tools to find files before assuming paths",
-              "Explain what you're doing before executing destructive commands"
-            ],
-            tool_guidance:
-              "You have full access to the project filesystem, shell, and system tools. " <>
-                "Use search_find_files and search_grep to locate code. " <>
-                "Use editor_read before editor_edit. " <>
-                "Use shell_run_command for builds, tests, and git operations. " <>
-                "Use system_specs to check hardware and OS information.",
-            provider: "anthropic",
-            model: "claude-haiku-4-5-20251001",
-            tool_ids: tool_ids,
-            disabled_builtins: ["text_editor", "code_execution"]
-          })
-
-        AgentStore.save(config)
-
-        Logger.info(
-          "ToolAssembler: created default agent '#{config.name}' for project #{project_id}"
-        )
-
-      [%AgentConfig{name: "assistant"} = old] ->
-        # Upgrade stale default agent from old "assistant" to "computer_use"
-        upgrade_default_agent(old, user_id, project_id, available_tools, opts)
-
-      _agents ->
-        :ok
-    end
-  end
-
-  defp upgrade_default_agent(old, _user_id, project_id, available_tools, opts) do
-    provider = Keyword.get(opts, :provider, old.provider || "anthropic")
-    tool_ids = Enum.map(available_tools, & &1.name)
-
-    updated =
-      AgentConfig.update(old, %{
-        name: "computer_use",
-        description:
-          "General-purpose computer use agent that can read/write files, " <>
-            "search code, run shell commands, fetch web content, and inspect system state",
-        role: "computer use agent",
-        personality: "methodical and thorough",
-        goal:
-          "Execute tasks by using the right tools: search before editing, " <>
-            "read before writing, verify after changing",
-        constraints: [
-          "Always read a file before editing it",
-          "Verify changes after writing files",
-          "Use search tools to find files before assuming paths",
-          "Explain what you're doing before executing destructive commands"
-        ],
-        tool_guidance:
-          "You have full access to the project filesystem, shell, and system tools. " <>
-            "Use search_find_files and search_grep to locate code. " <>
-            "Use editor_read before editor_edit. " <>
-            "Use shell_run_command for builds, tests, and git operations. " <>
-            "Use system_specs to check hardware and OS information.",
-        provider: provider,
-        model: AgentEx.ProviderHelpers.default_model_for(provider),
-        tool_ids: tool_ids
-      })
-
-    AgentStore.save(updated)
-
-    Logger.info(
-      "ToolAssembler: upgraded default agent 'assistant' → 'computer_use' for project #{project_id}"
-    )
   end
 
   @valid_statuses %{
