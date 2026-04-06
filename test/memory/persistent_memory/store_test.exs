@@ -1,15 +1,27 @@
 defmodule AgentEx.Memory.PersistentMemory.StoreTest do
   use ExUnit.Case, async: false
 
+  alias AgentEx.DetsManager
   alias AgentEx.Memory.PersistentMemory.Store
 
   @test_uid "test-user"
   @test_pid "test-project"
   @agent "test-agent"
+  @test_root "/tmp/agent_ex_test/persistent_memory_store"
 
   setup do
+    File.mkdir_p!(Path.join(@test_root, ".agent_ex"))
+    DetsManager.register_project(@test_uid, @test_pid, @test_root)
+
     for entry <- Store.all(@test_uid, @test_pid, @agent),
         do: Store.delete(@test_uid, @test_pid, @agent, entry.key)
+
+    on_exit(fn ->
+      Store.evict_project(@test_uid, @test_pid)
+      DetsManager.close_all(@test_root)
+      DetsManager.unregister_project(@test_uid, @test_pid)
+      File.rm_rf!(Path.join(@test_root, ".agent_ex"))
+    end)
 
     :ok
   end
@@ -62,6 +74,9 @@ defmodule AgentEx.Memory.PersistentMemory.StoreTest do
     Process.exit(pid, :kill)
     Process.sleep(100)
 
+    # After restart, data is in DETS but not yet in ETS — rehydrate
+    Store.hydrate_project(@test_root)
+
     assert {:ok, entry} = Store.get(@test_uid, @test_pid, @agent, "persistent_key")
     assert entry.value == "survives"
   end
@@ -76,11 +91,31 @@ defmodule AgentEx.Memory.PersistentMemory.StoreTest do
     assert {:ok, %{value: "value-a"}} = Store.get(@test_uid, @test_pid, agent_a, "key")
     assert {:ok, %{value: "value-b"}} = Store.get(@test_uid, @test_pid, agent_b, "key")
 
-    # all/3 only returns that agent's entries
     assert Enum.all?(Store.all(@test_uid, @test_pid, agent_a), &(&1.value == "value-a"))
     assert Enum.all?(Store.all(@test_uid, @test_pid, agent_b), &(&1.value == "value-b"))
 
     Store.delete(@test_uid, @test_pid, agent_a, "key")
     Store.delete(@test_uid, @test_pid, agent_b, "key")
+  end
+
+  test "evict_project removes all data from ETS" do
+    Store.put(@test_uid, @test_pid, @agent, "evict_me", "gone", "test")
+    assert {:ok, _} = Store.get(@test_uid, @test_pid, @agent, "evict_me")
+
+    Store.evict_project(@test_uid, @test_pid)
+    assert :not_found = Store.get(@test_uid, @test_pid, @agent, "evict_me")
+  end
+
+  test "hydrate_project loads DETS data into ETS" do
+    Store.put(@test_uid, @test_pid, @agent, "hydrate_key", "hydrate_val", "test")
+
+    # Evict from ETS
+    Store.evict_project(@test_uid, @test_pid)
+    assert :not_found = Store.get(@test_uid, @test_pid, @agent, "hydrate_key")
+
+    # Rehydrate from DETS
+    Store.hydrate_project(@test_root)
+    assert {:ok, entry} = Store.get(@test_uid, @test_pid, @agent, "hydrate_key")
+    assert entry.value == "hydrate_val"
   end
 end

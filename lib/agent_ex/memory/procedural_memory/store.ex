@@ -1,21 +1,21 @@
 defmodule AgentEx.Memory.ProceduralMemory.Store do
   @moduledoc """
-  Tier 4: Procedural memory (learned skills) using ETS + DETS.
+  Tier 4: Procedural memory (learned skills) using ETS + per-project DETS.
 
   Stores `Skill` structs keyed by `{user_id, project_id, agent_id, skill_name}`.
-  Skills capture reusable strategies, tool patterns, and error recovery approaches
-  that agents learn from session reflections.
+  DETS files are opened lazily per-project via DetsManager.
   """
 
   use GenServer
 
   @behaviour AgentEx.Memory.Tier
 
-  alias AgentEx.Memory.ProceduralMemory.{Loader, Skill}
+  alias AgentEx.DetsManager
+  alias AgentEx.Memory.ProceduralMemory.Skill
 
   require Logger
 
-  defstruct [:ets_table, :dets_table, :sync_interval]
+  @store_name :procedural_memory
 
   # --- Client API ---
 
@@ -30,7 +30,7 @@ defmodule AgentEx.Memory.ProceduralMemory.Store do
 
   @doc "Direct ETS lookup by `(user_id, project_id, agent_id, skill_name)`."
   def get(user_id, project_id, agent_id, skill_name) do
-    case :ets.lookup(:procedural_memory, {user_id, project_id, agent_id, skill_name}) do
+    case :ets.lookup(@store_name, {user_id, project_id, agent_id, skill_name}) do
       [{_key, skill}] -> {:ok, skill}
       [] -> :not_found
     end
@@ -46,7 +46,7 @@ defmodule AgentEx.Memory.ProceduralMemory.Store do
         _, acc -> acc
       end,
       [],
-      :procedural_memory
+      @store_name
     )
   rescue
     ArgumentError -> []
@@ -63,7 +63,7 @@ defmodule AgentEx.Memory.ProceduralMemory.Store do
           acc
       end,
       [],
-      :procedural_memory
+      @store_name
     )
   rescue
     ArgumentError -> []
@@ -90,6 +90,16 @@ defmodule AgentEx.Memory.ProceduralMemory.Store do
   @doc "Delete all skills for a project (cascade)."
   def delete_by_project(user_id, project_id) do
     GenServer.call(__MODULE__, {:delete_by_project, user_id, project_id})
+  end
+
+  @doc "Hydrate a project's procedural memory from DETS into ETS."
+  def hydrate_project(root_path) do
+    GenServer.call(__MODULE__, {:hydrate_project, root_path})
+  end
+
+  @doc "Evict a project's data from ETS."
+  def evict_project(user_id, project_id) do
+    GenServer.call(__MODULE__, {:evict_project, user_id, project_id})
   end
 
   # --- Tier callbacks ---
@@ -123,53 +133,49 @@ defmodule AgentEx.Memory.ProceduralMemory.Store do
     sync_interval =
       Application.get_env(:agent_ex, :procedural_memory_sync_interval, :timer.seconds(30))
 
-    dets_dir = Application.get_env(:agent_ex, :dets_dir, "priv/data")
-    File.mkdir_p!(dets_dir)
-    dets_path = Path.join(dets_dir, "procedural_memory.dets") |> String.to_charlist()
-
-    {:ok, dets_table} = :dets.open_file(:procedural_memory_dets, file: dets_path, type: :set)
-
     ets_table =
-      :ets.new(:procedural_memory, [:set, :named_table, :public, read_concurrency: true])
+      :ets.new(@store_name, [:set, :named_table, :public, read_concurrency: true])
 
-    Loader.hydrate(ets_table, dets_table)
     schedule_sync(sync_interval)
 
-    state = %__MODULE__{
-      ets_table: ets_table,
-      dets_table: dets_table,
-      sync_interval: sync_interval
-    }
-
-    {:ok, state}
+    {:ok, %{ets_table: ets_table, sync_interval: sync_interval}}
   end
 
   @impl GenServer
   def handle_call({:put, user_id, project_id, agent_id, %Skill{} = skill}, _from, state) do
     ets_key = {user_id, project_id, agent_id, skill.name}
+    root_path = DetsManager.root_path_for(user_id, project_id)
 
-    case :dets.insert(state.dets_table, {ets_key, skill}) do
-      :ok ->
-        :ets.insert(state.ets_table, {ets_key, skill})
-        {:reply, :ok, state}
+    if root_path do
+      case ensure_dets_and_insert(root_path, ets_key, skill) do
+        :ok ->
+          :ets.insert(state.ets_table, {ets_key, skill})
+          {:reply, :ok, state}
 
-      {:error, reason} ->
-        {:reply, {:error, reason}, state}
+        {:error, reason} ->
+          {:reply, {:error, reason}, state}
+      end
+    else
+      Logger.warning("ProceduralMemory: no root_path for project #{project_id}, ETS-only save")
+      :ets.insert(state.ets_table, {ets_key, skill})
+      {:reply, :ok, state}
     end
   end
 
   @impl GenServer
   def handle_call({:delete, user_id, project_id, agent_id, skill_name}, _from, state) do
     ets_key = {user_id, project_id, agent_id, skill_name}
+    root_path = DetsManager.root_path_for(user_id, project_id)
 
-    case :dets.delete(state.dets_table, ets_key) do
-      :ok ->
-        :ets.delete(state.ets_table, ets_key)
-        {:reply, :ok, state}
-
-      {:error, reason} ->
-        {:reply, {:error, reason}, state}
+    if root_path do
+      case resolve_dets(root_path) do
+        {:ok, dets_ref} -> :dets.delete(dets_ref, ets_key)
+        _ -> :ok
+      end
     end
+
+    :ets.delete(state.ets_table, ets_key)
+    {:reply, :ok, state}
   end
 
   @impl GenServer
@@ -184,7 +190,7 @@ defmodule AgentEx.Memory.ProceduralMemory.Store do
         state.ets_table
       )
 
-    delete_keys(state, keys)
+    delete_keys(state, keys, user_id, project_id)
     {:reply, {:ok, length(keys)}, state}
   end
 
@@ -200,21 +206,58 @@ defmodule AgentEx.Memory.ProceduralMemory.Store do
         state.ets_table
       )
 
-    delete_keys(state, keys)
+    delete_keys(state, keys, user_id, project_id)
+    {:reply, {:ok, length(keys)}, state}
+  end
+
+  @impl GenServer
+  def handle_call({:hydrate_project, root_path}, _from, state) do
+    case DetsManager.open(root_path, @store_name) do
+      {:ok, dets_ref} ->
+        count =
+          :dets.foldl(
+            fn {key, value}, acc ->
+              :ets.insert(state.ets_table, {key, value})
+              acc + 1
+            end,
+            0,
+            dets_ref
+          )
+
+        Logger.info("ProceduralMemory: hydrated #{count} skills for #{root_path}")
+        {:reply, {:ok, count}, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  @impl GenServer
+  def handle_call({:evict_project, user_id, project_id}, _from, state) do
+    keys =
+      :ets.foldl(
+        fn
+          {{^user_id, ^project_id, _, _} = k, _}, acc -> [k | acc]
+          _, acc -> acc
+        end,
+        [],
+        state.ets_table
+      )
+
+    Enum.each(keys, fn key -> :ets.delete(state.ets_table, key) end)
     {:reply, {:ok, length(keys)}, state}
   end
 
   @impl GenServer
   def handle_info(:sync, state) do
-    Loader.sync(state.ets_table, state.dets_table)
+    sync_all_projects(state.ets_table)
     schedule_sync(state.sync_interval)
     {:noreply, state}
   end
 
   @impl GenServer
   def terminate(_reason, state) do
-    Loader.sync(state.ets_table, state.dets_table)
-    :dets.close(state.dets_table)
+    sync_all_projects(state.ets_table)
     :ok
   end
 
@@ -245,18 +288,72 @@ defmodule AgentEx.Memory.ProceduralMemory.Store do
     end)
   end
 
-  defp delete_keys(state, keys) do
-    Enum.each(keys, fn key ->
-      case :dets.delete(state.dets_table, key) do
-        :ok ->
-          :ets.delete(state.ets_table, key)
+  defp ensure_dets_and_insert(root_path, key, value) do
+    case resolve_dets(root_path) do
+      {:ok, dets_ref} -> :dets.insert(dets_ref, {key, value})
+      {:error, reason} -> {:error, reason}
+    end
+  end
 
-        {:error, reason} ->
-          Logger.warning(
-            "ProceduralMemory: DETS delete failed for #{inspect(key)}: #{inspect(reason)}"
-          )
+  defp resolve_dets(root_path) do
+    case DetsManager.lookup(root_path, @store_name) do
+      nil -> DetsManager.open(root_path, @store_name)
+      dets_ref -> {:ok, dets_ref}
+    end
+  end
+
+  defp delete_keys(state, keys, user_id, project_id) do
+    root_path = DetsManager.root_path_for(user_id, project_id)
+
+    dets_ref =
+      if root_path do
+        case resolve_dets(root_path) do
+          {:ok, ref} -> ref
+          _ -> nil
+        end
       end
+
+    Enum.each(keys, fn key ->
+      if dets_ref, do: :dets.delete(dets_ref, key)
+      :ets.delete(state.ets_table, key)
     end)
+  end
+
+  defp sync_all_projects(ets_table) do
+    all_projects = DetsManager.registered_projects()
+    root_to_keys = build_root_to_keys(all_projects)
+
+    all_projects
+    |> Enum.map(fn {_, root_path} -> root_path end)
+    |> Enum.uniq()
+    |> Enum.each(fn root_path ->
+      sync_project(ets_table, root_path, root_to_keys[root_path] || MapSet.new())
+    end)
+  end
+
+  defp sync_project(ets_table, root_path, project_keys) do
+    case DetsManager.lookup(root_path, @store_name) do
+      nil -> :ok
+      dets_ref -> sync_ets_to_dets(ets_table, dets_ref, project_keys)
+    end
+  end
+
+  defp sync_ets_to_dets(ets_table, dets_ref, project_keys) do
+    :ets.foldl(
+      fn {{u, p, _, _} = key, value}, :ok ->
+        if MapSet.member?(project_keys, {u, p}), do: :dets.insert(dets_ref, {key, value})
+        :ok
+      end,
+      :ok,
+      ets_table
+    )
+
+    :dets.sync(dets_ref)
+  end
+
+  defp build_root_to_keys(projects) do
+    Enum.group_by(projects, fn {_, rp} -> rp end, fn {key, _} -> key end)
+    |> Map.new(fn {rp, keys} -> {rp, MapSet.new(keys)} end)
   end
 
   defp schedule_sync(interval) do

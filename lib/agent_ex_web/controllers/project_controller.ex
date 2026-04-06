@@ -8,24 +8,30 @@ defmodule AgentExWeb.ProjectController do
       {project_id, ""} ->
         user = conn.assigns.current_scope.user
 
-        case Projects.get_user_project(user.id, project_id) do
-          nil ->
-            conn
-            |> put_flash(:error, "Project not found")
-            |> redirect(to: ~p"/chat")
-
-          _project ->
-            redirect_to = safe_redirect_path(conn)
-
-            conn
-            |> put_session("current_project_id", project_id)
-            |> redirect(to: redirect_to)
-        end
+        user.id
+        |> Projects.get_user_project(project_id)
+        |> switch_to_project(conn)
 
       _ ->
         conn
         |> put_flash(:error, "Invalid project ID")
         |> redirect(to: ~p"/chat")
+    end
+  end
+
+  defp switch_to_project(nil, conn) do
+    conn |> put_flash(:error, "Project not found") |> redirect(to: ~p"/projects")
+  end
+
+  defp switch_to_project(project, conn) do
+    if Projects.project_available?(project) do
+      conn
+      |> put_session("current_project_id", project.id)
+      |> redirect(to: safe_redirect_path(conn))
+    else
+      conn
+      |> put_flash(:error, "Project unavailable — directory not found on this machine")
+      |> redirect(to: ~p"/projects")
     end
   end
 

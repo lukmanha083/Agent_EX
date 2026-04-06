@@ -1,17 +1,18 @@
 defmodule AgentEx.HttpToolStore do
   @moduledoc """
-  ETS + DETS persistence for HTTP tool configs.
-  Same pattern as AgentStore — ETS for fast reads, DETS for disk persistence.
+  ETS + per-project DETS persistence for HTTP tool configs.
+  Same pattern as AgentStore — ETS for fast reads, per-project DETS for disk persistence.
   Keys are `{user_id, project_id, tool_id}` for per-user, per-project isolation.
   """
 
   use GenServer
 
+  alias AgentEx.DetsManager
   alias AgentEx.HttpTool
 
   require Logger
 
-  defstruct [:ets_table, :dets_table, :sync_interval]
+  @store_name :http_tool_configs
 
   # --- Client API ---
 
@@ -26,7 +27,7 @@ defmodule AgentEx.HttpToolStore do
 
   @doc "Get a specific HTTP tool config by user_id, project_id, and tool_id."
   def get(user_id, project_id, tool_id) do
-    case :ets.lookup(:http_tool_configs, {user_id, project_id, tool_id}) do
+    case :ets.lookup(@store_name, {user_id, project_id, tool_id}) do
       [{{^user_id, ^project_id, ^tool_id}, config}] -> {:ok, config}
       [] -> :not_found
     end
@@ -38,7 +39,7 @@ defmodule AgentEx.HttpToolStore do
   def list(user_id, project_id) do
     pattern = {{user_id, project_id, :_}, :"$1"}
 
-    :ets.match(:http_tool_configs, pattern)
+    :ets.match(@store_name, pattern)
     |> List.flatten()
     |> Enum.sort_by(& &1.inserted_at, {:desc, DateTime})
   rescue
@@ -50,9 +51,14 @@ defmodule AgentEx.HttpToolStore do
     GenServer.call(__MODULE__, {:delete, user_id, project_id, tool_id})
   end
 
-  @doc "Delete all HTTP tool configs for a project. Used for cascade delete."
-  def delete_by_project(user_id, project_id) do
-    GenServer.call(__MODULE__, {:delete_by_project, user_id, project_id})
+  @doc "Hydrate a project's HTTP tool data from DETS into ETS."
+  def hydrate_project(root_path) do
+    GenServer.call(__MODULE__, {:hydrate_project, root_path})
+  end
+
+  @doc "Evict a project's data from ETS."
+  def evict_project(user_id, project_id) do
+    GenServer.call(__MODULE__, {:evict_project, user_id, project_id})
   end
 
   # --- Server callbacks ---
@@ -62,49 +68,70 @@ defmodule AgentEx.HttpToolStore do
     sync_interval =
       Application.get_env(:agent_ex, :http_tool_store_sync_interval, :timer.seconds(30))
 
-    dets_dir = Application.get_env(:agent_ex, :dets_dir, "priv/data")
-    File.mkdir_p!(dets_dir)
-    dets_path = Path.join(dets_dir, "http_tool_configs.dets") |> String.to_charlist()
-
-    {:ok, dets_table} = :dets.open_file(:http_tool_configs_dets, file: dets_path, type: :set)
-
     ets_table =
-      :ets.new(:http_tool_configs, [:set, :named_table, :public, read_concurrency: true])
+      :ets.new(@store_name, [:set, :named_table, :public, read_concurrency: true])
 
-    hydrate(ets_table, dets_table)
     schedule_sync(sync_interval)
 
-    state = %__MODULE__{
-      ets_table: ets_table,
-      dets_table: dets_table,
-      sync_interval: sync_interval
-    }
-
-    {:ok, state}
+    {:ok, %{ets_table: ets_table, sync_interval: sync_interval}}
   end
 
   @impl GenServer
   def handle_call({:save, %HttpTool{} = config}, _from, state) do
     key = {config.user_id, config.project_id, config.id}
+    root_path = DetsManager.root_path_for(config.user_id, config.project_id)
 
-    case :dets.insert(state.dets_table, {key, config}) do
-      :ok ->
-        :ets.insert(state.ets_table, {key, config})
-        {:reply, {:ok, config}, state}
+    if root_path do
+      case ensure_dets_and_insert(root_path, key, config) do
+        :ok ->
+          :ets.insert(state.ets_table, {key, config})
+          {:reply, {:ok, config}, state}
 
-      {:error, reason} ->
-        {:reply, {:error, reason}, state}
+        {:error, reason} ->
+          {:reply, {:error, reason}, state}
+      end
+    else
+      Logger.warning(
+        "HttpToolStore: no root_path for project #{config.project_id}, ETS-only save"
+      )
+
+      :ets.insert(state.ets_table, {key, config})
+      {:reply, {:ok, config}, state}
     end
   end
 
   @impl GenServer
   def handle_call({:delete, user_id, project_id, tool_id}, _from, state) do
     key = {user_id, project_id, tool_id}
+    root_path = DetsManager.root_path_for(user_id, project_id)
 
-    case :dets.delete(state.dets_table, key) do
-      :ok ->
-        :ets.delete(state.ets_table, key)
-        {:reply, :ok, state}
+    if root_path do
+      case resolve_dets(root_path) do
+        {:ok, dets_ref} -> :dets.delete(dets_ref, key)
+        _ -> :ok
+      end
+    end
+
+    :ets.delete(state.ets_table, key)
+    {:reply, :ok, state}
+  end
+
+  @impl GenServer
+  def handle_call({:hydrate_project, root_path}, _from, state) do
+    case DetsManager.open(root_path, @store_name) do
+      {:ok, dets_ref} ->
+        count =
+          :dets.foldl(
+            fn {key, value}, acc ->
+              :ets.insert(state.ets_table, {key, value})
+              acc + 1
+            end,
+            0,
+            dets_ref
+          )
+
+        Logger.info("HttpToolStore: hydrated #{count} HTTP tool configs for #{root_path}")
+        {:reply, {:ok, count}, state}
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
@@ -112,7 +139,7 @@ defmodule AgentEx.HttpToolStore do
   end
 
   @impl GenServer
-  def handle_call({:delete_by_project, user_id, project_id}, _from, state) do
+  def handle_call({:evict_project, user_id, project_id}, _from, state) do
     keys =
       :ets.foldl(
         fn
@@ -123,71 +150,74 @@ defmodule AgentEx.HttpToolStore do
         state.ets_table
       )
 
-    Enum.each(keys, fn key ->
-      case :dets.delete(state.dets_table, key) do
-        :ok ->
-          :ets.delete(state.ets_table, key)
-
-        {:error, reason} ->
-          Logger.warning(
-            "HttpToolStore delete_by_project: DETS delete failed for #{inspect(key)}: #{inspect(reason)}"
-          )
-      end
-    end)
-
+    Enum.each(keys, fn key -> :ets.delete(state.ets_table, key) end)
     {:reply, {:ok, length(keys)}, state}
   end
 
   @impl GenServer
   def handle_info(:sync, state) do
-    sync(state.ets_table, state.dets_table)
+    sync_all_projects(state.ets_table)
     schedule_sync(state.sync_interval)
     {:noreply, state}
   end
 
   @impl GenServer
   def terminate(_reason, state) do
-    sync(state.ets_table, state.dets_table)
-    :dets.close(state.dets_table)
+    sync_all_projects(state.ets_table)
     :ok
   end
 
-  defp hydrate(ets_table, dets_table) do
-    count =
-      :dets.foldl(
-        fn {key, value}, acc ->
-          :ets.insert(ets_table, {key, value})
-          acc + 1
-        end,
-        0,
-        dets_table
-      )
+  # --- Private helpers ---
 
-    Logger.info("HttpToolStore: hydrated #{count} HTTP tool configs from DETS")
-    :ok
+  defp ensure_dets_and_insert(root_path, key, value) do
+    case resolve_dets(root_path) do
+      {:ok, dets_ref} -> :dets.insert(dets_ref, {key, value})
+      {:error, reason} -> {:error, reason}
+    end
   end
 
-  defp sync(ets_table, dets_table) do
+  defp resolve_dets(root_path) do
+    case DetsManager.lookup(root_path, @store_name) do
+      nil -> DetsManager.open(root_path, @store_name)
+      dets_ref -> {:ok, dets_ref}
+    end
+  end
+
+  defp sync_all_projects(ets_table) do
+    all_projects = DetsManager.registered_projects()
+    root_to_keys = build_root_to_keys(all_projects)
+
+    all_projects
+    |> Enum.map(fn {_, root_path} -> root_path end)
+    |> Enum.uniq()
+    |> Enum.each(fn root_path ->
+      sync_project(ets_table, root_path, root_to_keys[root_path] || MapSet.new())
+    end)
+  end
+
+  defp sync_project(ets_table, root_path, project_keys) do
+    case DetsManager.lookup(root_path, @store_name) do
+      nil -> :ok
+      dets_ref -> sync_ets_to_dets(ets_table, dets_ref, project_keys)
+    end
+  end
+
+  defp sync_ets_to_dets(ets_table, dets_ref, project_keys) do
     :ets.foldl(
-      fn {key, value}, acc ->
-        case :dets.insert(dets_table, {key, value}) do
-          :ok ->
-            acc
-
-          {:error, reason} ->
-            Logger.warning(
-              "HttpToolStore sync: DETS insert failed for #{inspect(key)}: #{inspect(reason)}"
-            )
-
-            acc
-        end
+      fn {{u, p, _} = key, value}, :ok ->
+        if MapSet.member?(project_keys, {u, p}), do: :dets.insert(dets_ref, {key, value})
+        :ok
       end,
       :ok,
       ets_table
     )
 
-    :dets.sync(dets_table)
-    :ok
+    :dets.sync(dets_ref)
+  end
+
+  defp build_root_to_keys(projects) do
+    Enum.group_by(projects, fn {_, rp} -> rp end, fn {key, _} -> key end)
+    |> Map.new(fn {rp, keys} -> {rp, MapSet.new(keys)} end)
   end
 
   defp schedule_sync(interval) do

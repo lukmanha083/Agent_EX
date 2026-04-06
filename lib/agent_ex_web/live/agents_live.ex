@@ -1,7 +1,7 @@
 defmodule AgentExWeb.AgentsLive do
   use AgentExWeb, :live_view
 
-  alias AgentEx.{AgentConfig, AgentStore, ToolAssembler}
+  alias AgentEx.{AgentConfig, AgentStore}
 
   import AgentExWeb.AgentComponents
 
@@ -25,12 +25,6 @@ defmodule AgentExWeb.AgentsLive do
        |> put_flash(:error, "No project available. Please create one first.")
        |> redirect(to: ~p"/projects")}
     else
-      available = ToolAssembler.available_tools(user.id, project.id, project.root_path)
-
-      ToolAssembler.ensure_default_agent(user.id, project.id, available,
-        provider: project.provider || "anthropic"
-      )
-
       agents = AgentStore.list(user.id, project.id)
       default_provider = "openai"
       default_model = default_model_for(default_provider)
