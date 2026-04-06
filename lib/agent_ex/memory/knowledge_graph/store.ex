@@ -63,6 +63,32 @@ defmodule AgentEx.Memory.KnowledgeGraph.Store do
     {:ok, count}
   end
 
+  @doc """
+  Delete orphaned entities that have no remaining mentions or facts.
+
+  Entities are shared across projects, so they are not deleted by CASCADE.
+  After a project is deleted, entities that were only referenced by that
+  project's episodes become orphaned. This function cleans them up.
+
+  Returns `{:ok, count}` with the number of deleted entities.
+  """
+  def cleanup_orphaned_entities do
+    {count, _} =
+      from(e in Entity,
+        left_join: m in Mention, on: m.entity_id == e.id,
+        left_join: fs in Fact, on: fs.source_entity_id == e.id,
+        left_join: ft in Fact, on: ft.target_entity_id == e.id,
+        where: is_nil(m.id) and is_nil(fs.id) and is_nil(ft.id)
+      )
+      |> Repo.delete_all()
+
+    if count > 0 do
+      Logger.info("KnowledgeGraph: cleaned up #{count} orphaned entities")
+    end
+
+    {:ok, count}
+  end
+
   # --- Tier callbacks ---
 
   @impl AgentEx.Memory.Tier
@@ -189,18 +215,30 @@ defmodule AgentEx.Memory.KnowledgeGraph.Store do
     target_id = Map.get(entity_map, rel["target"])
 
     if source_id && target_id do
-      embedding = embed_or_nil("#{rel["source"]} #{rel["type"]} #{rel["target"]}: #{rel["description"]}")
+      embedding =
+        embed_or_nil("#{rel["source"]} #{rel["type"]} #{rel["target"]}: #{rel["description"]}")
 
-      %Fact{}
-      |> Fact.changeset(%{
-        source_entity_id: source_id,
-        target_entity_id: target_id,
-        fact_type: rel["type"],
-        description: rel["description"],
-        confidence: rel["confidence"] || "MEDIUM",
-        description_embedding: embedding
-      })
-      |> Repo.insert()
+      result =
+        %Fact{}
+        |> Fact.changeset(%{
+          source_entity_id: source_id,
+          target_entity_id: target_id,
+          fact_type: rel["type"],
+          description: rel["description"],
+          confidence: rel["confidence"] || "MEDIUM",
+          description_embedding: embedding
+        })
+        |> Repo.insert()
+
+      case result do
+        {:ok, _} ->
+          :ok
+
+        {:error, changeset} ->
+          Logger.warning(
+            "Failed to store fact #{rel["source"]}→#{rel["target"]}: #{inspect(changeset.errors)}"
+          )
+      end
     else
       Logger.warning(
         "Skipping relationship: missing entity - source=#{rel["source"]} target=#{rel["target"]}"
@@ -269,12 +307,19 @@ defmodule AgentEx.Memory.KnowledgeGraph.Store do
   defp find_entity_by_name(name) do
     case Embeddings.embed(name) do
       {:ok, vector} ->
-        from(e in Entity,
-          where: not is_nil(e.name_embedding),
-          order_by: cosine_distance(e.name_embedding, ^vector),
-          limit: 1
-        )
-        |> Repo.one()
+        result =
+          from(e in Entity,
+            where: not is_nil(e.name_embedding),
+            order_by: cosine_distance(e.name_embedding, ^vector),
+            limit: 1,
+            select: {e, cosine_distance(e.name_embedding, ^vector)}
+          )
+          |> Repo.one()
+
+        case result do
+          {entity, distance} when distance <= @entity_distance_threshold -> entity
+          _ -> nil
+        end
 
       _ ->
         nil

@@ -53,8 +53,8 @@ defmodule AgentEx.Memory.SemanticMemory.Store do
     end
   end
 
-  def delete(id) do
-    case Repo.get(Memory, id) do
+  def delete(project_id, id) do
+    case Repo.get_by(Memory, id: id, project_id: project_id) do
       nil -> {:error, :not_found}
       memory -> Repo.delete(memory)
     end
