@@ -1,14 +1,14 @@
 defmodule AgentEx.Memory do
   @moduledoc """
-  Public API facade for the 3-tier agent memory system with knowledge graph.
+  Public API facade for the 4-tier agent memory system with knowledge graph.
 
   All operations are scoped by `(user_id, project_id, agent_id)` for multi-tenant isolation.
 
   ## Tiers
   - **Tier 1 (Working Memory)**: Per-session conversation history
   - **Tier 2 (Persistent Memory)**: Key-value facts (ETS + DETS)
-  - **Tier 3 (Semantic Memory)**: Vector-based semantic search (HelixDB)
-  - **Knowledge Graph**: Shared entities/facts, per-agent episodes (HelixDB)
+  - **Tier 3 (Semantic Memory)**: Vector-based semantic search (pgvector)
+  - **Knowledge Graph**: Shared entities/facts, per-agent episodes (Postgres)
 
   ## Example — multi-agent memory isolation
 
@@ -80,18 +80,18 @@ defmodule AgentEx.Memory do
 
   # --- Semantic Memory (Tier 3) ---
 
-  def store_memory(user_id, project_id, agent_id, text, type \\ "general", session_id \\ "") do
-    SemanticMemory.Store.store(user_id, project_id, agent_id, text, type, session_id)
+  def store_memory(_user_id, project_id, agent_id, text, type \\ "general", session_id \\ "") do
+    SemanticMemory.Store.store(project_id, agent_id, text, type, session_id)
   end
 
-  def search_memory(user_id, project_id, agent_id, query, limit \\ 5) do
-    SemanticMemory.Store.search(user_id, project_id, agent_id, query, limit)
+  def search_memory(_user_id, project_id, agent_id, query, limit \\ 5) do
+    SemanticMemory.Store.search(project_id, agent_id, query, limit)
   end
 
   # --- Knowledge Graph ---
 
-  def ingest(user_id, project_id, agent_id, text, role \\ "user") do
-    KnowledgeGraph.Store.ingest(user_id, project_id, agent_id, text, role)
+  def ingest(_user_id, project_id, agent_id, text, role \\ "user") do
+    KnowledgeGraph.Store.ingest(project_id, agent_id, text, role)
   end
 
   @doc "Query an entity by name (shared across agents)."
@@ -104,8 +104,8 @@ defmodule AgentEx.Memory do
     KnowledgeGraph.Store.query_related(name, hops)
   end
 
-  def hybrid_search(user_id, project_id, agent_id, query, limit \\ 5) do
-    KnowledgeGraph.Store.hybrid_search(user_id, project_id, agent_id, query, limit)
+  def hybrid_search(_user_id, project_id, agent_id, query, limit \\ 5) do
+    KnowledgeGraph.Store.hybrid_search(project_id, agent_id, query, limit)
   end
 
   # --- Procedural Memory (Tier 4: Skills) ---
@@ -172,9 +172,9 @@ defmodule AgentEx.Memory do
   Delete all memory data for an agent across all tiers.
 
   - Tier 2: Removes all persistent memory entries (ETS + DETS)
-  - Tier 3: Removes semantic memory vectors from HelixDB (best-effort)
+  - Tier 3: Removes semantic memory vectors (Postgres DELETE)
   - Tier 4: Removes procedural skills (ETS + DETS)
-  - KG: Removes episode embeddings from HelixDB (best-effort; shared entities/facts kept)
+  - KG: Removes episodes (CASCADE cleans up mentions; shared entities/facts kept)
   """
   def delete_agent_data(user_id, project_id, agent_id) do
     # Stop any active Tier 1 sessions for this agent
@@ -185,10 +185,10 @@ defmodule AgentEx.Memory do
         {:persistent, PersistentMemory.Store.delete_all(user_id, project_id, agent_id)}
       end),
       Task.Supervisor.async_nolink(AgentEx.TaskSupervisor, fn ->
-        {:semantic, SemanticMemory.Store.delete_by_agent(user_id, project_id, agent_id)}
+        {:semantic, SemanticMemory.Store.delete_by_agent(project_id, agent_id)}
       end),
       Task.Supervisor.async_nolink(AgentEx.TaskSupervisor, fn ->
-        {:knowledge_graph, KnowledgeGraph.Store.delete_by_agent(user_id, project_id, agent_id)}
+        {:knowledge_graph, KnowledgeGraph.Store.delete_by_agent(project_id, agent_id)}
       end),
       Task.Supervisor.async_nolink(AgentEx.TaskSupervisor, fn ->
         {:procedural, ProceduralMemory.Store.delete_all(user_id, project_id, agent_id)}
@@ -203,26 +203,26 @@ defmodule AgentEx.Memory do
   Delete all memory data for a project across all tiers.
 
   - Tier 2: Direct project-scoped delete from ETS/DETS
-  - Tier 3: Removes semantic memory vectors matching project_id (best-effort)
+  - Tier 3: Removed by ON DELETE CASCADE from projects table
   - Tier 4: Removes procedural skills matching project_id (ETS + DETS)
-  - KG: Removes episode embeddings matching project_id (best-effort; shared entities/facts kept)
+  - KG: Episodes removed by CASCADE; shared entities/facts kept
   """
   def delete_project_data(user_id, project_id) do
     # Stop any active Tier 1 sessions for this project
     stop_project_sessions(user_id, project_id)
 
-    # Clean up all memory tiers. Tier 2/4 ETS+DETS cleanup is also handled by
-    # directory-based deletion in Projects.delete_project, but we include them
-    # here so this function remains complete when called independently.
+    # Tier 3 and KG episodes are cleaned up by ON DELETE CASCADE from projects.
+    # We still call delete explicitly here so this function works independently
+    # (e.g. when called before the project row is deleted).
     tasks = [
       Task.Supervisor.async_nolink(AgentEx.TaskSupervisor, fn ->
         {:persistent, PersistentMemory.Store.delete_by_project(user_id, project_id)}
       end),
       Task.Supervisor.async_nolink(AgentEx.TaskSupervisor, fn ->
-        {:semantic, SemanticMemory.Store.delete_by_project(user_id, project_id)}
+        {:semantic, SemanticMemory.Store.delete_by_project(project_id)}
       end),
       Task.Supervisor.async_nolink(AgentEx.TaskSupervisor, fn ->
-        {:knowledge_graph, KnowledgeGraph.Store.delete_by_project(user_id, project_id)}
+        {:knowledge_graph, KnowledgeGraph.Store.delete_by_project(project_id)}
       end),
       Task.Supervisor.async_nolink(AgentEx.TaskSupervisor, fn ->
         {:procedural, ProceduralMemory.Store.delete_by_project(user_id, project_id)}

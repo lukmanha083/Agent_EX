@@ -14,6 +14,7 @@ config :agent_ex, AgentEx.Repo,
   password: "agent_ex_dev",
   hostname: "localhost",
   database: "agent_ex_test#{System.get_env("MIX_TEST_PARTITION")}",
+  types: AgentEx.PostgrexTypes,
   pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: System.schedulers_online() * 2
 

@@ -18,7 +18,6 @@ config :agent_ex, :scopes,
 
 config :agent_ex,
   ecto_repos: [AgentEx.Repo],
-  helix_db_url: "http://localhost:7969",
   embedding_model: "text-embedding-3-small",
   embedding_dimensions: 1536,
   extraction_model: "gpt-4o-mini",

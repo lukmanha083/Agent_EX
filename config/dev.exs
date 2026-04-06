@@ -12,6 +12,7 @@ config :agent_ex, AgentEx.Repo,
   password: "agent_ex_dev",
   hostname: "localhost",
   database: "agent_ex_dev",
+  types: AgentEx.PostgrexTypes,
   stacktrace: true,
   show_sensitive_data_on_connection_error: true,
   pool_size: 10

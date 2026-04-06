@@ -50,7 +50,15 @@ global→per-project migration. PersistentMemory.Loader and ProceduralMemory.Loa
 modules removed (hydration now handled in-store via hydrate_project/1).
 Defaults registry (AgentEx.Defaults.Agents, AgentEx.Defaults.Tools) replaces
 inline ensure_default_agent in ToolAssembler — templates seeded on first hydration.
-Phase 5e (Migrate HelixDB → pgvector) next.
+Phase 5e (Migrate HelixDB → pgvector) implemented (2026-04-06):
+pgvector extension + Postgrex types, semantic_memories table (pgvector HNSW),
+kg_entities/kg_episodes/kg_facts/kg_mentions tables (ON DELETE CASCADE from projects),
+SemanticMemory.Store rewritten (GenServer→stateless Ecto, server-side WHERE filtering),
+KnowledgeGraph.Store rewritten (GenServer→stateless Ecto, entity resolution via cosine_distance),
+KnowledgeGraph.Retriever rewritten (3 parallel Ecto queries replacing HelixDB HTTP calls),
+HelixDB client + helix/*.hx deleted, helix_db_url config removed,
+Store GenServers removed from supervision tree.
+Migrations: 20260406100000–20260406100001.
 Phase 5f (Orchestration Engine — GenStage + Task Queue + Budget-Aware Dispatch) designed (2026-04-04):
 GenStage producer/consumer for orchestrator→specialist backpressure, LLM-as-scheduler
 with reactive task queue, transparent specialist-to-specialist delegation (Option B),

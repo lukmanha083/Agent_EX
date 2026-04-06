@@ -36,6 +36,7 @@ defmodule AgentEx.MixProject do
       # Database
       {:ecto_sql, "~> 3.12"},
       {:postgrex, "~> 0.19"},
+      {:pgvector, "~> 0.3"},
 
       # Phoenix
       {:phoenix, "~> 1.7"},
