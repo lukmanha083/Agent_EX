@@ -38,13 +38,26 @@ defmodule AgentEx.Projects.Project do
     |> foreign_key_constraint(:user_id)
   end
 
+  @immutable_fields ~w(provider model root_path)a
+
   @doc "Changeset for updating an existing project. Provider, model, and root_path cannot be changed."
   def update_changeset(project, attrs) do
     project
     |> cast(attrs, [:name, :description, :disabled_builtins, :token_budget])
     |> validate_required([:name])
+    |> reject_immutable_fields(attrs)
     |> validate_number(:token_budget, greater_than_or_equal_to: 0)
     |> unique_constraint([:user_id, :name])
+  end
+
+  defp reject_immutable_fields(changeset, attrs) do
+    Enum.reduce(@immutable_fields, changeset, fn field, cs ->
+      if Map.has_key?(attrs, field) or Map.has_key?(attrs, Atom.to_string(field)) do
+        add_error(cs, field, "cannot be changed after creation")
+      else
+        cs
+      end
+    end)
   end
 
   defp validate_root_path(changeset) do

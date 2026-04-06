@@ -52,8 +52,11 @@ defmodule AgentEx.DetsManager do
   Returns the DETS table ref if already open, or nil.
   """
   def lookup(root_path, store_name) do
+    expected_path = path_for(root_path, store_name)
+
     case :ets.lookup(@registry_table, {root_path, store_name}) do
-      [{_, dets_ref}] -> dets_ref
+      [{_, {dets_ref, ^expected_path}}] -> dets_ref
+      [{_, {_dets_ref, _stale_path}}] -> nil
       [] -> nil
     end
   rescue
@@ -155,20 +158,21 @@ defmodule AgentEx.DetsManager do
   def handle_call({:open, root_path, store_name}, _from, state) do
     key = {root_path, store_name}
 
+    dets_path = path_for(root_path, store_name)
+
     case :ets.lookup(state.ets, key) do
-      [{_, dets_ref}] ->
+      [{_, {dets_ref, ^dets_path}}] ->
         {:reply, {:ok, dets_ref}, state}
 
-      [] ->
-        dets_path = path_for(root_path, store_name)
-        dets_ref = :"dets_#{store_name}_#{:erlang.phash2(dets_path)}"
+      _ ->
+        dets_ref = make_dets_ref(store_name, dets_path)
 
         # Ensure parent directory exists before opening DETS file
         dets_path |> List.to_string() |> Path.dirname() |> File.mkdir_p()
 
         case :dets.open_file(dets_ref, file: dets_path, type: :set) do
           {:ok, ^dets_ref} ->
-            :ets.insert(state.ets, {key, dets_ref})
+            :ets.insert(state.ets, {key, {dets_ref, dets_path}})
             {:reply, {:ok, dets_ref}, state}
 
           {:error, reason} ->
@@ -186,7 +190,7 @@ defmodule AgentEx.DetsManager do
     key = {root_path, store_name}
 
     case :ets.lookup(state.ets, key) do
-      [{_, dets_ref}] ->
+      [{_, {dets_ref, _path}}] ->
         :dets.sync(dets_ref)
         :dets.close(dets_ref)
         :ets.delete(state.ets, key)
@@ -203,7 +207,7 @@ defmodule AgentEx.DetsManager do
       key = {root_path, store_name}
 
       case :ets.lookup(state.ets, key) do
-        [{_, dets_ref}] ->
+        [{_, {dets_ref, _path}}] ->
           :dets.sync(dets_ref)
           :dets.close(dets_ref)
           :ets.delete(state.ets, key)
@@ -219,7 +223,7 @@ defmodule AgentEx.DetsManager do
   @impl GenServer
   def terminate(_reason, state) do
     :ets.foldl(
-      fn {_key, dets_ref}, :ok ->
+      fn {_key, {dets_ref, _path}}, :ok ->
         :dets.sync(dets_ref)
         :dets.close(dets_ref)
         :ok
@@ -229,5 +233,10 @@ defmodule AgentEx.DetsManager do
     )
 
     :ok
+  end
+
+  defp make_dets_ref(store_name, dets_path) do
+    hash = :crypto.hash(:md5, :erlang.term_to_binary(dets_path)) |> Base.encode16(case: :lower)
+    :"dets_#{store_name}_#{hash}"
   end
 end

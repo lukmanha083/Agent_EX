@@ -211,15 +211,21 @@ defmodule AgentEx.Memory do
     # Stop any active Tier 1 sessions for this project
     stop_project_sessions(user_id, project_id)
 
-    # Tier 2 (PersistentMemory) and Tier 4 (ProceduralMemory) are handled by
-    # directory-based cleanup in Projects.delete_project (rm -rf .agent_ex/)
-    # Only clean up HelixDB-backed stores (Tier 3 + KnowledgeGraph) here
+    # Clean up all memory tiers. Tier 2/4 ETS+DETS cleanup is also handled by
+    # directory-based deletion in Projects.delete_project, but we include them
+    # here so this function remains complete when called independently.
     tasks = [
+      Task.Supervisor.async_nolink(AgentEx.TaskSupervisor, fn ->
+        {:persistent, PersistentMemory.Store.delete_by_project(user_id, project_id)}
+      end),
       Task.Supervisor.async_nolink(AgentEx.TaskSupervisor, fn ->
         {:semantic, SemanticMemory.Store.delete_by_project(user_id, project_id)}
       end),
       Task.Supervisor.async_nolink(AgentEx.TaskSupervisor, fn ->
         {:knowledge_graph, KnowledgeGraph.Store.delete_by_project(user_id, project_id)}
+      end),
+      Task.Supervisor.async_nolink(AgentEx.TaskSupervisor, fn ->
+        {:procedural, ProceduralMemory.Store.delete_by_project(user_id, project_id)}
       end)
     ]
 

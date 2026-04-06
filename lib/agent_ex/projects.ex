@@ -9,10 +9,26 @@ defmodule AgentEx.Projects do
   require Logger
 
   def create_project(attrs) do
-    with {:ok, project} <- %Project{} |> Project.creation_changeset(attrs) |> Repo.insert() do
-      ensure_root_path_dir(project)
-      scaffold_project_dirs(project)
-      {:ok, project}
+    Repo.transaction(fn ->
+      project = insert_project!(attrs)
+      scaffold_or_rollback(project)
+      project
+    end)
+  end
+
+  defp insert_project!(attrs) do
+    case %Project{} |> Project.creation_changeset(attrs) |> Repo.insert() do
+      {:ok, project} -> project
+      {:error, changeset} -> Repo.rollback(changeset)
+    end
+  end
+
+  defp scaffold_or_rollback(project) do
+    with :ok <- ensure_root_path_dir(project),
+         :ok <- scaffold_project_dirs(project) do
+      :ok
+    else
+      {:error, reason} -> Repo.rollback({:scaffold_failed, reason})
     end
   end
 

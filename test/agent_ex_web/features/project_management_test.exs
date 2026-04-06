@@ -36,7 +36,7 @@ defmodule AgentExWeb.Features.ProjectManagementTest do
         Projects.create_project(%{
           user_id: user.id,
           name: "Project A",
-          root_path: "/tmp/agent_ex_test/project_a",
+          root_path: "/tmp/agent_ex_test/project_a_#{System.unique_integer([:positive])}",
           provider: "anthropic",
           model: "claude-sonnet-4-6"
         })
@@ -45,7 +45,7 @@ defmodule AgentExWeb.Features.ProjectManagementTest do
         Projects.create_project(%{
           user_id: user.id,
           name: "Project B",
-          root_path: "/tmp/agent_ex_test/project_b",
+          root_path: "/tmp/agent_ex_test/project_b_#{System.unique_integer([:positive])}",
           provider: "anthropic",
           model: "claude-sonnet-4-6"
         })
@@ -95,7 +95,7 @@ defmodule AgentExWeb.Features.ProjectManagementTest do
         Projects.create_project(%{
           user_id: user.id,
           name: "Temp Project",
-          root_path: "/tmp/agent_ex_test/temp_project",
+          root_path: "/tmp/agent_ex_test/temp_project_#{System.unique_integer([:positive])}",
           provider: "anthropic",
           model: "claude-sonnet-4-6"
         })

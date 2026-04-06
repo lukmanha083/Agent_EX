@@ -12,7 +12,7 @@ defmodule AgentExWeb.Features.SidebarTest do
       AgentEx.Projects.create_project(%{
         user_id: user.id,
         name: "Test Project",
-        root_path: "/tmp/agent_ex_test/sidebar",
+        root_path: "/tmp/agent_ex_test/sidebar_#{System.unique_integer([:positive])}",
         provider: "anthropic",
         model: "claude-sonnet-4-6"
       })

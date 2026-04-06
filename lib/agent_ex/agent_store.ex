@@ -189,28 +189,28 @@ defmodule AgentEx.AgentStore do
   end
 
   defp sync_all_projects(ets_table) do
-    DetsManager.registered_projects()
-    |> Enum.each(fn {{_user_id, _project_id}, root_path} ->
-      sync_project(ets_table, root_path)
+    all_projects = DetsManager.registered_projects()
+    root_to_keys = build_root_to_keys(all_projects)
+
+    all_projects
+    |> Enum.map(fn {_, root_path} -> root_path end)
+    |> Enum.uniq()
+    |> Enum.each(fn root_path ->
+      sync_project(ets_table, root_path, root_to_keys[root_path] || MapSet.new())
     end)
   end
 
-  defp sync_project(ets_table, root_path) do
+  defp sync_project(ets_table, root_path, project_keys) do
     case DetsManager.lookup(root_path, @store_name) do
       nil -> :ok
-      dets_ref -> sync_ets_to_dets(ets_table, dets_ref, root_path)
+      dets_ref -> sync_ets_to_dets(ets_table, dets_ref, project_keys)
     end
   end
 
-  defp sync_ets_to_dets(ets_table, dets_ref, root_path) do
-    project_keys = projects_for_root_path(root_path)
-
+  defp sync_ets_to_dets(ets_table, dets_ref, project_keys) do
     :ets.foldl(
       fn {{u, p, _} = key, value}, :ok ->
-        if MapSet.member?(project_keys, {u, p}) do
-          :dets.insert(dets_ref, {key, value})
-        end
-
+        if MapSet.member?(project_keys, {u, p}), do: :dets.insert(dets_ref, {key, value})
         :ok
       end,
       :ok,
@@ -220,11 +220,9 @@ defmodule AgentEx.AgentStore do
     :dets.sync(dets_ref)
   end
 
-  defp projects_for_root_path(root_path) do
-    DetsManager.registered_projects()
-    |> Enum.filter(fn {_, rp} -> rp == root_path end)
-    |> Enum.map(fn {key, _} -> key end)
-    |> MapSet.new()
+  defp build_root_to_keys(projects) do
+    Enum.group_by(projects, fn {_, rp} -> rp end, fn {key, _} -> key end)
+    |> Map.new(fn {rp, keys} -> {rp, MapSet.new(keys)} end)
   end
 
   defp schedule_sync(interval) do

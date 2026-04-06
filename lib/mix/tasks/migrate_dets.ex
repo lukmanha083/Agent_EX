@@ -64,12 +64,20 @@ defmodule Mix.Tasks.AgentEx.MigrateDets do
   end
 
   defp migrate_all(global_files, projects, dry_run?) do
-    Enum.each(global_files, fn {store_name, global_path} ->
-      migrate_store(store_name, global_path, projects, dry_run?)
-    end)
+    results =
+      Enum.map(global_files, fn {store_name, global_path} ->
+        {store_name, migrate_store(store_name, global_path, projects, dry_run?)}
+      end)
 
-    rename_global_files(global_files, dry_run?)
-    Mix.shell().info(if dry_run?, do: "Dry run complete.", else: "Migration complete!")
+    all_ok? = Enum.all?(results, fn {_, result} -> result == :ok end)
+
+    if all_ok? do
+      rename_global_files(global_files, dry_run?)
+      Mix.shell().info(if dry_run?, do: "Dry run complete.", else: "Migration complete!")
+    else
+      failed = results |> Enum.reject(fn {_, r} -> r == :ok end) |> Enum.map(&elem(&1, 0))
+      Mix.shell().error("Migration failed for: #{Enum.join(failed, ", ")}. Files NOT renamed.")
+    end
   end
 
   defp rename_global_files(_files, true), do: :ok
@@ -94,9 +102,11 @@ defmodule Mix.Tasks.AgentEx.MigrateDets do
     case :dets.open_file(dets_ref, file: charlist_path, type: :set) do
       {:ok, ^dets_ref} ->
         migrate_and_close(dets_ref, projects, store_name, dry_run?)
+        :ok
 
       {:error, reason} ->
         Mix.shell().error("Failed to open #{global_path}: #{inspect(reason)}")
+        :error
     end
   end
 

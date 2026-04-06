@@ -25,7 +25,7 @@
                   class="block w-full rounded-lg bg-gray-800 border border-gray-700 text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm px-3 py-2"
                 >
                   <%= for project <- @projects do %>
-                    <% available = AgentEx.Projects.project_available?(project) %>
+                    <% available = @project_availability[project.id] %>
                     <option value={project.id} selected={assigns[:current_project] && project.id == @current_project.id} disabled={!available}>
                       <%= project.name %><%= unless available, do: " (unavailable)" %>
                     </option>
@@ -153,7 +153,7 @@
             class="block w-full rounded-lg bg-gray-800 border border-gray-700 text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm px-3 py-2"
           >
             <%= for project <- @projects do %>
-              <% available = AgentEx.Projects.project_available?(project) %>
+              <% available = @project_availability[project.id] %>
               <option value={project.id} selected={assigns[:current_project] && project.id == @current_project.id} disabled={!available}>
                 <%= project.name %><%= unless available, do: " (unavailable)" %>
               </option>

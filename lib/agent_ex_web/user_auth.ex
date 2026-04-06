@@ -303,6 +303,7 @@ defmodule AgentExWeb.UserAuth do
     |> Phoenix.Component.assign_new(:projects, fn ->
       AgentEx.Projects.list_projects(user.id)
     end)
+    |> assign_project_availability()
   end
 
   defp hydrate_or_nil(nil), do: nil
@@ -316,14 +317,30 @@ defmodule AgentExWeb.UserAuth do
 
     case project do
       %AgentEx.Projects.Project{} = p ->
-        if AgentEx.Projects.project_available?(p), do: p, else: nil
+        if AgentEx.Projects.project_available?(p) do
+          p
+        else
+          # Selected project unavailable on this machine — try first available
+          first_available_project(user_id)
+        end
 
       _ ->
-        # Pick first available project
-        user_id
-        |> AgentEx.Projects.list_projects()
-        |> Enum.find(&AgentEx.Projects.project_available?/1)
+        first_available_project(user_id)
     end
+  end
+
+  defp assign_project_availability(socket) do
+    Phoenix.Component.assign_new(socket, :project_availability, fn ->
+      Map.new(socket.assigns.projects, fn p ->
+        {p.id, AgentEx.Projects.project_available?(p)}
+      end)
+    end)
+  end
+
+  defp first_available_project(user_id) do
+    user_id
+    |> AgentEx.Projects.list_projects()
+    |> Enum.find(&AgentEx.Projects.project_available?/1)
   end
 
   @doc "Returns the path to redirect to after log in."
