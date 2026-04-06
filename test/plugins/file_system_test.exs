@@ -169,5 +169,19 @@ defmodule AgentEx.Plugins.FileSystemTest do
       assert msg =~ "absolute paths not allowed"
       assert msg =~ "/tmp/escape.txt"
     end
+
+    test "blocks symlink that escapes sandbox on read_file", %{tmp_dir: tmp_dir} do
+      outside = Path.join(System.tmp_dir!(), "agent_ex_outside_#{System.unique_integer([:positive])}")
+      File.write!(outside, "secret")
+      on_exit(fn -> File.rm(outside) end)
+
+      File.ln_s!(outside, Path.join(tmp_dir, "escape_link"))
+
+      {:ok, tools} = FileSystem.init(%{"root_path" => tmp_dir})
+      read_tool = Enum.find(tools, &(&1.name == "read_file"))
+
+      assert {:error, msg} = Tool.execute(read_tool, %{"path" => "escape_link"})
+      assert msg =~ "symlink"
+    end
   end
 end
