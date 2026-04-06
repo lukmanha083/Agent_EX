@@ -77,8 +77,11 @@ defmodule Mix.Tasks.AgentEx.MigrateDets do
   defp rename_global_files(files, false) do
     Enum.each(files, fn {_name, path} ->
       bak_path = path <> ".bak"
-      File.rename(path, bak_path)
-      Mix.shell().info("Renamed #{path} -> #{bak_path}")
+
+      case File.rename(path, bak_path) do
+        :ok -> Mix.shell().info("Renamed #{path} -> #{bak_path}")
+        {:error, reason} -> Mix.shell().error("Failed to rename #{path}: #{inspect(reason)}")
+      end
     end)
   end
 
@@ -87,10 +90,24 @@ defmodule Mix.Tasks.AgentEx.MigrateDets do
 
     dets_ref = :"global_#{store_name}_migration"
     charlist_path = String.to_charlist(global_path)
-    {:ok, ^dets_ref} = :dets.open_file(dets_ref, file: charlist_path, type: :set)
 
+    case :dets.open_file(dets_ref, file: charlist_path, type: :set) do
+      {:ok, ^dets_ref} ->
+        migrate_and_close(dets_ref, projects, store_name, dry_run?)
+
+      {:error, reason} ->
+        Mix.shell().error("Failed to open #{global_path}: #{inspect(reason)}")
+    end
+  end
+
+  defp migrate_and_close(dets_ref, projects, store_name, dry_run?) do
+    do_migrate_store(dets_ref, projects, store_name, dry_run?)
+  after
+    :dets.close(dets_ref)
+  end
+
+  defp do_migrate_store(dets_ref, projects, store_name, dry_run?) do
     project_map = Map.new(projects, fn p -> {{p.user_id, p.id}, p.root_path} end)
-
     entries_by_project = scan_global_dets(dets_ref, project_map)
 
     total = Enum.reduce(entries_by_project, 0, fn {_, entries}, acc -> acc + length(entries) end)
@@ -99,24 +116,24 @@ defmodule Mix.Tasks.AgentEx.MigrateDets do
     unless dry_run? do
       write_project_entries(entries_by_project, project_map, store_name)
     end
-
-    :dets.close(dets_ref)
   end
 
   defp scan_global_dets(dets_ref, project_map) do
     :dets.foldl(
-      fn {key, value}, acc ->
-        project_key = extract_project_key(key)
-
-        if Map.has_key?(project_map, project_key) do
-          Map.update(acc, project_key, [{key, value}], &[{key, value} | &1])
-        else
-          acc
-        end
-      end,
+      fn {key, value}, acc -> maybe_collect(acc, key, value, project_map) end,
       %{},
       dets_ref
     )
+  end
+
+  defp maybe_collect(acc, key, value, project_map) do
+    project_key = extract_project_key(key)
+
+    if project_key != :unknown and Map.has_key?(project_map, project_key) do
+      Map.update(acc, project_key, [{key, value}], &[{key, value} | &1])
+    else
+      acc
+    end
   end
 
   defp write_project_entries(entries_by_project, project_map, store_name) do
@@ -133,19 +150,28 @@ defmodule Mix.Tasks.AgentEx.MigrateDets do
     project_dets_path = Path.join(agent_ex_dir, "#{store_name}.dets") |> String.to_charlist()
     project_dets_ref = :"migrate_#{store_name}_#{:erlang.phash2(project_dets_path)}"
 
-    {:ok, ^project_dets_ref} =
-      :dets.open_file(project_dets_ref, file: project_dets_path, type: :set)
+    case :dets.open_file(project_dets_ref, file: project_dets_path, type: :set) do
+      {:ok, ^project_dets_ref} ->
+        insert_and_close(project_dets_ref, entries, root_path)
 
-    Enum.each(entries, fn {key, value} ->
-      :dets.insert(project_dets_ref, {key, value})
-    end)
+      {:error, reason} ->
+        Mix.shell().error("  Failed to open DETS for #{root_path}: #{inspect(reason)}")
+    end
+  end
 
-    :dets.sync(project_dets_ref)
-    :dets.close(project_dets_ref)
-
+  defp insert_and_close(dets_ref, entries, root_path) do
+    Enum.each(entries, fn {key, value} -> :dets.insert(dets_ref, {key, value}) end)
+    :dets.sync(dets_ref)
     Mix.shell().info("  #{root_path}: #{length(entries)} entries")
+  after
+    :dets.close(dets_ref)
   end
 
   defp extract_project_key({user_id, project_id, _}), do: {user_id, project_id}
   defp extract_project_key({user_id, project_id, _, _}), do: {user_id, project_id}
+
+  defp extract_project_key(other) do
+    Logger.warning("Unexpected DETS key format: #{inspect(other)}")
+    :unknown
+  end
 end

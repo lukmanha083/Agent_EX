@@ -49,7 +49,7 @@ defmodule AgentEx.Application do
       AgentExWeb.Endpoint
     ]
 
-    opts = [strategy: :one_for_one, name: AgentEx.Supervisor]
+    opts = [strategy: :rest_for_one, name: AgentEx.Supervisor]
     Supervisor.start_link(children, opts)
   end
 end

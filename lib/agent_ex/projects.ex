@@ -38,21 +38,21 @@ defmodule AgentEx.Projects do
 
   def delete_project(%Project{} = project) do
     with {:ok, deleted} <- Repo.delete(project) do
-      # Close all DETS handles for this project
-      if project.root_path && project.root_path != "" do
-        AgentEx.DetsManager.close_all(project.root_path)
-      end
+      # 1. Unregister first — prevents concurrent writes from re-opening DETS
+      AgentEx.DetsManager.unregister_project(project.user_id, project.id)
 
-      # Evict project data from ETS
+      # 2. Evict project data from ETS
       AgentEx.AgentStore.evict_project(project.user_id, project.id)
       AgentEx.HttpToolStore.evict_project(project.user_id, project.id)
       AgentEx.Memory.PersistentMemory.Store.evict_project(project.user_id, project.id)
       AgentEx.Memory.ProceduralMemory.Store.evict_project(project.user_id, project.id)
 
-      # Unregister project path mapping
-      AgentEx.DetsManager.unregister_project(project.user_id, project.id)
+      # 3. Close all DETS handles
+      if project.root_path && project.root_path != "" do
+        AgentEx.DetsManager.close_all(project.root_path)
+      end
 
-      # Delete the .agent_ex directory — all DETS data gone instantly
+      # 4. Delete the .agent_ex directory — all DETS data gone instantly
       if project.root_path && project.root_path != "" do
         agent_ex_dir = Path.join(Path.expand(project.root_path), ".agent_ex")
         File.rm_rf(agent_ex_dir)
@@ -96,16 +96,20 @@ defmodule AgentEx.Projects do
     agent_ex_dir = Path.join(expanded, ".agent_ex")
     memory_dir = Path.join(expanded, ".memory")
 
-    File.mkdir_p!(agent_ex_dir)
-    File.mkdir_p!(memory_dir)
+    with :ok <- File.mkdir_p(agent_ex_dir),
+         :ok <- File.mkdir_p(memory_dir) do
+      gitignore_path = Path.join(agent_ex_dir, ".gitignore")
 
-    gitignore_path = Path.join(agent_ex_dir, ".gitignore")
+      unless File.exists?(gitignore_path) do
+        File.write(gitignore_path, "# AgentEx project data — do not commit\n*.dets\n")
+      end
 
-    unless File.exists?(gitignore_path) do
-      File.write!(gitignore_path, "# AgentEx project data — do not commit\n*.dets\n")
+      :ok
+    else
+      {:error, reason} ->
+        Logger.warning("Failed to scaffold project dirs for #{expanded}: #{inspect(reason)}")
+        {:error, reason}
     end
-
-    :ok
   end
 
   defp scaffold_project_dirs(_), do: :ok
@@ -142,12 +146,19 @@ defmodule AgentEx.Projects do
 
       true ->
         AgentEx.DetsManager.register_project(project.user_id, project.id, root_path)
-        scaffold_project_dirs(project)
-        AgentEx.AgentStore.hydrate_project(root_path)
-        AgentEx.HttpToolStore.hydrate_project(root_path)
-        AgentEx.Memory.PersistentMemory.Store.hydrate_project(root_path)
-        AgentEx.Memory.ProceduralMemory.Store.hydrate_project(root_path)
-        :ok
+
+        with :ok <- scaffold_project_dirs(project),
+             {:ok, _} <- AgentEx.AgentStore.hydrate_project(root_path),
+             {:ok, _} <- AgentEx.HttpToolStore.hydrate_project(root_path),
+             {:ok, _} <- AgentEx.Memory.PersistentMemory.Store.hydrate_project(root_path),
+             {:ok, _} <- AgentEx.Memory.ProceduralMemory.Store.hydrate_project(root_path) do
+          :ok
+        else
+          {:error, reason} ->
+            Logger.warning("Failed to hydrate project #{project.id}: #{inspect(reason)}")
+            AgentEx.DetsManager.unregister_project(project.user_id, project.id)
+            :unavailable
+        end
     end
   end
 

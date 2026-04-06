@@ -163,6 +163,9 @@ defmodule AgentEx.DetsManager do
         dets_path = path_for(root_path, store_name)
         dets_ref = :"dets_#{store_name}_#{:erlang.phash2(dets_path)}"
 
+        # Ensure parent directory exists before opening DETS file
+        dets_path |> List.to_string() |> Path.dirname() |> File.mkdir_p()
+
         case :dets.open_file(dets_ref, file: dets_path, type: :set) do
           {:ok, ^dets_ref} ->
             :ets.insert(state.ets, {key, dets_ref})
