@@ -116,6 +116,50 @@ defmodule AgentEx.Plugins.DiffTest do
 
       assert msg =~ "path traversal"
     end
+
+    test "blocks absolute path on file_a", %{tmp_dir: tmp_dir} do
+      {:ok, tools} = Diff.init(%{"root_path" => tmp_dir})
+      compare = Enum.find(tools, &(&1.name == "compare_files"))
+
+      assert {:error, msg} =
+               Tool.execute(compare, %{
+                 "file_a" => "/etc/passwd",
+                 "file_b" => "original.txt"
+               })
+
+      assert msg =~ "absolute paths not allowed"
+      assert msg =~ "/etc/passwd"
+    end
+
+    test "blocks absolute path on file_b", %{tmp_dir: tmp_dir} do
+      {:ok, tools} = Diff.init(%{"root_path" => tmp_dir})
+      compare = Enum.find(tools, &(&1.name == "compare_files"))
+
+      assert {:error, msg} =
+               Tool.execute(compare, %{
+                 "file_a" => "original.txt",
+                 "file_b" => "/etc/passwd"
+               })
+
+      assert msg =~ "absolute paths not allowed"
+      assert msg =~ "/etc/passwd"
+    end
+
+    test "blocks symlinks that escape sandbox", %{tmp_dir: tmp_dir} do
+      symlink_path = Path.join(tmp_dir, "escape_link")
+      File.ln_s!("/etc/hostname", symlink_path)
+
+      {:ok, tools} = Diff.init(%{"root_path" => tmp_dir})
+      compare = Enum.find(tools, &(&1.name == "compare_files"))
+
+      assert {:error, msg} =
+               Tool.execute(compare, %{
+                 "file_a" => "escape_link",
+                 "file_b" => "original.txt"
+               })
+
+      assert msg =~ "symlinks not allowed"
+    end
   end
 
   describe "compare_text tool" do

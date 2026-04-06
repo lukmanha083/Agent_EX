@@ -56,7 +56,11 @@ defmodule AgentEx.Projects.Project do
       path when is_binary(path) ->
         cond do
           String.contains?(path, "~") ->
-            add_error(changeset, :root_path, "must be an absolute path (no ~ allowed), e.g. /home/user/project")
+            add_error(
+              changeset,
+              :root_path,
+              "must be an absolute path (no ~ allowed), e.g. /home/user/project"
+            )
 
           not String.starts_with?(path, "/") ->
             add_error(changeset, :root_path, "must be an absolute path starting with /")

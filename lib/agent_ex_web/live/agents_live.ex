@@ -65,6 +65,7 @@ defmodule AgentExWeb.AgentsLive do
      assign(socket,
        editing: nil,
        show_editor: true,
+       show_import: false,
        form: empty_form(),
        intervention_pipeline: [],
        sandbox: %{},
@@ -85,6 +86,7 @@ defmodule AgentExWeb.AgentsLive do
          assign(socket,
            editing: agent,
            show_editor: true,
+           show_import: false,
            form: agent_to_form(agent),
            intervention_pipeline: agent.intervention_pipeline || [],
            sandbox: agent.sandbox || %{},
@@ -138,7 +140,8 @@ defmodule AgentExWeb.AgentsLive do
              |> put_flash(:info, "Agent imported: #{config.name}")}
 
           {:error, reason} ->
-            {:noreply, put_flash(socket, :error, "Failed to save imported agent: #{inspect(reason)}")}
+            {:noreply,
+             put_flash(socket, :error, "Failed to save imported agent: #{inspect(reason)}")}
         end
 
       {:ok, _} ->

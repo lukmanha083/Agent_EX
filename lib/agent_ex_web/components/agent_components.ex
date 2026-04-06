@@ -345,11 +345,11 @@ defmodule AgentExWeb.AgentComponents do
 
   def import_agent_dialog(assigns) do
     ~H"""
-    <div :if={@show} class="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true" phx-window-keydown="close_import" phx-key="Escape">
+    <div :if={@show} class="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true" aria-labelledby="import-dialog-title" phx-window-keydown="close_import" phx-key="Escape">
       <div class="fixed inset-0 bg-black/60" phx-click="close_import"></div>
       <div class="relative z-10 w-full max-w-lg mx-4 max-h-[90vh] rounded-lg border border-gray-800 bg-gray-900 shadow-xl flex flex-col">
         <div class="p-6 pb-0 shrink-0">
-          <h2 class="text-lg font-semibold text-white">Import Agent from JSON</h2>
+          <h2 id="import-dialog-title" class="text-lg font-semibold text-white">Import Agent from JSON</h2>
           <p class="text-sm text-gray-400 mt-1">
             Paste the JSON output from <code class="text-emerald-400">kidkazz distill generate</code>
           </p>
@@ -361,6 +361,7 @@ defmodule AgentExWeb.AgentComponents do
               rows="16"
               maxlength="65536"
               placeholder='{"name": "...", "role": "...", ...}'
+              aria-label="Agent JSON configuration"
               class="w-full rounded-md border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white placeholder-gray-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 font-mono"
               required
             ></textarea>

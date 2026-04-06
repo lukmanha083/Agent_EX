@@ -307,5 +307,55 @@ defmodule AgentEx.Plugins.TextEditorTest do
 
       assert msg =~ "path traversal"
     end
+
+    test "blocks absolute path on read", %{tmp_dir: tmp_dir} do
+      {:ok, tools} = TextEditor.init(%{"root_path" => tmp_dir})
+      read = Enum.find(tools, &(&1.name == "read"))
+
+      assert {:error, msg} = Tool.execute(read, %{"path" => "/etc/passwd"})
+      assert msg =~ "absolute paths not allowed"
+      assert msg =~ "/etc/passwd"
+    end
+
+    test "blocks absolute path on edit", %{tmp_dir: tmp_dir} do
+      {:ok, tools} = TextEditor.init(%{"root_path" => tmp_dir})
+      edit = Enum.find(tools, &(&1.name == "edit"))
+
+      assert {:error, msg} =
+               Tool.execute(edit, %{
+                 "path" => "/etc/shadow",
+                 "old_string" => "x",
+                 "new_string" => "y"
+               })
+
+      assert msg =~ "absolute paths not allowed"
+      assert msg =~ "/etc/shadow"
+    end
+
+    test "blocks absolute path on insert", %{tmp_dir: tmp_dir} do
+      {:ok, tools} = TextEditor.init(%{"root_path" => tmp_dir})
+      insert = Enum.find(tools, &(&1.name == "insert"))
+
+      assert {:error, msg} =
+               Tool.execute(insert, %{
+                 "path" => "/tmp/bad.txt",
+                 "line" => 1,
+                 "text" => "bad"
+               })
+
+      assert msg =~ "absolute paths not allowed"
+      assert msg =~ "/tmp/bad.txt"
+    end
+
+    test "blocks absolute path on append", %{tmp_dir: tmp_dir} do
+      {:ok, tools} = TextEditor.init(%{"root_path" => tmp_dir})
+      append = Enum.find(tools, &(&1.name == "append"))
+
+      assert {:error, msg} =
+               Tool.execute(append, %{"path" => "/tmp/bad.txt", "text" => "bad"})
+
+      assert msg =~ "absolute paths not allowed"
+      assert msg =~ "/tmp/bad.txt"
+    end
   end
 end

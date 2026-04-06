@@ -256,11 +256,35 @@ defmodule AgentEx.Plugins.Diff do
       expanded = Path.expand(joined)
       root_prefix = String.trim_trailing(root, "/") <> "/"
 
-      if expanded == root or String.starts_with?(expanded, root_prefix) do
-        {:ok, expanded}
-      else
-        {:error, "path traversal attempt: #{relative}"}
+      cond do
+        not (expanded == root or String.starts_with?(expanded, root_prefix)) ->
+          {:error, "path traversal attempt: #{relative}"}
+
+        contains_symlink?(expanded, root) ->
+          {:error, "symlinks not allowed in path: #{relative}"}
+
+        true ->
+          {:ok, expanded}
       end
+    end
+  end
+
+  defp contains_symlink?(path, root) do
+    relative = Path.relative_to(path, root)
+    parts = Path.split(relative)
+
+    parts
+    |> Enum.reduce_while(root, fn part, acc ->
+      current = Path.join(acc, part)
+
+      case File.lstat(current) do
+        {:ok, %File.Stat{type: :symlink}} -> {:halt, :symlink_found}
+        _ -> {:cont, current}
+      end
+    end)
+    |> case do
+      :symlink_found -> true
+      _ -> false
     end
   end
 

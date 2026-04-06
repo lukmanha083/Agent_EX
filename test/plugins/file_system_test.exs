@@ -140,5 +140,34 @@ defmodule AgentEx.Plugins.FileSystemTest do
 
       assert msg =~ "path traversal"
     end
+
+    test "blocks absolute path on read_file", %{tmp_dir: tmp_dir} do
+      {:ok, tools} = FileSystem.init(%{"root_path" => tmp_dir})
+      read_tool = Enum.find(tools, &(&1.name == "read_file"))
+
+      assert {:error, msg} = Tool.execute(read_tool, %{"path" => "/etc/passwd"})
+      assert msg =~ "absolute paths not allowed"
+      assert msg =~ "/etc/passwd"
+    end
+
+    test "blocks absolute path on list_dir", %{tmp_dir: tmp_dir} do
+      {:ok, tools} = FileSystem.init(%{"root_path" => tmp_dir})
+      list_tool = Enum.find(tools, &(&1.name == "list_dir"))
+
+      assert {:error, msg} = Tool.execute(list_tool, %{"path" => "/etc"})
+      assert msg =~ "absolute paths not allowed"
+      assert msg =~ "/etc"
+    end
+
+    test "blocks absolute path on write_file", %{tmp_dir: tmp_dir} do
+      {:ok, tools} = FileSystem.init(%{"root_path" => tmp_dir, "allow_write" => true})
+      write_tool = Enum.find(tools, &(&1.name == "write_file"))
+
+      assert {:error, msg} =
+               Tool.execute(write_tool, %{"path" => "/tmp/escape.txt", "content" => "bad"})
+
+      assert msg =~ "absolute paths not allowed"
+      assert msg =~ "/tmp/escape.txt"
+    end
   end
 end
