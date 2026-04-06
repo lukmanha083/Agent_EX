@@ -91,7 +91,10 @@ defmodule AgentEx.HttpToolStore do
           {:reply, {:error, reason}, state}
       end
     else
-      Logger.warning("HttpToolStore: no root_path for project #{config.project_id}, ETS-only save")
+      Logger.warning(
+        "HttpToolStore: no root_path for project #{config.project_id}, ETS-only save"
+      )
+
       :ets.insert(state.ets_table, {key, config})
       {:reply, {:ok, config}, state}
     end
@@ -103,7 +106,7 @@ defmodule AgentEx.HttpToolStore do
     root_path = DetsManager.root_path_for(user_id, project_id)
 
     if root_path do
-      case DetsManager.open(root_path, @store_name) do
+      case resolve_dets(root_path) do
         {:ok, dets_ref} -> :dets.delete(dets_ref, key)
         _ -> :ok
       end
@@ -167,12 +170,16 @@ defmodule AgentEx.HttpToolStore do
   # --- Private helpers ---
 
   defp ensure_dets_and_insert(root_path, key, value) do
-    case DetsManager.open(root_path, @store_name) do
-      {:ok, dets_ref} ->
-        :dets.insert(dets_ref, {key, value})
+    case resolve_dets(root_path) do
+      {:ok, dets_ref} -> :dets.insert(dets_ref, {key, value})
+      {:error, reason} -> {:error, reason}
+    end
+  end
 
-      {:error, reason} ->
-        {:error, reason}
+  defp resolve_dets(root_path) do
+    case DetsManager.lookup(root_path, @store_name) do
+      nil -> DetsManager.open(root_path, @store_name)
+      dets_ref -> {:ok, dets_ref}
     end
   end
 
@@ -191,9 +198,11 @@ defmodule AgentEx.HttpToolStore do
   end
 
   defp sync_ets_to_dets(ets_table, dets_ref, root_path) do
+    project_keys = projects_for_root_path(root_path)
+
     :ets.foldl(
       fn {{u, p, _} = key, value}, :ok ->
-        if DetsManager.root_path_for(u, p) == root_path do
+        if MapSet.member?(project_keys, {u, p}) do
           :dets.insert(dets_ref, {key, value})
         end
 
@@ -204,6 +213,13 @@ defmodule AgentEx.HttpToolStore do
     )
 
     :dets.sync(dets_ref)
+  end
+
+  defp projects_for_root_path(root_path) do
+    DetsManager.registered_projects()
+    |> Enum.filter(fn {_, rp} -> rp == root_path end)
+    |> Enum.map(fn {key, _} -> key end)
+    |> MapSet.new()
   end
 
   defp schedule_sync(interval) do
