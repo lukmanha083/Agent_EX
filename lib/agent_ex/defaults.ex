@@ -43,7 +43,12 @@ defmodule AgentEx.Defaults do
     Enum.each(Agents.templates(), fn template ->
       config =
         template
-        |> Map.merge(%{user_id: user_id, project_id: project_id, provider: provider, model: model})
+        |> Map.merge(%{
+          user_id: user_id,
+          project_id: project_id,
+          provider: provider,
+          model: model
+        })
         |> AgentConfig.new()
 
       case AgentStore.save(config) do
@@ -51,9 +56,7 @@ defmodule AgentEx.Defaults do
           Logger.info("Defaults: seeded agent '#{config.name}' for project #{project_id}")
 
         {:error, reason} ->
-          Logger.warning(
-            "Defaults: failed to seed agent '#{template.name}': #{inspect(reason)}"
-          )
+          Logger.warning("Defaults: failed to seed agent '#{template.name}': #{inspect(reason)}")
       end
     end)
   end
@@ -70,9 +73,7 @@ defmodule AgentEx.Defaults do
           Logger.info("Defaults: seeded tool '#{tool.name}' for project #{project_id}")
 
         {:error, reason} ->
-          Logger.warning(
-            "Defaults: failed to seed tool '#{template.name}': #{inspect(reason)}"
-          )
+          Logger.warning("Defaults: failed to seed tool '#{template.name}': #{inspect(reason)}")
       end
     end)
   end
