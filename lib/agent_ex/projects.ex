@@ -85,6 +85,8 @@ defmodule AgentEx.Projects do
     cleanup_fn = fn ->
       try do
         AgentEx.Memory.delete_project_data(project.user_id, project.id)
+        # Clean up shared KG entities that lost all mentions/facts after episode CASCADE
+        AgentEx.Memory.KnowledgeGraph.Store.cleanup_orphaned_entities()
       rescue
         e ->
           Logger.error(

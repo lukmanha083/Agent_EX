@@ -4199,6 +4199,27 @@ Trigger (any source)
 
 ## Phase 7 — Run View + Memory Inspector
 
+### Background Jobs: Oban
+
+Phase 7 introduces Oban (`{:oban, "~> 2.18"}`) as the background job framework.
+Two jobs need durable, retryable execution:
+
+1. **KG Orphan Cleanup** — after project deletion, sweep `kg_entities` that have
+   no remaining `kg_mentions` or `kg_facts`. Currently runs inline in
+   `schedule_memory_cleanup` (Phase 5e), migrated to an Oban worker for
+   retry + observability.
+2. **SessionGC** — periodic sweep for orphaned working memory GenServers.
+   Promotes idle sessions (24h) to Tier 3, then terminates them. Currently
+   planned as a bare GenServer with `Process.send_after` (Layer 5 in session
+   lifecycle), migrated to Oban cron plugin.
+
+Oban setup:
+- `mix.exs`: add `{:oban, "~> 2.18"}`
+- Migration: `Oban.Migration`
+- `config/config.exs`: `config :agent_ex, Oban, ...` with queues + cron plugin
+- `application.ex`: add `{Oban, ...}` to supervision tree
+- Workers: `AgentEx.Workers.OrphanCleanup`, `AgentEx.Workers.SessionGC`
+
 ### Problem
 
 The current chat view is a generic LLM chat that doesn't show AgentEx's internal
