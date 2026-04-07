@@ -24,17 +24,21 @@ defmodule AgentEx.Memory.KnowledgeGraph.Retriever do
         Task.async(fn -> search_facts(vector, limit) end)
       ]
 
-      results = Task.await_many(tasks, 15_000)
-
       [episodes, entities, facts] =
-        Enum.map(results, fn
-          {:ok, data} -> data
-          _ -> []
-        end)
+        tasks
+        |> Task.yield_many(15_000)
+        |> Enum.map(&collect_result/1)
 
       context = format_context(entities, facts, episodes)
       {:ok, context}
     end
+  end
+
+  defp collect_result({_task, {:ok, {:ok, data}}}), do: data
+
+  defp collect_result({task, _}) do
+    Task.shutdown(task, :brutal_kill)
+    []
   end
 
   # --- Strategy 1: Episode vector search (project+agent scoped) ---
@@ -125,6 +129,8 @@ defmodule AgentEx.Memory.KnowledgeGraph.Retriever do
   # --- Formatting ---
 
   defp format_context(entities, facts, episodes) do
+    entity_lines = extract_entity_lines(entities)
+
     fact_lines =
       (extract_fact_lines(entities) ++ extract_fact_search_lines(facts))
       |> Enum.uniq()
@@ -136,6 +142,7 @@ defmodule AgentEx.Memory.KnowledgeGraph.Retriever do
       |> Enum.uniq()
 
     [
+      format_section("Known entities", entity_lines),
       format_section("Known facts", fact_lines),
       format_section("Related context", episode_lines)
     ]
@@ -145,6 +152,13 @@ defmodule AgentEx.Memory.KnowledgeGraph.Retriever do
 
   defp format_section(_header, []), do: ""
   defp format_section(header, lines), do: "#{header}:\n" <> Enum.map_join(lines, "\n", &"- #{&1}")
+
+  defp extract_entity_lines(entities) do
+    entities
+    |> Enum.filter(&(&1.type == :entity))
+    |> Enum.reject(&(is_nil(&1.description) or &1.description == ""))
+    |> Enum.map(fn e -> "#{e.name} (#{e.entity_type}): #{e.description}" end)
+  end
 
   defp extract_fact_lines(entities) do
     entities

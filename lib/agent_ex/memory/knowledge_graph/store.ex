@@ -31,7 +31,13 @@ defmodule AgentEx.Memory.KnowledgeGraph.Store do
     do_query_entity(name)
   end
 
-  def query_related(name, _hops \\ 1) do
+  def query_related(name, hops \\ 1) do
+    if hops > 1 do
+      Logger.warning(
+        "query_related: multi-hop traversal not yet implemented, returning single-hop"
+      )
+    end
+
     do_query_related(name)
   end
 
@@ -116,22 +122,35 @@ defmodule AgentEx.Memory.KnowledgeGraph.Store do
   # --- Ingestion Pipeline ---
 
   defp run_ingestion_pipeline(project_id, agent_id, text, role) do
-    with {:ok, episode} <- create_episode(project_id, agent_id, text, role),
-         {:ok, extraction} <- Extractor.extract(text),
-         {:ok, entity_map} <- resolve_entities(extraction.entities),
-         :ok <- store_facts(extraction.relationships, entity_map),
-         :ok <- link_entities_to_episode(entity_map, episode.id, extraction) do
-      {:ok,
-       %{
-         episode_id: episode.id,
-         entities: Map.keys(entity_map),
-         relationships: length(extraction.relationships)
-       }}
-    else
+    # Extract entities/relationships before DB writes so LLM failures
+    # don't leave orphan episodes
+    case Extractor.extract(text) do
+      {:ok, extraction} ->
+        do_ingest_transaction(project_id, agent_id, text, role, extraction)
+
       {:error, reason} = err ->
-        Logger.error("Ingestion pipeline failed: #{inspect(reason)}")
+        Logger.error("Ingestion extraction failed: #{inspect(reason)}")
         err
     end
+  end
+
+  defp do_ingest_transaction(project_id, agent_id, text, role, extraction) do
+    Repo.transaction(fn ->
+      with {:ok, episode} <- create_episode(project_id, agent_id, text, role),
+           {:ok, entity_map} <- resolve_entities(extraction.entities),
+           :ok <- store_facts(extraction.relationships, entity_map),
+           :ok <- link_entities_to_episode(entity_map, episode.id, extraction) do
+        %{
+          episode_id: episode.id,
+          entities: Map.keys(entity_map),
+          relationships: length(extraction.relationships)
+        }
+      else
+        {:error, reason} ->
+          Logger.error("Ingestion pipeline failed: #{inspect(reason)}")
+          Repo.rollback(reason)
+      end
+    end)
   end
 
   defp create_episode(project_id, agent_id, text, role) do
@@ -171,10 +190,12 @@ defmodule AgentEx.Memory.KnowledgeGraph.Store do
   end
 
   defp resolve_with_vector(entity, vector) do
-    # Find closest existing entity by vector similarity
+    entity_type = entity["type"]
+
+    # Find closest existing entity by vector similarity, scoped to same type
     existing =
       from(e in Entity,
-        where: not is_nil(e.name_embedding),
+        where: not is_nil(e.name_embedding) and e.entity_type == ^entity_type,
         order_by: cosine_distance(e.name_embedding, ^vector),
         limit: 1,
         select: %{id: e.id, distance: cosine_distance(e.name_embedding, ^vector)}
@@ -231,7 +252,11 @@ defmodule AgentEx.Memory.KnowledgeGraph.Store do
           confidence: rel["confidence"] || "MEDIUM",
           description_embedding: embedding
         })
-        |> Repo.insert()
+        |> Repo.insert(
+          on_conflict:
+            {:replace, [:description, :confidence, :description_embedding, :updated_at]},
+          conflict_target: [:source_entity_id, :target_entity_id, :fact_type]
+        )
 
       case result do
         {:ok, _} ->
