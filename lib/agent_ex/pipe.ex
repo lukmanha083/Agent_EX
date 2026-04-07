@@ -33,7 +33,7 @@ defmodule AgentEx.Pipe do
       |> Pipe.merge(lead_researcher, client)
   """
 
-  alias AgentEx.{Memory, Message, ModelClient, Sensing, Tool, ToolAgent}
+  alias AgentEx.{Memory, Message, ModelClient, Orchestrator, Sensing, Specialist, Tool, ToolAgent}
 
   require Logger
 
@@ -351,6 +351,76 @@ defmodule AgentEx.Pipe do
 
     Memory.inject_memory_context(messages, user_id, project_id, agent_id, session_id,
       context_window: context_window
+    )
+  end
+
+  @doc """
+  Run a budget-aware orchestrator with specialist pool.
+
+  GenStage-powered replacement for `through/4` with delegate tools.
+  The orchestrator plans and dispatches tasks to specialists concurrently,
+  re-evaluating after each result.
+
+  ## Options
+  - `:budget` — total token budget for this run
+  - `:max_concurrency` — max parallel specialists (default: 3)
+  - `:specialists` — map of `%{name => %Specialist{}}` configs
+  - `:model_fn` — override LLM calls for testing (1-arg for Planner)
+  - `:run_id` — custom run ID
+  - `:timeout` — max wait time (default: 300_000ms)
+
+  ## Example
+
+      specialists = %{
+        "researcher" => %Specialist{name: "researcher", ...},
+        "analyst" => %Specialist{name: "analyst", ...}
+      }
+
+      {:ok, result, summary} = Pipe.orchestrate(
+        "Analyze AAPL stock",
+        model_client,
+        specialists: specialists,
+        budget: 100_000,
+        max_concurrency: 3
+      )
+  """
+  def orchestrate(goal, model_client, opts \\ []) do
+    specialists = Keyword.get(opts, :specialists, %{})
+    budget = Keyword.get(opts, :budget)
+    max_concurrency = Keyword.get(opts, :max_concurrency, 3)
+    timeout = Keyword.get(opts, :timeout, 300_000)
+    model_fn = Keyword.get(opts, :model_fn)
+    run_id = Keyword.get(opts, :run_id)
+
+    orch_opts = [
+      model_client: model_client,
+      specialists: specialists,
+      max_concurrency: max_concurrency,
+      budget: budget
+    ]
+
+    with {:ok, orch} <- Orchestrator.start_link(orch_opts),
+         {:ok, pool} <- start_pool(orch, specialists, max_concurrency, model_fn) do
+      try do
+        run_opts = [timeout: timeout, model_fn: model_fn]
+        run_opts = if run_id, do: Keyword.put(run_opts, :run_id, run_id), else: run_opts
+
+        Orchestrator.run(orch, goal, run_opts)
+      after
+        Supervisor.stop(pool, :normal)
+        Orchestrator.stop(orch)
+      end
+    end
+  end
+
+  defp start_pool(orchestrator, specialists, max_demand, model_fn) do
+    pool_opts = if model_fn, do: [model_fn: model_fn], else: []
+
+    Specialist.Pool.start_link(
+      orchestrator: orchestrator,
+      specialists: specialists,
+      max_demand: max_demand,
+      pool_opts: pool_opts
     )
   end
 end
