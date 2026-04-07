@@ -79,15 +79,17 @@ defmodule AgentEx.Memory.KnowledgeGraph.Store do
   Returns `{:ok, count}` with the number of deleted entities.
   """
   def cleanup_orphaned_entities do
+    mention_exists = from(m in Mention, where: m.entity_id == parent_as(:entity).id)
+    source_fact_exists = from(f in Fact, where: f.source_entity_id == parent_as(:entity).id)
+    target_fact_exists = from(f in Fact, where: f.target_entity_id == parent_as(:entity).id)
+
     {count, _} =
       from(e in Entity,
-        left_join: m in Mention,
-        on: m.entity_id == e.id,
-        left_join: fs in Fact,
-        on: fs.source_entity_id == e.id,
-        left_join: ft in Fact,
-        on: ft.target_entity_id == e.id,
-        where: is_nil(m.id) and is_nil(fs.id) and is_nil(ft.id)
+        as: :entity,
+        where:
+          not exists(mention_exists) and
+            not exists(source_fact_exists) and
+            not exists(target_fact_exists)
       )
       |> Repo.delete_all()
 
