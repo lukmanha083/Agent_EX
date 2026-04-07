@@ -25,11 +25,8 @@ defmodule AgentEx.Application do
       # Per-project DETS lifecycle manager (must start before stores)
       AgentEx.DetsManager,
 
-      # Agent config store (ETS + lazy per-project DETS)
-      AgentEx.AgentStore,
-
-      # HTTP tool config store (ETS + lazy per-project DETS)
-      AgentEx.HttpToolStore,
+      # Specialist delegation supervisor (Phase 5f)
+      {DynamicSupervisor, name: AgentEx.Specialist.DelegationSupervisor, strategy: :one_for_one},
 
       # EventLoop: ETS-based run tracking
       AgentEx.EventLoop.RunRegistry,
