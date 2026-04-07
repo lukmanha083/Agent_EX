@@ -148,10 +148,11 @@ defmodule AgentExWeb.ProjectsLive.New do
         do: default_model_for(new_provider),
         else: params["model"] || socket.assigns.form["model"]
 
+    prev = socket.assigns.form
+
     form =
-      params
-      |> Map.take(~w(name description root_path anthropic_key openai_key extra_llm_key))
-      |> Map.new(fn {k, v} -> {k, v || ""} end)
+      ~w(name description root_path anthropic_key openai_key extra_llm_key)
+      |> Map.new(fn k -> {k, params[k] || prev[k] || ""} end)
       |> Map.merge(%{"provider" => new_provider, "model" => current_model})
 
     socket =

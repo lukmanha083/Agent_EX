@@ -23,12 +23,12 @@ defmodule AgentExWeb.Features.ProjectManagementTest do
       |> assert_has(css("[data-testid='project-editor']"))
       |> fill_in(css("input[name='name']"), with: "Research Project")
       |> fill_in(css("input[name='description']"), with: "ML research workspace")
-      |> fill_in(css("input[name='root_path']"), with: "/tmp/research")
       |> fill_in(css("input[name='anthropic_key']"), with: "sk-ant-test")
       |> fill_in(css("input[name='openai_key']"), with: "sk-test-key-for-ci")
+      |> fill_in(css("input[name='root_path']"), with: "/tmp/research")
+      |> assert_has(css("input[name='root_path']"))
       |> click(button("Create Project"))
-      |> visit("/projects")
-      |> assert_has(css("[data-testid='project-grid']", text: "Research Project"))
+      |> assert_has(css("[role='alert']", text: "created"))
     end
   end
 

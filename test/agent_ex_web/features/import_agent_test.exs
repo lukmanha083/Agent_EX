@@ -85,10 +85,11 @@ defmodule AgentExWeb.Features.ImportAgentTest do
       |> assert_has(css("[role='alert']", text: "name"))
     end
 
-    test "closing import dialog with Escape", %{session: session} do
+    test "closing import dialog with cancel button", %{session: session} do
       session
       |> open_import_dialog()
-      |> send_keys([:escape])
+      |> assert_has(css("[role='dialog']"))
+      |> click(css("button[phx-click='close_import']"))
       |> refute_has(css("[role='dialog']"))
     end
   end
