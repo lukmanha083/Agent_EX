@@ -17,7 +17,7 @@ jobs:
         elixir: ["1.18.3"]
     services:
       postgres:
-        image: postgres:16
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: agent_ex
           POSTGRES_PASSWORD: agent_ex_dev

@@ -37,7 +37,7 @@ defmodule AgentEx.Repo.Migrations.CreateSemanticMemoriesAndKnowledgeGraph do
     create unique_index(:kg_entities, [:name, :entity_type])
 
     execute(
-      "CREATE INDEX kg_entities_embedding_idx ON kg_entities USING hnsw (name_embedding vector_cosine_ops)",
+      "CREATE INDEX kg_entities_embedding_idx ON kg_entities USING hnsw (name_embedding vector_cosine_ops) WHERE name_embedding IS NOT NULL",
       "DROP INDEX IF EXISTS kg_entities_embedding_idx"
     )
 
@@ -57,7 +57,7 @@ defmodule AgentEx.Repo.Migrations.CreateSemanticMemoriesAndKnowledgeGraph do
     create index(:kg_episodes, [:project_id, :agent_id])
 
     execute(
-      "CREATE INDEX kg_episodes_embedding_idx ON kg_episodes USING hnsw (content_embedding vector_cosine_ops)",
+      "CREATE INDEX kg_episodes_embedding_idx ON kg_episodes USING hnsw (content_embedding vector_cosine_ops) WHERE content_embedding IS NOT NULL",
       "DROP INDEX IF EXISTS kg_episodes_embedding_idx"
     )
 
@@ -78,7 +78,7 @@ defmodule AgentEx.Repo.Migrations.CreateSemanticMemoriesAndKnowledgeGraph do
     create index(:kg_facts, [:target_entity_id])
 
     execute(
-      "CREATE INDEX kg_facts_embedding_idx ON kg_facts USING hnsw (description_embedding vector_cosine_ops)",
+      "CREATE INDEX kg_facts_embedding_idx ON kg_facts USING hnsw (description_embedding vector_cosine_ops) WHERE description_embedding IS NOT NULL",
       "DROP INDEX IF EXISTS kg_facts_embedding_idx"
     )
 

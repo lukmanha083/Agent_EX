@@ -2,7 +2,9 @@ defmodule AgentEx.Memory do
   @moduledoc """
   Public API facade for the 4-tier agent memory system with knowledge graph.
 
-  All operations are scoped by `(user_id, project_id, agent_id)` for multi-tenant isolation.
+  ## Scoping
+  - **Tier 1/2/4**: Scoped by `(user_id, project_id, agent_id)` — ETS/DETS per-user isolation
+  - **Tier 3 & Knowledge Graph**: Scoped by `(project_id, agent_id)` — project implies user via FK
 
   ## Tiers
   - **Tier 1 (Working Memory)**: Per-session conversation history
@@ -172,9 +174,10 @@ defmodule AgentEx.Memory do
   Delete all memory data for an agent across all tiers.
 
   - Tier 2: Removes all persistent memory entries (ETS + DETS)
-  - Tier 3: Removes semantic memory vectors (Postgres DELETE)
+  - Tier 3: Removes semantic memory vectors (Postgres DELETE by project_id + agent_id)
   - Tier 4: Removes procedural skills (ETS + DETS)
-  - KG: Removes episodes (CASCADE cleans up mentions; shared entities/facts kept)
+  - KG: Explicitly deletes episodes for this agent; mentions cascade from episodes.
+    Shared entities and facts are preserved (cleaned up by `cleanup_orphaned_entities/0`).
   """
   def delete_agent_data(user_id, project_id, agent_id) do
     # Stop any active Tier 1 sessions for this agent

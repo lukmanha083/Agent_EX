@@ -75,9 +75,12 @@ defmodule AgentEx.Memory.KnowledgeGraph.Store do
   def cleanup_orphaned_entities do
     {count, _} =
       from(e in Entity,
-        left_join: m in Mention, on: m.entity_id == e.id,
-        left_join: fs in Fact, on: fs.source_entity_id == e.id,
-        left_join: ft in Fact, on: ft.target_entity_id == e.id,
+        left_join: m in Mention,
+        on: m.entity_id == e.id,
+        left_join: fs in Fact,
+        on: fs.source_entity_id == e.id,
+        left_join: ft in Fact,
+        on: ft.target_entity_id == e.id,
         where: is_nil(m.id) and is_nil(fs.id) and is_nil(ft.id)
       )
       |> Repo.delete_all()

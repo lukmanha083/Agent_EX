@@ -80,6 +80,7 @@ defmodule AgentEx.Memory.KnowledgeGraph.Retriever do
       if entity_ids != [] do
         from(f in Fact,
           where: f.source_entity_id in ^entity_ids or f.target_entity_id in ^entity_ids,
+          limit: ^(limit * 3),
           select: %{
             description: f.description,
             fact_type: f.fact_type,
