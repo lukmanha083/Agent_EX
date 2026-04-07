@@ -45,6 +45,18 @@ defmodule AgentEx.Application do
     ]
 
     opts = [strategy: :rest_for_one, name: AgentEx.Supervisor]
-    Supervisor.start_link(children, opts)
+
+    case Supervisor.start_link(children, opts) do
+      {:ok, pid} ->
+        # Register system agents after Repo is ready (non-blocking)
+        Task.Supervisor.start_child(AgentEx.TaskSupervisor, fn ->
+          AgentEx.Defaults.register_system_agents()
+        end)
+
+        {:ok, pid}
+
+      error ->
+        error
+    end
   end
 end

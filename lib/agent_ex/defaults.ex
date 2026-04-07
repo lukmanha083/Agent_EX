@@ -1,28 +1,59 @@
 defmodule AgentEx.Defaults do
   @moduledoc """
-  Orchestrates seeding of default agents and tools into new projects.
+  Manages default (system) agents and tools.
 
-  Templates are defined in `AgentEx.Defaults.Agents` and `AgentEx.Defaults.Tools`.
-  On first project hydration, copies are created in the project's DETS stores.
-  After seeding, copies are user-owned — they can be modified or deleted freely.
+  System agents are registered in Postgres at app boot — shared across all
+  projects, read-only, with capability embeddings computed once.
 
-  ## Usage
+  User agents are created per-project and can shadow system agents by name.
 
-  Called automatically from `Projects.hydrate_project/1`:
+  ## Lifecycle
 
-      AgentEx.Defaults.seed_project(user_id, project_id, provider: "anthropic")
+  Called from `Application.start/2` after Repo is ready:
+
+      AgentEx.Defaults.register_system_agents()
   """
 
-  alias AgentEx.{AgentConfig, AgentStore, HttpTool, HttpToolStore}
+  alias AgentEx.{AgentConfig, AgentStore}
   alias AgentEx.Defaults.{Agents, Tools}
 
   require Logger
 
   @doc """
-  Seed default agents and tools into a project's stores.
+  Register all default agent templates as system agents in Postgres.
 
-  Only seeds if the project has no agents yet (idempotent).
-  Uses the project's provider to select the appropriate model.
+  Idempotent — uses upsert. Called once at app boot.
+  Capability embeddings are computed asynchronously to avoid blocking startup.
+  """
+  def register_system_agents do
+    Enum.each(Agents.templates(), fn template ->
+      config =
+        template
+        |> Map.merge(%{
+          user_id: 0,
+          project_id: 0,
+          provider: "anthropic",
+          model: "claude-haiku-4-5-20251001"
+        })
+        |> AgentConfig.new()
+
+      case AgentStore.save_system(config) do
+        {:ok, _} ->
+          Logger.info("Defaults: registered system agent '#{config.name}'")
+
+        {:error, reason} ->
+          Logger.warning("Defaults: failed to register '#{template.name}': #{inspect(reason)}")
+      end
+    end)
+
+    :ok
+  end
+
+  @doc """
+  Seed user-owned copies of default agents into a project.
+
+  Only seeds if the project has no user agents yet (idempotent).
+  Unlike system agents, these are mutable — users can edit/delete them.
 
   Returns `:ok` if seeded, `:already_seeded` if project already has agents.
   """
@@ -66,9 +97,9 @@ defmodule AgentEx.Defaults do
       tool =
         template
         |> Map.merge(%{user_id: user_id, project_id: project_id})
-        |> HttpTool.new()
+        |> AgentEx.HttpTool.new()
 
-      case HttpToolStore.save(tool) do
+      case AgentEx.HttpToolStore.save(tool) do
         {:ok, _} ->
           Logger.info("Defaults: seeded tool '#{tool.name}' for project #{project_id}")
 
