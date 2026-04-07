@@ -24,6 +24,7 @@ defmodule AgentEx.Specialist do
   @type t :: %__MODULE__{}
 
   alias AgentEx.{Message, ToolAgent, ToolCallerLoop}
+  alias AgentEx.Specialist.Delegation
 
   require Logger
 
@@ -43,7 +44,17 @@ defmodule AgentEx.Specialist do
       Message.user(task.input)
     ]
 
-    tools = specialist.tools
+    specialists_map = Keyword.get(opts, :specialists, %{})
+
+    tools =
+      if specialist.can_delegate_to != [] do
+        delegation_tools =
+          Delegation.delegation_tools(specialist.can_delegate_to, specialists_map, opts)
+
+        specialist.tools ++ delegation_tools
+      else
+        specialist.tools
+      end
 
     case start_tool_agent(tools) do
       {:ok, tool_agent} ->
