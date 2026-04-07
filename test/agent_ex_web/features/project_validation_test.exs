@@ -19,7 +19,8 @@ defmodule AgentExWeb.Features.ProjectValidationTest do
       |> assert_has(css("[data-testid='project-editor']"))
       |> fill_in(css("input[name='name']"), with: "Bad Path Project")
       |> fill_in(css("input[name='root_path']"), with: "~/projects/bad")
-      |> fill_in(css("input[name='embedding_key']"), with: "sk-test-key")
+      |> fill_in(css("input[name='anthropic_key']"), with: "sk-ant-test")
+      |> fill_in(css("input[name='openai_key']"), with: "sk-test-key")
       |> click(button("Create Project"))
       |> assert_has(css("[role='alert']", text: "absolute path"))
     end
@@ -31,7 +32,8 @@ defmodule AgentExWeb.Features.ProjectValidationTest do
       |> assert_has(css("[data-testid='project-editor']"))
       |> fill_in(css("input[name='name']"), with: "Relative Path Project")
       |> fill_in(css("input[name='root_path']"), with: "relative/path")
-      |> fill_in(css("input[name='embedding_key']"), with: "sk-test-key")
+      |> fill_in(css("input[name='anthropic_key']"), with: "sk-ant-test")
+      |> fill_in(css("input[name='openai_key']"), with: "sk-test-key")
       |> click(button("Create Project"))
       |> assert_has(css("[role='alert']", text: "absolute path"))
     end
@@ -43,7 +45,8 @@ defmodule AgentExWeb.Features.ProjectValidationTest do
       |> assert_has(css("[data-testid='project-editor']"))
       |> fill_in(css("input[name='name']"), with: "Good Project")
       |> fill_in(css("input[name='root_path']"), with: "/tmp/valid_project")
-      |> fill_in(css("input[name='embedding_key']"), with: "sk-test-key")
+      |> fill_in(css("input[name='anthropic_key']"), with: "sk-ant-test")
+      |> fill_in(css("input[name='openai_key']"), with: "sk-test-key")
       |> click(button("Create Project"))
       |> assert_has(css("[role='alert']", text: "created"))
     end
