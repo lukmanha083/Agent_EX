@@ -118,11 +118,15 @@ Companion to the Python learning project at `../agent/`.
 - `lib/agent_ex/memory/working_memory/server.ex` — Per-session conversation history (Tier 1)
 - `lib/agent_ex/memory/persistent_memory/store.ex` — ETS + DETS key-value memory (Tier 2)
 - `lib/agent_ex/memory/persistent_memory/loader.ex` — DETS ↔ ETS hydration/sync
-- `lib/agent_ex/memory/semantic_memory/client.ex` — HelixDB HTTP client (shared)
-- `lib/agent_ex/memory/semantic_memory/store.ex` — Vector embed + search (Tier 3)
-- `lib/agent_ex/memory/knowledge_graph/store.ex` — Ingestion pipeline: extract → resolve → store
+- `lib/agent_ex/memory/semantic_memory/memory.ex` — Ecto schema for semantic memory vectors (pgvector)
+- `lib/agent_ex/memory/semantic_memory/store.ex` — Tier 3: Ecto queries with pgvector cosine search
+- `lib/agent_ex/memory/knowledge_graph/entity.ex` — Ecto schema for KG entities (shared)
+- `lib/agent_ex/memory/knowledge_graph/episode.ex` — Ecto schema for KG episodes (per-project/agent)
+- `lib/agent_ex/memory/knowledge_graph/fact.ex` — Ecto schema for KG facts (entity→entity)
+- `lib/agent_ex/memory/knowledge_graph/mention.ex` — Ecto schema for entity↔episode links
+- `lib/agent_ex/memory/knowledge_graph/store.ex` — Ingestion pipeline: extract → resolve → store (Ecto)
 - `lib/agent_ex/memory/knowledge_graph/extractor.ex` — LLM entity/relationship extraction (reuses `ModelClient`)
-- `lib/agent_ex/memory/knowledge_graph/retriever.ex` — Hybrid graph+vector retrieval (3 parallel strategies)
+- `lib/agent_ex/memory/knowledge_graph/retriever.ex` — Hybrid graph+vector retrieval (3 parallel Ecto queries)
 - `lib/agent_ex/memory/embeddings.ex` — OpenAI embedding API client
 - `lib/agent_ex/memory/procedural_memory/store.ex` — ETS + DETS skill storage (Tier 4)
 - `lib/agent_ex/memory/procedural_memory/skill.ex` — Skill struct with EMA confidence tracking
@@ -131,8 +135,6 @@ Companion to the Python learning project at `../agent/`.
 - `lib/agent_ex/memory/procedural_memory/loader.ex` — DETS ↔ ETS hydration/sync for skills
 - `lib/agent_ex/memory/context_builder.ex` — Compose all tiers + KG into LLM prompt
 - `lib/agent_ex/memory/promotion.ex` — Memory promotion: session summaries + save_memory tool + Reflector hook
-- `helix/schema.hx` — HelixDB vector/node/edge type definitions
-- `helix/queries.hx` — HelixQL queries for CRUD + search
 
 ### Memory Architecture
 ```
@@ -143,9 +145,9 @@ Companion to the Python learning project at `../agent/`.
    │            │              │              │              │
 ┌──▼───┐  ┌────▼─────┐  ┌────▼────────┐  ┌──▼──────────┐  ┌▼─────────────┐
 │Tier 1│  │  Tier 2   │  │   Tier 3     │  │   Tier 4    │  │Knowledge Graph│
-│Work- │  │Persistent │  │  Semantic    │  │ Procedural  │  │  (HelixDB     │
-│ing   │  │ Memory    │  │  Memory     │  │  Memory     │  │  Graph+Vector)│
-│Memory│  │(ETS+DETS) │  │(HelixDB Vec)│  │ (ETS+DETS)  │  │               │
+│Work- │  │Persistent │  │  Semantic    │  │ Procedural  │  │  (Postgres    │
+│ing   │  │ Memory    │  │  Memory     │  │  Memory     │  │  tables +     │
+│Memory│  │(ETS+DETS) │  │ (pgvector)  │  │ (ETS+DETS)  │  │  pgvector)    │
 │(Gen- │  └──────────┘  └────────────┘  │  Skills +    │  └───────────────┘
 │Serv) │                                 │  Observer +  │
 └──────┘                                 │  Reflector   │

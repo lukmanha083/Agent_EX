@@ -74,8 +74,8 @@ defmodule AgentEx.Projects do
         File.rm_rf(agent_ex_dir)
       end
 
-      # Workflows: ON DELETE CASCADE from projects table handles cleanup
-      # Async cleanup for SemanticMemory + KnowledgeGraph (HelixDB, best-effort)
+      # Workflows, SemanticMemory, KG episodes: ON DELETE CASCADE from projects table
+      # Explicit cleanup ensures Tier 1 sessions are stopped and ETS is cleared
       schedule_memory_cleanup(project)
       {:ok, deleted}
     end
@@ -85,6 +85,8 @@ defmodule AgentEx.Projects do
     cleanup_fn = fn ->
       try do
         AgentEx.Memory.delete_project_data(project.user_id, project.id)
+        # Clean up shared KG entities that lost all mentions/facts after episode CASCADE
+        AgentEx.Memory.KnowledgeGraph.Store.cleanup_orphaned_entities()
       rescue
         e ->
           Logger.error(

@@ -1,72 +1,110 @@
 defmodule AgentEx.Memory.KnowledgeGraph.Store do
   @moduledoc """
-  Orchestrates knowledge graph operations, scoped by `(user_id, project_id, agent_id)`.
+  Orchestrates knowledge graph operations using Postgres + pgvector.
 
-  - **Episodes** are per-agent (each agent's conversation turns are separate)
+  - **Episodes** are per-project, per-agent (conversation turns are separate)
   - **Entities** are shared (world knowledge is universal across agents)
   - **Facts** are shared (relationships between entities are universal)
-  - **Retrieval** can filter episodes by agent_id while facts are shared
+  - **Retrieval** filters episodes by project/agent while facts are shared
   """
-
-  use GenServer
 
   @behaviour AgentEx.Memory.Tier
 
+  import Ecto.Query
+  import Pgvector.Ecto.Query
+
   alias AgentEx.Memory.Embeddings
-  alias AgentEx.Memory.KnowledgeGraph.{Extractor, Retriever}
-  alias AgentEx.Memory.SemanticMemory.Client
+  alias AgentEx.Memory.KnowledgeGraph.{Entity, Episode, Extractor, Fact, Mention, Retriever}
+  alias AgentEx.Repo
 
   require Logger
 
-  @entity_similarity_threshold 0.85
+  @entity_distance_threshold 0.15
 
-  # --- Client API ---
+  # --- Public API ---
 
-  def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
-  end
-
-  def ingest(user_id, project_id, agent_id, text, role \\ "user") do
-    GenServer.call(__MODULE__, {:ingest, user_id, project_id, agent_id, text, role}, 60_000)
+  def ingest(project_id, agent_id, text, role \\ "user") do
+    run_ingestion_pipeline(project_id, agent_id, text, role)
   end
 
   def query_entity(name) do
-    GenServer.call(__MODULE__, {:query_entity, name}, 30_000)
+    do_query_entity(name)
   end
 
   def query_related(name, hops \\ 1) do
-    GenServer.call(__MODULE__, {:query_related, name, hops}, 30_000)
+    if hops > 1 do
+      Logger.warning(
+        "query_related: multi-hop traversal not yet implemented, returning single-hop"
+      )
+    end
+
+    do_query_related(name)
   end
 
-  def hybrid_search(user_id, project_id, agent_id, query, limit \\ 5) do
-    GenServer.call(
-      __MODULE__,
-      {:hybrid_search, user_id, project_id, agent_id, query, limit},
-      30_000
-    )
+  def hybrid_search(project_id, agent_id, query, limit \\ 5) do
+    Retriever.hybrid_search(project_id, agent_id, query, limit)
   end
 
   @doc """
-  Delete all episodes and episode embeddings for an agent.
-
-  Entities and facts are shared across agents and are NOT deleted.
-  Uses broad vector search + client-side agent_id filter since HelixDB
-  doesn't support property-based queries.
+  Delete all episodes for an agent within a project.
+  Entities and facts are shared and NOT deleted.
+  Mentions are cleaned up by CASCADE from episodes.
   """
-  def delete_by_agent(user_id, project_id, agent_id) do
-    GenServer.call(__MODULE__, {:delete_by_agent, user_id, project_id, agent_id}, 60_000)
+  def delete_by_agent(project_id, agent_id) do
+    {count, _} =
+      from(e in Episode,
+        where: e.project_id == ^project_id and e.agent_id == ^agent_id
+      )
+      |> Repo.delete_all()
+
+    {:ok, count}
   end
 
-  @doc "Delete all episodes and episode embeddings for a project (scoped by project_id metadata)."
-  def delete_by_project(user_id, project_id) do
-    GenServer.call(__MODULE__, {:delete_by_project, user_id, project_id}, 60_000)
+  @doc "Delete all episodes for a project. (Also handled by CASCADE.)"
+  def delete_by_project(project_id) do
+    {count, _} =
+      from(e in Episode, where: e.project_id == ^project_id)
+      |> Repo.delete_all()
+
+    {:ok, count}
+  end
+
+  @doc """
+  Delete orphaned entities that have no remaining mentions or facts.
+
+  Entities are shared across projects, so they are not deleted by CASCADE.
+  After a project is deleted, entities that were only referenced by that
+  project's episodes become orphaned. This function cleans them up.
+
+  Returns `{:ok, count}` with the number of deleted entities.
+  """
+  def cleanup_orphaned_entities do
+    mention_exists = from(m in Mention, where: m.entity_id == parent_as(:entity).id)
+    source_fact_exists = from(f in Fact, where: f.source_entity_id == parent_as(:entity).id)
+    target_fact_exists = from(f in Fact, where: f.target_entity_id == parent_as(:entity).id)
+
+    {count, _} =
+      from(e in Entity,
+        as: :entity,
+        where:
+          not exists(mention_exists) and
+            not exists(source_fact_exists) and
+            not exists(target_fact_exists)
+      )
+      |> Repo.delete_all()
+
+    if count > 0 do
+      Logger.info("KnowledgeGraph: cleaned up #{count} orphaned entities")
+    end
+
+    {:ok, count}
   end
 
   # --- Tier callbacks ---
 
   @impl AgentEx.Memory.Tier
-  def to_context_messages({user_id, project_id, agent_id}, query) when is_binary(query) do
-    case hybrid_search(user_id, project_id, agent_id, query) do
+  def to_context_messages({_user_id, project_id, agent_id}, query) when is_binary(query) do
+    case hybrid_search(project_id, agent_id, query) do
       {:ok, context} when context != "" ->
         [%{role: "system", content: "## Knowledge Graph\n#{context}"}]
 
@@ -76,126 +114,67 @@ defmodule AgentEx.Memory.KnowledgeGraph.Store do
   end
 
   @impl AgentEx.Memory.Tier
-  def token_estimate({user_id, project_id, agent_id}, query) when is_binary(query) do
-    case hybrid_search(user_id, project_id, agent_id, query) do
+  def token_estimate({_user_id, project_id, agent_id}, query) when is_binary(query) do
+    case hybrid_search(project_id, agent_id, query) do
       {:ok, context} -> div(String.length(context), 4)
       _ -> 0
     end
   end
 
-  # --- Server callbacks ---
-
-  @impl GenServer
-  def init(_opts), do: {:ok, %{}}
-
-  @impl GenServer
-  def handle_call({:ingest, user_id, project_id, agent_id, text, role}, _from, state) do
-    result = run_ingestion_pipeline(user_id, project_id, agent_id, text, role)
-    {:reply, result, state}
-  end
-
-  @impl GenServer
-  def handle_call({:query_entity, name}, _from, state) do
-    result = do_query_entity(name)
-    {:reply, result, state}
-  end
-
-  @impl GenServer
-  def handle_call({:query_related, name, hops}, _from, state) do
-    result = do_query_related(name, hops)
-    {:reply, result, state}
-  end
-
-  @impl GenServer
-  def handle_call({:hybrid_search, user_id, project_id, agent_id, query, limit}, _from, state) do
-    result = Retriever.hybrid_search(user_id, project_id, agent_id, query, limit)
-    {:reply, result, state}
-  end
-
-  @impl GenServer
-  def handle_call({:delete_by_agent, user_id, project_id, agent_id}, _from, state) do
-    filter = %{
-      "agent_id" => to_string(agent_id),
-      "user_id" => to_string(user_id),
-      "project_id" => to_string(project_id)
-    }
-
-    result = do_delete_by_filter(filter)
-    {:reply, result, state}
-  end
-
-  @impl GenServer
-  def handle_call({:delete_by_project, user_id, project_id}, _from, state) do
-    filter = %{
-      "user_id" => to_string(user_id),
-      "project_id" => to_string(project_id)
-    }
-
-    result = do_delete_by_filter(filter)
-    {:reply, result, state}
-  end
-
   # --- Ingestion Pipeline ---
 
-  defp run_ingestion_pipeline(user_id, project_id, agent_id, text, role) do
-    now = DateTime.utc_now() |> DateTime.to_iso8601()
+  defp run_ingestion_pipeline(project_id, agent_id, text, role) do
+    # Extract entities/relationships before DB writes so LLM failures
+    # don't leave orphan episodes
+    case Extractor.extract(text) do
+      {:ok, extraction} ->
+        do_ingest_transaction(project_id, agent_id, text, role, extraction)
 
-    with {:ok, episode_id} <- create_episode(user_id, project_id, agent_id, text, role, now),
-         :ok <- store_episode_embedding(user_id, project_id, agent_id, episode_id, text),
-         {:ok, extraction} <- Extractor.extract(text),
-         {:ok, entity_map} <- resolve_entities(extraction.entities, now),
-         :ok <- store_facts(extraction.relationships, entity_map, now),
-         :ok <- link_entities_to_episode(entity_map, episode_id, extraction) do
-      {:ok,
-       %{
-         episode_id: episode_id,
-         entities: Map.keys(entity_map),
-         relationships: length(extraction.relationships)
-       }}
-    else
       {:error, reason} = err ->
-        Logger.error("Ingestion pipeline failed: #{inspect(reason)}")
+        Logger.error("Ingestion extraction failed: #{inspect(reason)}")
         err
     end
   end
 
-  defp create_episode(user_id, project_id, agent_id, text, role, now) do
-    case Client.query("CreateEpisode", %{
-           content: text,
-           role: role,
-           source: "conversation",
-           agent_id: agent_id,
-           user_id: user_id,
-           project_id: project_id,
-           now: now
-         }) do
-      {:ok, %{"episode" => %{"id" => id}}} -> {:ok, id}
-      {:ok, response} -> extract_id(response)
-      error -> error
-    end
+  defp do_ingest_transaction(project_id, agent_id, text, role, extraction) do
+    Repo.transaction(fn ->
+      with {:ok, episode} <- create_episode(project_id, agent_id, text, role),
+           {:ok, entity_map} <- resolve_entities(extraction.entities, project_id),
+           :ok <- store_facts(extraction.relationships, entity_map, project_id),
+           :ok <- link_entities_to_episode(entity_map, episode.id, extraction) do
+        %{
+          episode_id: episode.id,
+          entities: Map.keys(entity_map),
+          relationships: length(extraction.relationships)
+        }
+      else
+        {:error, reason} ->
+          Logger.error("Ingestion pipeline failed: #{inspect(reason)}")
+          Repo.rollback(reason)
+      end
+    end)
   end
 
-  defp store_episode_embedding(user_id, project_id, agent_id, episode_id, text) do
-    with {:ok, vector} <- Embeddings.embed(text),
-         {:ok, _} <-
-           Client.query("StoreEpisodeEmbedding", %{
-             episode_id: episode_id,
-             content_summary: text,
-             agent_id: agent_id,
-             user_id: user_id,
-             project_id: project_id,
-             vector: vector,
-             now: DateTime.utc_now() |> DateTime.to_iso8601()
-           }) do
-      :ok
-    end
+  defp create_episode(project_id, agent_id, text, role) do
+    embedding = embed_or_nil(text, project_id)
+
+    %Episode{}
+    |> Episode.changeset(%{
+      project_id: project_id,
+      agent_id: agent_id,
+      content: text,
+      role: role,
+      source: "conversation",
+      content_embedding: embedding
+    })
+    |> Repo.insert()
   end
 
-  defp resolve_entities(entities, now) do
+  defp resolve_entities(entities, project_id) do
     entity_map =
       Enum.reduce_while(entities, {:ok, %{}}, fn entity, {:ok, acc} ->
-        case resolve_single_entity(entity, now) do
-          {:ok, id} -> {:cont, {:ok, Map.put(acc, entity["name"], id)}}
+        case resolve_single_entity(entity, project_id) do
+          {:ok, db_entity} -> {:cont, {:ok, Map.put(acc, entity["name"], db_entity.id)}}
           {:error, _} = err -> {:halt, err}
         end
       end)
@@ -203,114 +182,95 @@ defmodule AgentEx.Memory.KnowledgeGraph.Store do
     entity_map
   end
 
-  defp resolve_single_entity(entity, now) do
+  defp resolve_single_entity(entity, project_id) do
     embed_text = "#{entity["name"]}: #{entity["description"]}"
 
-    with {:ok, vector} <- Embeddings.embed(embed_text) do
-      resolve_with_vector(entity, vector, now)
+    case Embeddings.embed(embed_text, project_id: project_id) do
+      {:ok, vector} -> resolve_with_vector(entity, vector)
+      {:error, _} = err -> err
     end
   end
 
-  defp resolve_with_vector(entity, vector, now) do
-    case Client.query("FindEntity", %{query_vector: vector, limit: 1}) do
-      {:ok, results} -> resolve_or_create(entity, results, vector, now)
-      {:error, _} -> create_new_entity(entity, vector, now)
+  defp resolve_with_vector(entity, vector) do
+    entity_type = entity["type"]
+
+    # Find closest existing entity by vector similarity, scoped to same type
+    existing =
+      from(e in Entity,
+        where: not is_nil(e.name_embedding) and e.entity_type == ^entity_type,
+        order_by: cosine_distance(e.name_embedding, ^vector),
+        limit: 1,
+        select: %{id: e.id, distance: cosine_distance(e.name_embedding, ^vector)}
+      )
+      |> Repo.one()
+
+    if existing && existing.distance <= @entity_distance_threshold do
+      # Update existing entity's description
+      entity_record = Repo.get!(Entity, existing.id)
+
+      entity_record
+      |> Entity.changeset(%{description: entity["description"], name_embedding: vector})
+      |> Repo.update()
+    else
+      # Create new entity
+      %Entity{}
+      |> Entity.changeset(%{
+        name: entity["name"],
+        entity_type: entity["type"],
+        description: entity["description"],
+        summary: entity["description"],
+        name_embedding: vector
+      })
+      |> Repo.insert(
+        on_conflict: {:replace, [:description, :summary, :name_embedding, :updated_at]},
+        conflict_target: [:name, :entity_type]
+      )
     end
   end
 
-  defp resolve_or_create(entity, results, vector, now) do
-    case find_matching_entity(results) do
-      {:match, existing_id} ->
-        Logger.debug("Entity resolved to existing: #{entity["name"]} → #{existing_id}")
-        {:ok, existing_id}
-
-      :no_match ->
-        create_new_entity(entity, vector, now)
-    end
-  end
-
-  defp find_matching_entity(%{"embeddings" => [%{"score" => score, "id" => id} | _]})
-       when score >= @entity_similarity_threshold,
-       do: {:match, id}
-
-  defp find_matching_entity(%{"results" => [%{"score" => score, "id" => id} | _]})
-       when score >= @entity_similarity_threshold,
-       do: {:match, id}
-
-  defp find_matching_entity(_), do: :no_match
-
-  defp create_new_entity(entity, vector, now) do
-    with {:ok, response} <-
-           Client.query("CreateEntity", %{
-             name: entity["name"],
-             entity_type: entity["type"],
-             description: entity["description"],
-             summary: entity["description"],
-             now: now
-           }),
-         {:ok, entity_id} <- extract_id(response),
-         {:ok, _} <-
-           Client.query("StoreEntityEmbedding", %{
-             entity_id: entity_id,
-             entity_name: entity["name"],
-             entity_description: entity["description"],
-             vector: vector,
-             now: now
-           }) do
-      {:ok, entity_id}
-    end
-  end
-
-  defp store_facts(relationships, entity_map, now) do
-    Enum.each(relationships, fn rel ->
-      store_single_fact(rel, entity_map, now)
+  defp store_facts(relationships, entity_map, project_id) do
+    Enum.reduce_while(relationships, :ok, fn rel, :ok ->
+      case store_single_fact(rel, entity_map, project_id) do
+        :ok -> {:cont, :ok}
+        {:error, _} = err -> {:halt, err}
+      end
     end)
-
-    :ok
   end
 
-  defp store_single_fact(rel, entity_map, now) do
+  defp store_single_fact(rel, entity_map, project_id) do
     source_id = Map.get(entity_map, rel["source"])
     target_id = Map.get(entity_map, rel["target"])
 
     if source_id && target_id do
-      with {:ok, _} <- create_fact(rel, source_id, target_id, now) do
-        embed_fact(rel, source_id)
+      embedding =
+        embed_or_nil(
+          "#{rel["source"]} #{rel["type"]} #{rel["target"]}: #{rel["description"]}",
+          project_id
+        )
+
+      %Fact{}
+      |> Fact.changeset(%{
+        source_entity_id: source_id,
+        target_entity_id: target_id,
+        fact_type: rel["type"],
+        description: rel["description"],
+        confidence: rel["confidence"] || "MEDIUM",
+        description_embedding: embedding
+      })
+      |> Repo.insert(
+        on_conflict: {:replace, [:description, :confidence, :description_embedding, :updated_at]},
+        conflict_target: [:source_entity_id, :target_entity_id, :fact_type]
+      )
+      |> case do
+        {:ok, _} -> :ok
+        {:error, changeset} -> {:error, {:fact_insert_failed, rel, changeset.errors}}
       end
     else
       Logger.warning(
         "Skipping relationship: missing entity - source=#{rel["source"]} target=#{rel["target"]}"
       )
-    end
-  end
 
-  defp create_fact(rel, source_id, target_id, now) do
-    Client.query("CreateFact", %{
-      source_id: source_id,
-      target_id: target_id,
-      fact_type: rel["type"],
-      description: rel["description"],
-      confidence: rel["confidence"] || "MEDIUM",
-      now: now
-    })
-  end
-
-  defp embed_fact(rel, source_id) do
-    embed_text = "#{rel["source"]} #{rel["type"]} #{rel["target"]}: #{rel["description"]}"
-
-    case Embeddings.embed(embed_text) do
-      {:ok, vector} ->
-        Client.query("StoreFactEmbedding", %{
-          entity_id: source_id,
-          fact_description: rel["description"],
-          source_entity: rel["source"],
-          target_entity: rel["target"],
-          vector: vector,
-          now: DateTime.utc_now() |> DateTime.to_iso8601()
-        })
-
-      _ ->
-        :ok
+      :ok
     end
   end
 
@@ -318,11 +278,13 @@ defmodule AgentEx.Memory.KnowledgeGraph.Store do
     Enum.each(entity_map, fn {name, entity_id} ->
       confidence = find_entity_confidence(name, extraction.relationships)
 
-      Client.query("LinkEntityToEpisode", %{
+      %Mention{}
+      |> Mention.changeset(%{
         entity_id: entity_id,
         episode_id: episode_id,
         confidence: confidence
       })
+      |> Repo.insert(on_conflict: :nothing, conflict_target: [:entity_id, :episode_id])
     end)
 
     :ok
@@ -334,96 +296,82 @@ defmodule AgentEx.Memory.KnowledgeGraph.Store do
     end)
   end
 
-  defp extract_id(response) when is_map(response) do
-    cond do
-      is_binary(response["id"]) ->
-        {:ok, response["id"]}
+  # --- Direct queries (entities are shared, no project scope needed) ---
 
-      is_map(response["data"]) && is_binary(response["data"]["id"]) ->
-        {:ok, response["data"]["id"]}
+  defp do_query_entity(name) do
+    case find_entity_by_name(name) do
+      nil ->
+        {:ok, :not_found}
 
-      true ->
-        case find_nested_id(response) do
-          nil -> {:error, {:missing_id, response}}
-          id -> {:ok, id}
-        end
+      entity ->
+        entity = Repo.preload(entity, [:outgoing_facts, :incoming_facts])
+
+        {:ok,
+         %{
+           entity: entity,
+           outgoing: Enum.map(entity.outgoing_facts, &fact_to_map/1),
+           incoming: Enum.map(entity.incoming_facts, &fact_to_map/1)
+         }}
     end
   end
 
-  defp find_nested_id(map) when is_map(map) do
-    case Map.get(map, "id") do
-      id when is_binary(id) -> id
-      _ -> Enum.find_value(Map.values(map), &find_nested_id/1)
+  defp do_query_related(name) do
+    case find_entity_by_name(name) do
+      nil ->
+        {:ok, :not_found}
+
+      entity ->
+        related =
+          from(f in Fact,
+            where: f.source_entity_id == ^entity.id or f.target_entity_id == ^entity.id,
+            preload: [:source_entity, :target_entity]
+          )
+          |> Repo.all()
+
+        {:ok, %{entity: entity, related: Enum.map(related, &fact_to_map/1)}}
     end
   end
 
-  defp find_nested_id(list) when is_list(list), do: Enum.find_value(list, &find_nested_id/1)
-  defp find_nested_id(_), do: nil
+  defp find_entity_by_name(name) do
+    case Embeddings.embed(name) do
+      {:ok, vector} ->
+        result =
+          from(e in Entity,
+            where: not is_nil(e.name_embedding),
+            order_by: cosine_distance(e.name_embedding, ^vector),
+            limit: 1,
+            select: {e, cosine_distance(e.name_embedding, ^vector)}
+          )
+          |> Repo.one()
 
-  # --- Agent-scoped cleanup (episodes only; entities/facts are shared) ---
-
-  @batch_size 500
-  @zero_vector List.duplicate(0.0, 1536)
-
-  defp do_delete_by_filter(filter) do
-    deleted = delete_episode_embeddings_by_filter(filter)
-
-    Logger.info("KnowledgeGraph: deleted #{deleted} episode embeddings for #{inspect(filter)}")
-    {:ok, deleted}
-  rescue
-    e ->
-      Logger.warning("KnowledgeGraph cleanup failed for #{inspect(filter)}: #{inspect(e)}")
-      {:ok, 0}
-  end
-
-  defp delete_episode_embeddings_by_filter(filter, total_deleted \\ 0) do
-    case Client.query("SearchEpisodes", %{query_vector: @zero_vector, limit: @batch_size}) do
-      {:ok, response} ->
-        ids =
-          response
-          |> parse_episode_results()
-          |> Enum.filter(&matches_filter?(&1, filter))
-          |> Enum.map(fn r -> r["id"] || get_in(r, ["properties", "id"]) end)
-          |> Enum.reject(&is_nil/1)
-
-        Enum.each(ids, &Client.query("DeleteEpisodeEmbedding", %{id: &1}))
-
-        if ids == [] do
-          total_deleted
-        else
-          delete_episode_embeddings_by_filter(filter, total_deleted + length(ids))
+        case result do
+          {entity, distance} when distance <= @entity_distance_threshold -> entity
+          _ -> nil
         end
 
-      {:error, _} ->
-        total_deleted
+      _ ->
+        nil
     end
   end
 
-  defp matches_filter?(record, filter) do
-    Enum.all?(filter, fn {field, value} ->
-      r_val = record[field] || get_in(record, ["properties", field])
-      to_string(r_val) == value
-    end)
+  defp fact_to_map(%Fact{} = f) do
+    %{
+      fact_type: f.fact_type,
+      description: f.description,
+      confidence: f.confidence,
+      source_entity_id: f.source_entity_id,
+      target_entity_id: f.target_entity_id
+    }
   end
 
-  defp parse_episode_results(%{"results" => results}) when is_list(results), do: results
-  defp parse_episode_results(%{"embeddings" => results}) when is_list(results), do: results
-  defp parse_episode_results(results) when is_list(results), do: results
-  defp parse_episode_results(_), do: []
+  defp embed_or_nil(text, project_id) do
+    case Embeddings.embed(text, project_id: project_id) do
+      {:ok, vector} ->
+        vector
 
-  # --- Direct queries (entities are shared, no agent scope needed) ---
-
-  defp do_query_entity(name), do: find_and_query(name, "GetEntityKnowledge")
-
-  defp do_query_related(name, _hops), do: find_and_query(name, "GetRelatedEntities")
-
-  defp find_and_query(name, query_name) do
-    with {:ok, vector} <- Embeddings.embed(name),
-         {:ok, results} <- Client.query("FindEntity", %{query_vector: vector, limit: 1}) do
-      case find_matching_entity(results) do
-        {:match, entity_id} -> Client.query(query_name, %{entity_id: entity_id})
-        :no_match -> {:ok, :not_found}
-      end
+      {:error, reason} ->
+        Logger.debug("Embedding failed (non-critical): #{inspect(reason)}")
+        nil
     end
   end
 end

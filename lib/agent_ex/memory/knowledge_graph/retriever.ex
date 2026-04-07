@@ -1,154 +1,137 @@
 defmodule AgentEx.Memory.KnowledgeGraph.Retriever do
   @moduledoc """
-  Hybrid graph+vector retrieval. Executes three strategies in parallel:
-  1. Vector search for semantically similar episodes (filtered by agent_id)
+  Hybrid graph+vector retrieval using Postgres + pgvector.
+  Executes three strategies in parallel:
+  1. Vector search for semantically similar episodes (filtered by project/agent)
   2. Entity graph traversal (shared across agents)
   3. Fact search (shared across agents)
   """
 
+  import Ecto.Query
+  import Pgvector.Ecto.Query
+
   alias AgentEx.Memory.Embeddings
-  alias AgentEx.Memory.SemanticMemory.Client
+  alias AgentEx.Memory.KnowledgeGraph.{Entity, Episode, Fact}
+  alias AgentEx.Repo
 
   require Logger
 
-  def hybrid_search(user_id, project_id, agent_id, query, limit \\ 5) do
-    with {:ok, vector} <- Embeddings.embed(query) do
+  def hybrid_search(project_id, agent_id, query, limit \\ 5) do
+    with {:ok, vector} <- Embeddings.embed(query, project_id: project_id) do
       tasks = [
-        Task.async(fn -> search_episodes(user_id, project_id, agent_id, vector, limit) end),
+        Task.async(fn -> search_episodes(project_id, agent_id, vector, limit) end),
         Task.async(fn -> search_entities(vector, limit) end),
         Task.async(fn -> search_facts(vector, limit) end)
       ]
 
-      results = Task.await_many(tasks, 15_000)
-
       [episodes, entities, facts] =
-        Enum.map(results, fn
-          {:ok, data} -> data
-          _ -> []
-        end)
+        tasks
+        |> Task.yield_many(15_000)
+        |> Enum.map(&collect_result/1)
 
       context = format_context(entities, facts, episodes)
       {:ok, context}
     end
   end
 
-  # --- Strategy 1: Episode vector search (agent-scoped) ---
+  defp collect_result({_task, {:ok, {:ok, data}}}), do: data
 
-  defp search_episodes(user_id, project_id, agent_id, vector, limit) do
-    # Over-fetch then filter by (user_id, project_id, agent_id) client-side
-    fetch_limit = limit * 3
-
-    case Client.query("SearchEpisodes", %{query_vector: vector, limit: fetch_limit}) do
-      {:ok, response} ->
-        episodes =
-          response
-          |> extract_episodes()
-          |> Enum.filter(fn ep ->
-            ep_agent = ep[:agent_id]
-            ep_uid = ep[:user_id]
-            ep_pid = ep[:project_id]
-
-            ep_agent == agent_id and
-              to_string(ep_uid) == to_string(user_id) and
-              to_string(ep_pid) == to_string(project_id)
-          end)
-          |> Enum.take(limit)
-
-        {:ok, episodes}
-
-      error ->
-        error
-    end
+  defp collect_result({task, _}) do
+    Task.shutdown(task, :brutal_kill)
+    []
   end
 
-  defp extract_episodes(response) do
-    extract_items(response, fn item ->
-      %{
-        type: :episode,
-        content: prop(item, "content_summary", ""),
-        agent_id: item["agent_id"] || get_in(item, ["properties", "agent_id"]),
-        user_id: item["user_id"] || get_in(item, ["properties", "user_id"]),
-        project_id: item["project_id"] || get_in(item, ["properties", "project_id"]),
-        score: item["score"] || 0.0
-      }
-    end)
+  # --- Strategy 1: Episode vector search (project+agent scoped) ---
+
+  defp search_episodes(project_id, agent_id, vector, limit) do
+    episodes =
+      from(e in Episode,
+        where:
+          e.project_id == ^project_id and
+            e.agent_id == ^agent_id and
+            not is_nil(e.content_embedding),
+        order_by: cosine_distance(e.content_embedding, ^vector),
+        limit: ^limit,
+        select: %{content: e.content}
+      )
+      |> Repo.all()
+      |> Enum.map(&Map.put(&1, :type, :episode))
+
+    {:ok, episodes}
   end
 
   # --- Strategy 2: Entity graph traversal (shared) ---
 
   defp search_entities(vector, limit) do
-    search_and_extract("HybridEntitySearch", vector, limit, &extract_entities/1)
-  end
-
-  defp extract_entities(%{"entities" => entities, "related" => related})
-       when is_list(entities) do
-    entity_items =
-      Enum.map(entities, fn e ->
-        %{
-          type: :entity,
-          name: prop(e, "name", ""),
-          entity_type: prop(e, "entity_type", ""),
-          description: prop(e, "description", "")
+    entities =
+      from(e in Entity,
+        where: not is_nil(e.name_embedding),
+        order_by: cosine_distance(e.name_embedding, ^vector),
+        limit: ^limit,
+        select: %{
+          id: e.id,
+          name: e.name,
+          entity_type: e.entity_type,
+          description: e.description
         }
-      end)
+      )
+      |> Repo.all()
 
-    fact_items =
-      Enum.map(related || [], fn f ->
-        %{
-          type: :fact,
-          description: prop(f, "description", ""),
-          fact_type: prop(f, "fact_type", ""),
-          confidence: prop(f, "confidence", "MEDIUM")
-        }
-      end)
+    # For top entities, fetch their related facts
+    entity_ids = Enum.map(entities, & &1.id)
 
-    entity_items ++ fact_items
+    related_facts =
+      if entity_ids != [] do
+        from(f in Fact,
+          where: f.source_entity_id in ^entity_ids or f.target_entity_id in ^entity_ids,
+          order_by: [desc: f.updated_at],
+          limit: ^(limit * 3),
+          select: %{
+            description: f.description,
+            fact_type: f.fact_type,
+            confidence: f.confidence
+          }
+        )
+        |> Repo.all()
+      else
+        []
+      end
+
+    entity_items = Enum.map(entities, fn e -> Map.put(e, :type, :entity) end)
+    fact_items = Enum.map(related_facts, fn f -> Map.put(f, :type, :fact) end)
+
+    {:ok, entity_items ++ fact_items}
   end
-
-  defp extract_entities(_), do: []
 
   # --- Strategy 3: Fact vector search (shared) ---
 
   defp search_facts(vector, limit) do
-    search_and_extract("SearchFacts", vector, limit, &extract_facts/1)
-  end
+    facts =
+      from(f in Fact,
+        where: not is_nil(f.description_embedding),
+        order_by: cosine_distance(f.description_embedding, ^vector),
+        limit: ^limit,
+        join: src in Entity,
+        on: src.id == f.source_entity_id,
+        join: tgt in Entity,
+        on: tgt.id == f.target_entity_id,
+        select: %{
+          description: f.description,
+          source: src.name,
+          target: tgt.name
+        }
+      )
+      |> Repo.all()
+      |> Enum.map(&Map.put(&1, :type, :fact_search))
 
-  defp search_and_extract(query_name, vector, limit, extractor) do
-    case Client.query(query_name, %{query_vector: vector, limit: limit}) do
-      {:ok, response} -> {:ok, extractor.(response)}
-      error -> error
-    end
-  end
-
-  defp extract_facts(response) do
-    extract_items(response, fn item ->
-      %{
-        type: :fact_search,
-        description: prop(item, "fact_description", ""),
-        source: prop(item, "source_entity", ""),
-        target: prop(item, "target_entity", ""),
-        score: item["score"] || 0.0
-      }
-    end)
-  end
-
-  # Extracts items from HelixDB responses that use either "embeddings" or "results" keys
-  defp extract_items(%{"embeddings" => items}, mapper) when is_list(items),
-    do: Enum.map(items, mapper)
-
-  defp extract_items(%{"results" => items}, mapper) when is_list(items),
-    do: Enum.map(items, mapper)
-
-  defp extract_items(_, _), do: []
-
-  # Gets a property from either top-level or nested "properties" map
-  defp prop(item, key, default) do
-    item[key] || get_in(item, ["properties", key]) || default
+    {:ok, facts}
   end
 
   # --- Formatting ---
 
   defp format_context(entities, facts, episodes) do
+    entity_lines = extract_entity_lines(entities)
+
     fact_lines =
       (extract_fact_lines(entities) ++ extract_fact_search_lines(facts))
       |> Enum.uniq()
@@ -160,6 +143,7 @@ defmodule AgentEx.Memory.KnowledgeGraph.Retriever do
       |> Enum.uniq()
 
     [
+      format_section("Known entities", entity_lines),
       format_section("Known facts", fact_lines),
       format_section("Related context", episode_lines)
     ]
@@ -169,6 +153,13 @@ defmodule AgentEx.Memory.KnowledgeGraph.Retriever do
 
   defp format_section(_header, []), do: ""
   defp format_section(header, lines), do: "#{header}:\n" <> Enum.map_join(lines, "\n", &"- #{&1}")
+
+  defp extract_entity_lines(entities) do
+    entities
+    |> Enum.filter(&(&1.type == :entity))
+    |> Enum.reject(&(is_nil(&1.description) or &1.description == ""))
+    |> Enum.map(fn e -> "#{e.name} (#{e.entity_type}): #{e.description}" end)
+  end
 
   defp extract_fact_lines(entities) do
     entities

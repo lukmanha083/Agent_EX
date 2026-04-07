@@ -1,9 +1,5 @@
 import Config
 
-if helix_url = System.get_env("HELIX_DB_URL") do
-  config :agent_ex, helix_db_url: helix_url
-end
-
 # Production database + Phoenix config
 if config_env() == :prod do
   database_url =
@@ -12,6 +8,7 @@ if config_env() == :prod do
 
   config :agent_ex, AgentEx.Repo,
     url: database_url,
+    types: AgentEx.PostgrexTypes,
     pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10")
 
   secret_key_base =

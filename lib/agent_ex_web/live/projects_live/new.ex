@@ -52,6 +52,47 @@ defmodule AgentExWeb.ProjectsLive.New do
               </div>
             </fieldset>
 
+            <fieldset class="border-t border-gray-800 pt-4">
+              <legend class="text-xs font-medium text-gray-500 uppercase tracking-wider">API Keys</legend>
+              <div class="space-y-3 mt-3">
+                <.input
+                  type="password"
+                  name="anthropic_key"
+                  value={@form["anthropic_key"]}
+                  label="Anthropic API Key"
+                  placeholder="sk-ant-..."
+                  required
+                />
+                <p class="text-[10px] text-gray-500 -mt-2">
+                  Used for orchestrator (if Anthropic provider) and computer use agent (Claude Haiku).
+                </p>
+                <.input
+                  type="password"
+                  name="openai_key"
+                  value={@form["openai_key"]}
+                  label="OpenAI API Key"
+                  placeholder="sk-..."
+                  required
+                />
+                <p class="text-[10px] text-gray-500 -mt-2">
+                  Used for embeddings (text-embedding-3-large){if(@form["provider"] == "openai", do: " and orchestrator", else: "")}.
+                </p>
+                <div :if={@form["provider"] not in ["anthropic", "openai"]}>
+                  <.input
+                    type="password"
+                    name="extra_llm_key"
+                    value={@form["extra_llm_key"]}
+                    label={"#{@provider_label} API Key"}
+                    placeholder={@llm_key_placeholder}
+                    required
+                  />
+                  <p class="text-[10px] text-gray-500 mt-1">
+                    Required for the orchestrator model ({@form["model"]}).
+                  </p>
+                </div>
+              </div>
+            </fieldset>
+
             <.button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white">
               Create Project
             </.button>
@@ -83,9 +124,14 @@ defmodule AgentExWeb.ProjectsLive.New do
          "description" => "",
          "root_path" => "",
          "provider" => default_provider,
-         "model" => default_model
+         "model" => default_model,
+         "anthropic_key" => "",
+         "openai_key" => "",
+         "extra_llm_key" => ""
        },
        provider_options: provider_options(),
+       provider_label: provider_label(default_provider),
+       llm_key_placeholder: llm_key_placeholder(default_provider),
        model_options: model_select_options(default_provider),
        context_window_display: format_context_window(context_window_for(default_model)),
        has_projects: has_projects
@@ -102,18 +148,23 @@ defmodule AgentExWeb.ProjectsLive.New do
         do: default_model_for(new_provider),
         else: params["model"] || socket.assigns.form["model"]
 
-    form = %{
-      "name" => params["name"] || "",
-      "description" => params["description"] || "",
-      "root_path" => params["root_path"] || "",
-      "provider" => new_provider,
-      "model" => current_model
-    }
+    prev = socket.assigns.form
+
+    form =
+      ~w(name description root_path anthropic_key openai_key extra_llm_key)
+      |> Map.new(fn k -> {k, params[k] || prev[k] || ""} end)
+      |> Map.merge(%{"provider" => new_provider, "model" => current_model})
 
     socket =
-      if provider_changed?,
-        do: assign(socket, model_options: model_select_options(new_provider)),
-        else: socket
+      if provider_changed? do
+        assign(socket,
+          model_options: model_select_options(new_provider),
+          provider_label: provider_label(new_provider),
+          llm_key_placeholder: llm_key_placeholder(new_provider)
+        )
+      else
+        socket
+      end
 
     {:noreply,
      assign(socket,
@@ -123,19 +174,34 @@ defmodule AgentExWeb.ProjectsLive.New do
   end
 
   def handle_event("create_project", params, socket) do
+    keys = extract_keys(params)
+
+    case validate_keys(keys) do
+      {:error, missing} ->
+        {:noreply, put_flash(socket, :error, "Required: #{Enum.join(missing, ", ")}")}
+
+      :ok ->
+        do_create_project(params, keys, socket)
+    end
+  end
+
+  defp do_create_project(params, keys, socket) do
     user = socket.assigns.current_scope.user
+    provider = params["provider"] || "anthropic"
 
     attrs = %{
       user_id: user.id,
       name: String.trim(params["name"] || ""),
       description: blank_to_nil(params["description"]),
       root_path: blank_to_nil(params["root_path"]),
-      provider: params["provider"] || "anthropic",
-      model: params["model"] || default_model_for(params["provider"] || "anthropic")
+      provider: provider,
+      model: params["model"] || default_model_for(provider)
     }
 
     case Projects.create_project(attrs) do
       {:ok, project} ->
+        store_vault_secrets(project.id, provider, keys)
+
         {:noreply,
          socket
          |> put_flash(:info, "Project '#{project.name}' created!")
@@ -143,6 +209,39 @@ defmodule AgentExWeb.ProjectsLive.New do
 
       {:error, changeset} ->
         {:noreply, put_flash(socket, :error, "Failed: #{format_errors(changeset)}")}
+    end
+  end
+
+  defp extract_keys(params) do
+    %{
+      provider: params["provider"] || "anthropic",
+      anthropic: String.trim(params["anthropic_key"] || ""),
+      openai: String.trim(params["openai_key"] || ""),
+      extra: String.trim(params["extra_llm_key"] || "")
+    }
+  end
+
+  defp validate_keys(keys) do
+    missing =
+      [
+        if(keys.anthropic == "", do: "Anthropic API key"),
+        if(keys.openai == "", do: "OpenAI API key"),
+        if(keys.provider not in ["anthropic", "openai"] && keys.extra == "",
+          do: "#{provider_label(keys.provider)} API key"
+        )
+      ]
+      |> Enum.reject(&is_nil/1)
+
+    if missing == [], do: :ok, else: {:error, missing}
+  end
+
+  defp store_vault_secrets(project_id, provider, keys) do
+    AgentEx.Vault.set_secret(project_id, "llm:anthropic", keys.anthropic)
+    AgentEx.Vault.set_secret(project_id, "llm:openai", keys.openai)
+    AgentEx.Vault.set_secret(project_id, "embedding:openai", keys.openai)
+
+    if provider not in ["anthropic", "openai"] do
+      AgentEx.Vault.set_secret(project_id, "llm:#{provider}", keys.extra)
     end
   end
 
@@ -158,6 +257,14 @@ defmodule AgentExWeb.ProjectsLive.New do
       trimmed -> trimmed
     end
   end
+
+  defp provider_label("anthropic"), do: "Anthropic"
+  defp provider_label("openai"), do: "OpenAI"
+  defp provider_label("moonshot"), do: "Moonshot"
+  defp provider_label(_), do: "LLM"
+
+  defp llm_key_placeholder("moonshot"), do: "sk-..."
+  defp llm_key_placeholder(_), do: "sk-..."
 
   defp format_errors(changeset) do
     Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->

@@ -42,8 +42,6 @@ defmodule AgentEx.Application do
       AgentEx.Memory.WorkingMemory.Supervisor,
       AgentEx.Memory.PersistentMemory.Store,
       AgentEx.Memory.ProceduralMemory.Store,
-      AgentEx.Memory.SemanticMemory.Store,
-      AgentEx.Memory.KnowledgeGraph.Store,
 
       # Phoenix web endpoint (must be last)
       AgentExWeb.Endpoint
