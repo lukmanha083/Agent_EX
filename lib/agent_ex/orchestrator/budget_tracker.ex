@@ -10,8 +10,8 @@ defmodule AgentEx.Orchestrator.BudgetTracker do
 
   - `:explore` (>50% remaining) — full parallelism, deep research
   - `:focused` (20-50%) — reduce parallelism, skip non-critical tasks
-  - `:converge` (<20%) — stop dispatching, synthesize from what you have
-  - `:report` (~0%) — emit best-effort result + incomplete task summary
+  - `:converge` (5-20%) — stop dispatching, synthesize from what you have
+  - `:report` (≤5%) — emit best-effort result + incomplete task summary
   """
 
   defstruct [
@@ -40,7 +40,7 @@ defmodule AgentEx.Orchestrator.BudgetTracker do
   end
 
   @doc "Record token usage from a completed task. Updates velocity EMA and zone."
-  @spec record(t(), pos_integer()) :: t()
+  @spec record(t(), non_neg_integer()) :: t()
   def record(%__MODULE__{} = bt, usage) when is_integer(usage) and usage >= 0 do
     new_used = bt.used + usage
     new_count = bt.task_count + 1
@@ -60,9 +60,9 @@ defmodule AgentEx.Orchestrator.BudgetTracker do
     Float.round(remaining(bt) / total * 100, 1)
   end
 
-  @doc "Projected number of tasks the remaining budget can support."
+  @doc "Projected number of tasks the remaining budget can support. Returns 0 if no velocity data yet."
   @spec projected_tasks(t()) :: non_neg_integer()
-  def projected_tasks(%__MODULE__{velocity: +0.0} = bt), do: remaining(bt)
+  def projected_tasks(%__MODULE__{velocity: +0.0}), do: 0
 
   def projected_tasks(%__MODULE__{} = bt) do
     trunc(remaining(bt) / bt.velocity)

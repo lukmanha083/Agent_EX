@@ -49,8 +49,14 @@ defmodule AgentEx.HttpToolStore do
   @doc "Delete an HTTP tool config."
   def delete(user_id, project_id, tool_id) do
     case Repo.get_by(Schema, id: tool_id, user_id: user_id, project_id: project_id) do
-      nil -> :ok
-      row -> Repo.delete(row) |> then(fn _ -> :ok end)
+      nil ->
+        :ok
+
+      row ->
+        case Repo.delete(row) do
+          {:ok, _} -> :ok
+          {:error, changeset} -> {:error, changeset}
+        end
     end
   end
 

@@ -50,6 +50,7 @@ defmodule AgentEx.Orchestrator.TaskQueue do
   A task is ready when all its `depends_on` IDs are in `completed_ids`.
   Returns `{taken_tasks, remaining_queue}`.
   """
+  @spec take(t(), pos_integer()) :: {[task()], t()}
   @spec take(t(), pos_integer(), MapSet.t()) :: {[task()], t()}
   def take(%__MODULE__{} = q, n, completed_ids \\ MapSet.new()) when n > 0 do
     {ready, blocked} = Enum.split_with(q.items, &task_ready?(&1, completed_ids))

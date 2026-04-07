@@ -56,8 +56,14 @@ defmodule AgentEx.AgentStore do
   @doc "Delete an agent config."
   def delete(user_id, project_id, agent_id) do
     case Repo.get_by(Schema, id: agent_id, user_id: user_id, project_id: project_id) do
-      nil -> :ok
-      row -> Repo.delete(row) |> then(fn _ -> :ok end)
+      nil ->
+        :ok
+
+      row ->
+        case Repo.delete(row) do
+          {:ok, _} -> :ok
+          {:error, changeset} -> {:error, changeset}
+        end
     end
   end
 
@@ -70,7 +76,8 @@ defmodule AgentEx.AgentStore do
 
   @doc """
   Save a system agent (upsert by name). Used at app boot to register defaults.
-  System agents use project_id=0 and user_id=0 as sentinel values.
+  System agents have nil project_id/user_id and system=true.
+  Uses partial unique index `agent_configs_system_name_idx` for conflict detection.
   """
   def save_system(%AgentConfig{} = config) do
     attrs =
@@ -83,8 +90,8 @@ defmodule AgentEx.AgentStore do
     %Schema{}
     |> Schema.changeset(attrs)
     |> Repo.insert(
-      on_conflict: {:replace_all_except, [:id, :inserted_at]},
-      conflict_target: :id
+      on_conflict: {:replace_all_except, [:id, :name, :inserted_at]},
+      conflict_target: {:unsafe_fragment, "name WHERE system = true"}
     )
   end
 

@@ -143,7 +143,9 @@ defmodule AgentEx.CapabilityIndex do
       row.name,
       row.description,
       row.role,
-      if(row.expertise != [], do: "expertise: #{Enum.join(row.expertise, ", ")}"),
+      if(is_list(row.expertise) and row.expertise != [],
+        do: "expertise: #{Enum.join(row.expertise, ", ")}"
+      ),
       row.goal,
       row.tool_guidance
     ]

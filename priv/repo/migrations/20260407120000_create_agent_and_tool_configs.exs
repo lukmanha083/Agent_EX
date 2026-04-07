@@ -56,6 +56,12 @@ defmodule AgentEx.Repo.Migrations.CreateAgentAndToolConfigs do
     create index(:agent_configs, [:user_id, :project_id])
     create unique_index(:agent_configs, [:project_id, :name])
 
+    # System agents (project_id IS NULL) have unique names globally
+    execute(
+      "CREATE UNIQUE INDEX agent_configs_system_name_idx ON agent_configs (name) WHERE system = true",
+      "DROP INDEX IF EXISTS agent_configs_system_name_idx"
+    )
+
     execute(
       "CREATE INDEX agent_configs_capability_idx ON agent_configs USING hnsw (capability_embedding vector_cosine_ops) WHERE capability_embedding IS NOT NULL",
       "DROP INDEX IF EXISTS agent_configs_capability_idx"

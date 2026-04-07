@@ -22,8 +22,8 @@ defmodule AgentEx.Defaults do
   @doc """
   Register all default agent templates as system agents in Postgres.
 
-  Idempotent — uses upsert. Called once at app boot.
-  Capability embeddings are computed asynchronously to avoid blocking startup.
+  Idempotent — uses upsert. Called once at app boot (async via TaskSupervisor).
+  Capability embeddings are computed separately via CapabilityIndex.
   """
   def register_system_agents do
     Enum.each(Agents.templates(), fn template ->

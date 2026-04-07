@@ -79,9 +79,9 @@ defmodule AgentEx.Orchestrator.BudgetTrackerTest do
       assert is_integer(projected)
     end
 
-    test "projected_tasks with zero velocity returns remaining" do
+    test "projected_tasks with zero velocity returns 0" do
       bt = BudgetTracker.new(100_000)
-      assert BudgetTracker.projected_tasks(bt) == 100_000
+      assert BudgetTracker.projected_tasks(bt) == 0
     end
   end
 
