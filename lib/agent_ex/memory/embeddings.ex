@@ -73,6 +73,9 @@ defmodule AgentEx.Memory.Embeddings do
   end
 
   defp resolve_api_key(project_id) do
-    AgentEx.Vault.resolve_key(project_id, "embedding:openai")
+    case AgentEx.Vault.resolve_key(project_id, "embedding:openai") do
+      key when is_binary(key) and key != "" -> key
+      _ -> System.get_env("OPENAI_API_KEY") || ""
+    end
   end
 end

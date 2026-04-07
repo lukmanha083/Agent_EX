@@ -18,7 +18,7 @@ defmodule AgentEx.Memory.SemanticMemory.Store do
   # --- Public API ---
 
   def store(project_id, agent_id, text, type \\ "general", session_id \\ "") do
-    with {:ok, vector} <- Embeddings.embed(text) do
+    with {:ok, vector} <- Embeddings.embed(text, project_id: project_id) do
       %Memory{}
       |> Memory.changeset(%{
         project_id: project_id,
@@ -33,7 +33,7 @@ defmodule AgentEx.Memory.SemanticMemory.Store do
   end
 
   def search(project_id, agent_id, query, limit \\ 5) do
-    with {:ok, vector} <- Embeddings.embed(query) do
+    with {:ok, vector} <- Embeddings.embed(query, project_id: project_id) do
       results =
         from(m in Memory,
           where: m.project_id == ^project_id and m.agent_id == ^agent_id,

@@ -139,8 +139,8 @@ defmodule AgentEx.Memory.KnowledgeGraph.Store do
   defp do_ingest_transaction(project_id, agent_id, text, role, extraction) do
     Repo.transaction(fn ->
       with {:ok, episode} <- create_episode(project_id, agent_id, text, role),
-           {:ok, entity_map} <- resolve_entities(extraction.entities),
-           :ok <- store_facts(extraction.relationships, entity_map),
+           {:ok, entity_map} <- resolve_entities(extraction.entities, project_id),
+           :ok <- store_facts(extraction.relationships, entity_map, project_id),
            :ok <- link_entities_to_episode(entity_map, episode.id, extraction) do
         %{
           episode_id: episode.id,
@@ -156,7 +156,7 @@ defmodule AgentEx.Memory.KnowledgeGraph.Store do
   end
 
   defp create_episode(project_id, agent_id, text, role) do
-    embedding = embed_or_nil(text)
+    embedding = embed_or_nil(text, project_id)
 
     %Episode{}
     |> Episode.changeset(%{
@@ -170,10 +170,10 @@ defmodule AgentEx.Memory.KnowledgeGraph.Store do
     |> Repo.insert()
   end
 
-  defp resolve_entities(entities) do
+  defp resolve_entities(entities, project_id) do
     entity_map =
       Enum.reduce_while(entities, {:ok, %{}}, fn entity, {:ok, acc} ->
-        case resolve_single_entity(entity) do
+        case resolve_single_entity(entity, project_id) do
           {:ok, db_entity} -> {:cont, {:ok, Map.put(acc, entity["name"], db_entity.id)}}
           {:error, _} = err -> {:halt, err}
         end
@@ -182,10 +182,10 @@ defmodule AgentEx.Memory.KnowledgeGraph.Store do
     entity_map
   end
 
-  defp resolve_single_entity(entity) do
+  defp resolve_single_entity(entity, project_id) do
     embed_text = "#{entity["name"]}: #{entity["description"]}"
 
-    case Embeddings.embed(embed_text) do
+    case Embeddings.embed(embed_text, project_id: project_id) do
       {:ok, vector} -> resolve_with_vector(entity, vector)
       {:error, _} = err -> err
     end
@@ -209,7 +209,7 @@ defmodule AgentEx.Memory.KnowledgeGraph.Store do
       entity_record = Repo.get!(Entity, existing.id)
 
       entity_record
-      |> Entity.changeset(%{description: entity["description"]})
+      |> Entity.changeset(%{description: entity["description"], name_embedding: vector})
       |> Repo.update()
     else
       # Create new entity
@@ -228,22 +228,25 @@ defmodule AgentEx.Memory.KnowledgeGraph.Store do
     end
   end
 
-  defp store_facts(relationships, entity_map) do
+  defp store_facts(relationships, entity_map, project_id) do
     Enum.reduce_while(relationships, :ok, fn rel, :ok ->
-      case store_single_fact(rel, entity_map) do
+      case store_single_fact(rel, entity_map, project_id) do
         :ok -> {:cont, :ok}
         {:error, _} = err -> {:halt, err}
       end
     end)
   end
 
-  defp store_single_fact(rel, entity_map) do
+  defp store_single_fact(rel, entity_map, project_id) do
     source_id = Map.get(entity_map, rel["source"])
     target_id = Map.get(entity_map, rel["target"])
 
     if source_id && target_id do
       embedding =
-        embed_or_nil("#{rel["source"]} #{rel["type"]} #{rel["target"]}: #{rel["description"]}")
+        embed_or_nil(
+          "#{rel["source"]} #{rel["type"]} #{rel["target"]}: #{rel["description"]}",
+          project_id
+        )
 
       %Fact{}
       |> Fact.changeset(%{
@@ -361,8 +364,8 @@ defmodule AgentEx.Memory.KnowledgeGraph.Store do
     }
   end
 
-  defp embed_or_nil(text) do
-    case Embeddings.embed(text) do
+  defp embed_or_nil(text, project_id) do
+    case Embeddings.embed(text, project_id: project_id) do
       {:ok, vector} ->
         vector
 
