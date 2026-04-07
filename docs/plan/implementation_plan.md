@@ -3966,15 +3966,119 @@ ToolCallerLoop internally. The refactor wraps it in a supervised worker process.
 **Memory** integration is unchanged — each specialist gets its own memory scope.
 The orchestrator uses `orchestrator: true` mode (Tier 1 only) as it does today.
 
+### Agent & Tool Storage: DETS → Postgres Migration
+
+**Problem:** Agents and tools are stored in per-project DETS files. This worked
+when there were few agents, but breaks at scale:
+
+1. **Seeding cost** — 100 default agents × N projects = N×100 DETS writes on creation
+2. **No vector search** — DETS is key-value, can't do cosine similarity for
+   capability-based agent discovery
+3. **No update propagation** — improving a default agent doesn't reach existing projects
+4. **Disk waste** — identical copies of the same defaults in every project directory
+
+**Solution: System vs User split**
+
+```text
+┌──────────────────────────────────────────────────────────────────┐
+│                      Agent/Tool Storage                           │
+│                                                                    │
+│  System Registry (Postgres + pgvector)    ← shared, read-only     │
+│  ┌──────────────────────────────────────┐                         │
+│  │  agent_configs table                 │ Seeded from Defaults    │
+│  │  ├─ id, name, description, role...  │ at app boot (not per-   │
+│  │  ├─ capability_embedding vector(1536)│ project). Updates       │
+│  │  └─ system: true (immutable flag)   │ propagate instantly.    │
+│  │                                      │                         │
+│  │  tool_configs table                  │ Same pattern for tools. │
+│  │  ├─ id, name, description, params...│                         │
+│  │  └─ capability_embedding vector(1536)│                         │
+│  └──────────────────────────────────────┘                         │
+│                                                                    │
+│  User Agents (Postgres, per-project)      ← user-owned, mutable   │
+│  ┌──────────────────────────────────────┐                         │
+│  │  Same agent_configs table            │ user_id + project_id    │
+│  │  ├─ system: false                   │ scoped. User can create, │
+│  │  ├─ capability_embedding vector(1536)│ edit, delete freely.    │
+│  │  └─ overrides system agent if same  │                         │
+│  │     name exists (shadow pattern)    │                         │
+│  └──────────────────────────────────────┘                         │
+│                                                                    │
+│  DETS (per-project .agent_ex/)            ← memory only           │
+│  ┌──────────────────────────────────────┐                         │
+│  │  Tier 2: PersistentMemory (ETS+DETS) │ Key-value facts        │
+│  │  Tier 4: ProceduralMemory (ETS+DETS) │ Skills + observations  │
+│  └──────────────────────────────────────┘                         │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+**DETS scope after migration:** Only Tier 2 (PersistentMemory) and Tier 4
+(ProceduralMemory) remain in DETS. These are hot-path, per-agent key-value
+stores that benefit from in-process ETS + disk-backed DETS for fast reads
+and crash recovery. Everything else is in Postgres:
+
+| Data | Before (Phase 5d) | After (Phase 5f) |
+|------|-------------------|-------------------|
+| Agent configs | DETS (per-project) | **Postgres** (shared system + per-project user) |
+| HTTP tool configs | DETS (per-project) | **Postgres** (shared system + per-project user) |
+| Tier 2 memory | ETS + DETS | ETS + DETS (unchanged) |
+| Tier 4 skills | ETS + DETS | ETS + DETS (unchanged) |
+| Tier 3 memory | Postgres/pgvector | Postgres/pgvector (unchanged, Phase 5e) |
+| Knowledge graph | Postgres/pgvector | Postgres/pgvector (unchanged, Phase 5e) |
+| Workflows | Postgres | Postgres (unchanged) |
+
+**Capability discovery at orchestration time:**
+
+```elixir
+# Orchestrator receives: "Analyze AAPL stock and write a report"
+# Step 1: embed the task
+{:ok, task_vector} = Embeddings.embed(goal, project_id: project_id)
+
+# Step 2: search system + user agents by capability similarity
+agents = CapabilityIndex.search_agents(task_vector, project_id, limit: 8)
+#=> [%{name: "researcher", score: 0.92}, %{name: "analyst", score: 0.88},
+#    %{name: "writer", score: 0.85}, %{name: "my_earnings_bot", score: 0.81}]
+
+# Step 3: search tools the same way
+tools = CapabilityIndex.search_tools(task_vector, project_id, limit: 15)
+
+# Step 4: Planner sees only these 8 agents + 15 tools, not all 100+
+Planner.initial_plan(goal, agents, tools, budget)
+```
+
+**System agent lifecycle:**
+- `Defaults.Agents` templates are registered in Postgres at app boot (idempotent upsert)
+- Capability embeddings are computed once, stored alongside the agent config
+- Users see system agents in their project but can't edit/delete them
+- Users can "override" a system agent by creating a user agent with the same name
+  (shadow pattern — user version takes precedence)
+- When we update a default agent template, the next deploy propagates it to all projects
+
 ### Implementation Steps
 
 ```text
-5f-A: Dependencies + Foundation
+5f-A: Dependencies + Foundation + Capability Index
   │
   ├─ mix.exs: add {:gen_stage, "~> 1.2"}, {:flow, "~> 1.2"}
   ├─ TaskQueue: pure data structure (priority queue with depends_on)
   ├─ BudgetTracker: pure struct with zone calculation
-  └─ Tests for TaskQueue and BudgetTracker (no GenStage yet)
+  ├─ Migration: create agent_configs table (Postgres, replaces DETS)
+  │   ├─ id, user_id, project_id, name, description, role, expertise...
+  │   ├─ system boolean (true = default template, false = user-created)
+  │   ├─ capability_embedding vector(1536) + HNSW index
+  │   └─ ON DELETE CASCADE from projects for user agents
+  ├─ Migration: create tool_configs table (Postgres, replaces DETS)
+  │   ├─ id, user_id, project_id, name, description, method, url...
+  │   ├─ system boolean
+  │   ├─ capability_embedding vector(1536) + HNSW index
+  │   └─ ON DELETE CASCADE from projects for user tools
+  ├─ Rewrite AgentStore: ETS+DETS → Ecto queries (Postgres)
+  ├─ Rewrite HttpToolStore: ETS+DETS → Ecto queries (Postgres)
+  ├─ Defaults.register_system_agents/0: upsert templates + embed at app boot
+  ├─ CapabilityIndex: embed on create/update, cosine search for discovery
+  ├─ ToolAssembler: merge system + user agents/tools, user overrides system
+  ├─ Remove AgentStore/HttpToolStore from DetsManager lifecycle
+  └─ Tests for TaskQueue, BudgetTracker, CapabilityIndex, and store migration
 
 5f-B: Orchestrator GenStage
   │
@@ -4109,6 +4213,8 @@ ChatLive builds tree state from events:
 
 | Action | File | Purpose |
 |---|---|---|
+| Create | `priv/repo/migrations/*_create_agent_and_tool_configs.exs` | Postgres tables for agents + tools with capability embeddings |
+| Create | `lib/agent_ex/capability_index.ex` | Embed + cosine search for agent/tool discovery |
 | Create | `lib/agent_ex/orchestrator.ex` | GenStage producer + LLM scheduler |
 | Create | `lib/agent_ex/orchestrator/task_queue.ex` | Priority queue with dependency tracking |
 | Create | `lib/agent_ex/orchestrator/planner.ex` | LLM-based task planning + re-evaluation |
@@ -4122,11 +4228,15 @@ ChatLive builds tree state from events:
 | Create | `test/agent_ex/orchestrator_test.exs` | Orchestrator GenStage integration tests |
 | Create | `test/agent_ex/specialist_test.exs` | Specialist + delegation tests |
 | Create | `test/agent_ex/specialist/pool_test.exs` | Pool + Worker integration tests |
+| Rewrite | `lib/agent_ex/agent_store.ex` | ETS+DETS → Ecto queries (Postgres) |
+| Rewrite | `lib/agent_ex/http_tool_store.ex` | ETS+DETS → Ecto queries (Postgres) |
+| Modify | `lib/agent_ex/defaults.ex` | seed_project → register_system_agents at app boot |
+| Modify | `lib/agent_ex/dets_manager.ex` | Remove agent/tool DETS lifecycle (keep Tier 2/4 only) |
 | Modify | `mix.exs` | Add gen_stage + flow dependencies |
-| Modify | `lib/agent_ex/application.ex` | Add DelegationSupervisor to supervision tree |
+| Modify | `lib/agent_ex/application.ex` | Add DelegationSupervisor, system agent registration |
 | Modify | `lib/agent_ex/sensing.ex` | Add Flow-based batch dispatch option |
 | Modify | `lib/agent_ex/pipe.ex` | Add `Pipe.orchestrate/4` entry point |
-| Modify | `lib/agent_ex/tool_assembler.ex` | Add `orchestrator_specialists/2` helper |
+| Modify | `lib/agent_ex/tool_assembler.ex` | Merge system + user agents, capability search |
 | Create | `lib/agent_ex_web/components/agent_tree.ex` | Vertical agent tree LiveComponent |
 | Create | `assets/js/hooks/agent_tree.js` | Auto-scroll + collapse hook for agent tree |
 | Modify | `lib/agent_ex_web/live/chat_live.ex` | Replace pipeline_stages with agent_tree during orchestrate |
