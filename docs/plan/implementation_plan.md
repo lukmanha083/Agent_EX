@@ -4016,9 +4016,93 @@ The orchestrator uses `orchestrator: true` mode (Tier 1 only) as it does today.
 5f-G: Pipe Integration + API Surface
   │
   ├─ Pipe.orchestrate/4: public entry point
-  ├─ Wire into ChatLive (optional: behind feature flag)
   ├─ ToolAssembler: orchestrator_specialists/2 helper
   └─ End-to-end test: goal → orchestrate → result
+
+5f-H: Vertical Agent Tree UI
+  │
+  ├─ New event types: :agent_spawn, :agent_tool_call, :agent_tool_result,
+  │   :agent_delegate, :agent_complete (emitted by Specialist.Worker)
+  ├─ AgentTree LiveComponent: vertical tree with real-time state
+  ├─ Each agent node: robot icon + name + model + status + tool stream
+  │   (similar to Claude Code tool display — shows tool calls inline)
+  ├─ Sub-delegation renders as nested children with indent + tree lines
+  ├─ Orchestrator at root, specialists as children, sub-specialists as grandchildren
+  ├─ Wire into ChatLive: replace pipeline_stages with agent_tree during orchestrate runs
+  ├─ JS hook: auto-scroll to active agent node, collapse completed branches
+  └─ Pure CSS tree lines (border-l + pl- for indent, no JS library)
+```
+
+#### Agent Tree UI Design (5f-H)
+
+The agent tree replaces the horizontal pipeline progress bar with a vertical,
+real-time execution tree. Each agent node shows tool calls inline (like Claude
+Code shows tool use), and sub-specialists appear as nested children.
+
+```text
+┌─────────────────────────────────────────────────────────────┐
+│  🤖 Orchestrator (claude-sonnet-4-6)           ● planning   │
+│  │  Budget: 72% remaining (explore zone)                     │
+│  │                                                           │
+│  ├── 🤖 Researcher                             ● thinking   │
+│  │   ├─ 🔧 web_search("AAPL Q4 earnings")     ✓ 0.8s      │
+│  │   ├─ 🔧 fetch_url(sec.gov/10-Q/...)        ● running    │
+│  │   └─ 🔧 ...                                              │
+│  │                                                           │
+│  ├── 🤖 Researcher                             ✓ complete   │
+│  │   ├─ 🔧 web_search("MSFT Q4 earnings")     ✓ 1.2s      │
+│  │   └─ Result: "MSFT revenue $62B..."                      │
+│  │                                                           │
+│  ├── 🤖 Researcher                             ● thinking   │
+│  │   ├─ 🔧 web_search("GOOGL Q4 earnings")    ✓ 0.9s      │
+│  │   │                                                       │
+│  │   └── 🤖 FactChecker (sub-delegate)         ● running    │
+│  │       ├─ 🔧 web_search("verify GOOGL...")   ✓ 0.6s      │
+│  │       └─ 🔧 web_search("cross-check...")    ● running    │
+│  │                                                           │
+│  └── 🤖 Analyst                                ○ pending    │
+│      └─ Waiting for: Researcher (×3)                        │
+│                                                              │
+│  ─────────────────────────────────────────────               │
+│  Tasks: 3/5 complete │ Budget: 72% │ Zone: explore           │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Node states:**
+- `○ pending` — task queued, waiting for dependencies or capacity
+- `● planning/thinking` — LLM reasoning (pulse animation)
+- `● running` — executing tools (pulse animation)
+- `✓ complete` — done, result available (collapsible)
+- `✗ failed` — error, shows error message
+
+**Tool display (like Claude Code):**
+Each agent's tool calls appear inline below the agent node, streaming in
+real-time. Shows tool name, arguments preview, status dot, and duration.
+Completed tool results can be expanded/collapsed.
+
+**Sub-delegation:**
+When a specialist delegates to a sub-specialist, a new child node appears
+under the parent with increased indent. The parent shows "delegating to..."
+status. When the sub-specialist completes, its result collapses and the
+parent resumes.
+
+**Event flow:**
+```text
+Specialist.Worker emits:
+  {:agent_spawn, %{agent: "researcher", task_id: "t1", parent: "orchestrator"}}
+  {:agent_tool_call, %{agent: "researcher", tool: "web_search", args: %{...}}}
+  {:agent_tool_result, %{agent: "researcher", tool: "web_search", duration_ms: 800}}
+  {:agent_delegate, %{agent: "researcher", delegate_to: "fact_checker", task: "..."}}
+  {:agent_complete, %{agent: "researcher", result_preview: "AAPL: revenue..."}}
+
+ChatLive builds tree state from events:
+  %{
+    "orchestrator" => %{status: :planning, children: ["t1", "t2", "t3", "t4"]},
+    "t1" => %{agent: "researcher", status: :running, parent: "orchestrator",
+              tools: [%{name: "web_search", status: :complete, duration: 800}],
+              children: ["t1-sub1"]},
+    "t1-sub1" => %{agent: "fact_checker", status: :running, parent: "t1", ...}
+  }
 ```
 
 ### Files
@@ -4043,6 +4127,11 @@ The orchestrator uses `orchestrator: true` mode (Tier 1 only) as it does today.
 | Modify | `lib/agent_ex/sensing.ex` | Add Flow-based batch dispatch option |
 | Modify | `lib/agent_ex/pipe.ex` | Add `Pipe.orchestrate/4` entry point |
 | Modify | `lib/agent_ex/tool_assembler.ex` | Add `orchestrator_specialists/2` helper |
+| Create | `lib/agent_ex_web/components/agent_tree.ex` | Vertical agent tree LiveComponent |
+| Create | `assets/js/hooks/agent_tree.js` | Auto-scroll + collapse hook for agent tree |
+| Modify | `lib/agent_ex_web/live/chat_live.ex` | Replace pipeline_stages with agent_tree during orchestrate |
+| Modify | `lib/agent_ex_web/live/chat_live.html.heex` | Render agent_tree component |
+| Modify | `lib/agent_ex/event_loop/broadcast_handler.ex` | Emit agent_spawn/tool_call/delegate/complete events |
 
 ### Testing Strategy
 
