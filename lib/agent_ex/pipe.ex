@@ -399,17 +399,26 @@ defmodule AgentEx.Pipe do
       budget: budget
     ]
 
-    with {:ok, orch} <- Orchestrator.start_link(orch_opts),
-         {:ok, pool} <- start_pool(orch, specialists, max_concurrency, model_fn) do
-      try do
-        run_opts = [timeout: timeout, model_fn: model_fn]
-        run_opts = if run_id, do: Keyword.put(run_opts, :run_id, run_id), else: run_opts
+    case Orchestrator.start_link(orch_opts) do
+      {:ok, orch} ->
+        case start_pool(orch, specialists, max_concurrency, model_fn) do
+          {:ok, pool} ->
+            try do
+              run_opts = [timeout: timeout, model_fn: model_fn]
+              run_opts = if run_id, do: Keyword.put(run_opts, :run_id, run_id), else: run_opts
+              Orchestrator.run(orch, goal, run_opts)
+            after
+              Supervisor.stop(pool, :normal)
+              Orchestrator.stop(orch)
+            end
 
-        Orchestrator.run(orch, goal, run_opts)
-      after
-        Supervisor.stop(pool, :normal)
-        Orchestrator.stop(orch)
-      end
+          error ->
+            Orchestrator.stop(orch)
+            error
+        end
+
+      error ->
+        error
     end
   end
 

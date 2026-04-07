@@ -225,7 +225,8 @@ defmodule AgentEx.Orchestrator do
           {:noreply, events, state}
         end
 
-      {:error, _reason} ->
+      {:error, reason} ->
+        Logger.warning("Orchestrator [#{state.run_id}]: re-evaluation failed: #{inspect(reason)}")
         {events, state} = dispatch_ready(state)
         {:noreply, events, state}
     end
@@ -281,8 +282,9 @@ defmodule AgentEx.Orchestrator do
     {:noreply, [], state}
   end
 
-  defp truncate(text, max) when byte_size(text) <= max, do: text
-  defp truncate(text, max), do: String.slice(text, 0, max) <> "..."
+  defp truncate(text, max) do
+    if String.length(text) <= max, do: text, else: String.slice(text, 0, max) <> "..."
+  end
 
   defp generate_run_id do
     "orch-#{Base.url_encode64(:crypto.strong_rand_bytes(8), padding: false)}"

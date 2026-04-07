@@ -236,8 +236,9 @@ defmodule AgentEx.Orchestrator.Planner do
   defp parse_priority("low"), do: :low
   defp parse_priority(_), do: :normal
 
-  defp truncate(text, max) when byte_size(text) <= max, do: text
-  defp truncate(text, max), do: String.slice(text, 0, max) <> "..."
+  defp truncate(text, max) do
+    if String.length(text) <= max, do: text, else: String.slice(text, 0, max) <> "..."
+  end
 
   defp generate_id, do: "t-#{Base.url_encode64(:crypto.strong_rand_bytes(6), padding: false)}"
 end

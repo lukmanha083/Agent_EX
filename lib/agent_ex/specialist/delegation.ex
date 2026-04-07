@@ -37,12 +37,20 @@ defmodule AgentEx.Specialist.Delegation do
 
     caller = self()
 
-    {:ok, pid} =
-      DynamicSupervisor.start_child(
-        AgentEx.Specialist.DelegationSupervisor,
-        {Task, fn -> run_and_report(specialist, task, caller, opts) end}
-      )
+    case DynamicSupervisor.start_child(
+           AgentEx.Specialist.DelegationSupervisor,
+           {Task, fn -> run_and_report(specialist, task, caller, opts) end}
+         ) do
+      {:ok, pid} ->
+        await_delegation(pid, specialist.name, timeout)
 
+      {:error, reason} ->
+        Logger.error("Failed to start delegation to #{specialist.name}: #{inspect(reason)}")
+        {:error, {:delegation_start_failed, reason}}
+    end
+  end
+
+  defp await_delegation(pid, name, timeout) do
     ref = Process.monitor(pid)
 
     receive do
@@ -51,13 +59,13 @@ defmodule AgentEx.Specialist.Delegation do
         result
 
       {:DOWN, ^ref, :process, ^pid, reason} ->
-        Logger.error("Delegation to #{specialist.name} crashed: #{inspect(reason)}")
+        Logger.error("Delegation to #{name} crashed: #{inspect(reason)}")
         {:error, {:delegation_failed, reason}}
     after
       timeout ->
         Process.demonitor(ref, [:flush])
         DynamicSupervisor.terminate_child(AgentEx.Specialist.DelegationSupervisor, pid)
-        Logger.warning("Delegation to #{specialist.name} timed out after #{timeout}ms")
+        Logger.warning("Delegation to #{name} timed out after #{timeout}ms")
         {:error, :delegation_timeout}
     end
   end

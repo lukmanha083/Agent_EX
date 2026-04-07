@@ -78,20 +78,38 @@ defmodule AgentEx.OrchestratorTest do
     end
 
     test "respects max_iterations safety limit" do
-      # model_fn always adds more tasks (never converges)
+      call_count = :counters.new(1, [:atomics])
+
+      # model_fn: initial plan returns 1 task, re-eval always adds another,
+      # converge returns final text
       model_fn = fn _messages ->
-        {:ok,
-         Jason.encode!(%{
-           action: "add",
-           tasks: [
-             %{
-               id: "t-#{System.unique_integer([:positive])}",
-               specialist: "researcher",
-               input: "more work",
-               priority: "normal"
-             }
-           ]
-         })}
+        call = :counters.get(call_count, 1) + 1
+        :counters.put(call_count, 1, call)
+
+        cond do
+          call == 1 ->
+            {:ok,
+             Jason.encode!([
+               %{id: "t1", specialist: "researcher", input: "work", priority: "high"}
+             ])}
+
+          call <= 32 ->
+            {:ok,
+             Jason.encode!(%{
+               action: "add",
+               tasks: [
+                 %{
+                   id: "t#{call}",
+                   specialist: "researcher",
+                   input: "more work",
+                   priority: "normal"
+                 }
+               ]
+             })}
+
+          true ->
+            {:ok, "Final result after max iterations."}
+        end
       end
 
       {:ok, orch} =
@@ -103,24 +121,12 @@ defmodule AgentEx.OrchestratorTest do
 
       task =
         Task.async(fn ->
-          Orchestrator.run(orch, "infinite loop test",
-            model_fn: fn messages ->
-              # Initial plan returns 1 task, then always converge on re-eval
-              if length(messages) == 2 and hd(messages).role == :system do
-                {:ok,
-                 Jason.encode!([
-                   %{id: "t1", specialist: "researcher", input: "work", priority: "high"}
-                 ])}
-              else
-                {:ok, "Final result after max iterations."}
-              end
-            end
-          )
+          Orchestrator.run(orch, "iteration limit test", model_fn: model_fn)
         end)
 
       Process.sleep(100)
 
-      # Report enough results to hit max_iterations
+      # Report results to keep the orchestrator iterating
       for i <- 1..31 do
         Orchestrator.report_result(orch, "t#{i}", "result #{i}", 100)
         Process.sleep(10)

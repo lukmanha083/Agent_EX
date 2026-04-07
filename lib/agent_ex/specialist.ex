@@ -26,8 +26,6 @@ defmodule AgentEx.Specialist do
   alias AgentEx.{Message, ToolAgent, ToolCallerLoop}
   alias AgentEx.Specialist.Delegation
 
-  require Logger
-
   @doc """
   Execute a task using this specialist's tools and model.
 
@@ -40,7 +38,11 @@ defmodule AgentEx.Specialist do
     model_fn = Keyword.get(opts, :model_fn)
 
     messages = [
-      Message.system(specialist.system_message || "You are #{specialist.name}."),
+      Message.system(
+        specialist.system_message ||
+          (specialist.name && "You are #{specialist.name}.") ||
+          "You are a specialist."
+      ),
       Message.user(task.input)
     ]
 

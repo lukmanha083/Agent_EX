@@ -39,7 +39,7 @@ defmodule AgentEx.Specialist.Worker do
 
     Logger.info("Specialist.Worker [#{specialist.name}]: executing task #{task.id}")
 
-    case Specialist.execute(specialist, task, model_fn: model_fn) do
+    case safe_execute(specialist, task, model_fn) do
       {:ok, result_text, usage} ->
         Logger.info("Specialist.Worker [#{specialist.name}]: task #{task.id} done")
         Orchestrator.report_result(report_to, task.id, result_text, usage)
@@ -49,14 +49,16 @@ defmodule AgentEx.Specialist.Worker do
           "Specialist.Worker [#{specialist.name}]: task #{task.id} failed: #{inspect(reason)}"
         )
 
-        Orchestrator.report_result(
-          report_to,
-          task.id,
-          "Error: #{inspect(reason)}",
-          0
-        )
+        Orchestrator.report_result(report_to, task.id, "Error: #{inspect(reason)}", 0)
     end
 
     {:stop, :normal, state}
+  end
+
+  defp safe_execute(specialist, task, model_fn) do
+    Specialist.execute(specialist, task, model_fn: model_fn)
+  rescue
+    e ->
+      {:error, {:exception, Exception.message(e)}}
   end
 end
