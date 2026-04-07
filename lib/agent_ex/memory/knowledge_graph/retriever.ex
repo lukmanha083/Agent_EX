@@ -84,6 +84,7 @@ defmodule AgentEx.Memory.KnowledgeGraph.Retriever do
       if entity_ids != [] do
         from(f in Fact,
           where: f.source_entity_id in ^entity_ids or f.target_entity_id in ^entity_ids,
+          order_by: [desc: f.updated_at],
           limit: ^(limit * 3),
           select: %{
             description: f.description,

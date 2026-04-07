@@ -229,11 +229,12 @@ defmodule AgentEx.Memory.KnowledgeGraph.Store do
   end
 
   defp store_facts(relationships, entity_map) do
-    Enum.each(relationships, fn rel ->
-      store_single_fact(rel, entity_map)
+    Enum.reduce_while(relationships, :ok, fn rel, :ok ->
+      case store_single_fact(rel, entity_map) do
+        :ok -> {:cont, :ok}
+        {:error, _} = err -> {:halt, err}
+      end
     end)
-
-    :ok
   end
 
   defp store_single_fact(rel, entity_map) do
@@ -244,35 +245,29 @@ defmodule AgentEx.Memory.KnowledgeGraph.Store do
       embedding =
         embed_or_nil("#{rel["source"]} #{rel["type"]} #{rel["target"]}: #{rel["description"]}")
 
-      result =
-        %Fact{}
-        |> Fact.changeset(%{
-          source_entity_id: source_id,
-          target_entity_id: target_id,
-          fact_type: rel["type"],
-          description: rel["description"],
-          confidence: rel["confidence"] || "MEDIUM",
-          description_embedding: embedding
-        })
-        |> Repo.insert(
-          on_conflict:
-            {:replace, [:description, :confidence, :description_embedding, :updated_at]},
-          conflict_target: [:source_entity_id, :target_entity_id, :fact_type]
-        )
-
-      case result do
-        {:ok, _} ->
-          :ok
-
-        {:error, changeset} ->
-          Logger.warning(
-            "Failed to store fact #{rel["source"]}→#{rel["target"]}: #{inspect(changeset.errors)}"
-          )
+      %Fact{}
+      |> Fact.changeset(%{
+        source_entity_id: source_id,
+        target_entity_id: target_id,
+        fact_type: rel["type"],
+        description: rel["description"],
+        confidence: rel["confidence"] || "MEDIUM",
+        description_embedding: embedding
+      })
+      |> Repo.insert(
+        on_conflict: {:replace, [:description, :confidence, :description_embedding, :updated_at]},
+        conflict_target: [:source_entity_id, :target_entity_id, :fact_type]
+      )
+      |> case do
+        {:ok, _} -> :ok
+        {:error, changeset} -> {:error, {:fact_insert_failed, rel, changeset.errors}}
       end
     else
       Logger.warning(
         "Skipping relationship: missing entity - source=#{rel["source"]} target=#{rel["target"]}"
       )
+
+      :ok
     end
   end
 
@@ -368,8 +363,12 @@ defmodule AgentEx.Memory.KnowledgeGraph.Store do
 
   defp embed_or_nil(text) do
     case Embeddings.embed(text) do
-      {:ok, vector} -> vector
-      _ -> nil
+      {:ok, vector} ->
+        vector
+
+      {:error, reason} ->
+        Logger.debug("Embedding failed (non-critical): #{inspect(reason)}")
+        nil
     end
   end
 end
