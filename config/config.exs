@@ -18,7 +18,7 @@ config :agent_ex, :scopes,
 
 config :agent_ex,
   ecto_repos: [AgentEx.Repo],
-  embedding_model: "text-embedding-3-small",
+  embedding_model: "text-embedding-3-large",
   embedding_dimensions: 1536,
   extraction_model: "gpt-4o-mini",
   persistent_memory_sync_interval: :timer.seconds(30),

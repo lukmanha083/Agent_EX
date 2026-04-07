@@ -52,6 +52,22 @@ defmodule AgentExWeb.ProjectsLive.New do
               </div>
             </fieldset>
 
+            <fieldset class="border-t border-gray-800 pt-4">
+              <legend class="text-xs font-medium text-gray-500 uppercase tracking-wider">Embedding Key</legend>
+              <.input
+                type="password"
+                name="embedding_key"
+                value={@form["embedding_key"]}
+                label="OpenAI API Key (for embeddings)"
+                placeholder="sk-..."
+                required
+              />
+              <p class="text-[10px] text-gray-500 mt-1">
+                Required for semantic memory and knowledge graph. Uses text-embedding-3-large.
+                You can manage this later in the Vault.
+              </p>
+            </fieldset>
+
             <.button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white">
               Create Project
             </.button>
@@ -83,7 +99,8 @@ defmodule AgentExWeb.ProjectsLive.New do
          "description" => "",
          "root_path" => "",
          "provider" => default_provider,
-         "model" => default_model
+         "model" => default_model,
+         "embedding_key" => ""
        },
        provider_options: provider_options(),
        model_options: model_select_options(default_provider),
@@ -107,7 +124,8 @@ defmodule AgentExWeb.ProjectsLive.New do
       "description" => params["description"] || "",
       "root_path" => params["root_path"] || "",
       "provider" => new_provider,
-      "model" => current_model
+      "model" => current_model,
+      "embedding_key" => params["embedding_key"] || ""
     }
 
     socket =
@@ -124,25 +142,32 @@ defmodule AgentExWeb.ProjectsLive.New do
 
   def handle_event("create_project", params, socket) do
     user = socket.assigns.current_scope.user
+    embedding_key = String.trim(params["embedding_key"] || "")
 
-    attrs = %{
-      user_id: user.id,
-      name: String.trim(params["name"] || ""),
-      description: blank_to_nil(params["description"]),
-      root_path: blank_to_nil(params["root_path"]),
-      provider: params["provider"] || "anthropic",
-      model: params["model"] || default_model_for(params["provider"] || "anthropic")
-    }
+    if embedding_key == "" do
+      {:noreply, put_flash(socket, :error, "OpenAI embedding key is required")}
+    else
+      attrs = %{
+        user_id: user.id,
+        name: String.trim(params["name"] || ""),
+        description: blank_to_nil(params["description"]),
+        root_path: blank_to_nil(params["root_path"]),
+        provider: params["provider"] || "anthropic",
+        model: params["model"] || default_model_for(params["provider"] || "anthropic")
+      }
 
-    case Projects.create_project(attrs) do
-      {:ok, project} ->
-        {:noreply,
-         socket
-         |> put_flash(:info, "Project '#{project.name}' created!")
-         |> redirect(to: ~p"/chat")}
+      case Projects.create_project(attrs) do
+        {:ok, project} ->
+          AgentEx.Vault.set_secret(project.id, "embedding:openai", embedding_key)
 
-      {:error, changeset} ->
-        {:noreply, put_flash(socket, :error, "Failed: #{format_errors(changeset)}")}
+          {:noreply,
+           socket
+           |> put_flash(:info, "Project '#{project.name}' created!")
+           |> redirect(to: ~p"/chat")}
+
+        {:error, changeset} ->
+          {:noreply, put_flash(socket, :error, "Failed: #{format_errors(changeset)}")}
+      end
     end
   end
 

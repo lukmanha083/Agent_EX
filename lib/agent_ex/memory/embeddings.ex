@@ -1,7 +1,8 @@
 defmodule AgentEx.Memory.Embeddings do
   @moduledoc """
   OpenAI embedding API client.
-  Uses text-embedding-3-small (1536 dimensions).
+  Uses text-embedding-3-large truncated to 1536 dimensions for optimal
+  retrieval quality at the same storage cost as text-embedding-3-small.
   Supports project-scoped API keys via Vault.
   """
 
@@ -18,7 +19,8 @@ defmodule AgentEx.Memory.Embeddings do
     if api_key == "" or is_nil(api_key) do
       {:error, :missing_api_key}
     else
-      body = %{input: text, model: model}
+      dimensions = Application.get_env(:agent_ex, :embedding_dimensions, 1536)
+      body = %{input: text, model: model, dimensions: dimensions}
 
       case Req.post(@url,
              json: body,
@@ -48,7 +50,8 @@ defmodule AgentEx.Memory.Embeddings do
     if api_key == "" or is_nil(api_key) do
       {:error, :missing_api_key}
     else
-      body = %{input: texts, model: model}
+      dimensions = Application.get_env(:agent_ex, :embedding_dimensions, 1536)
+      body = %{input: texts, model: model, dimensions: dimensions}
 
       case Req.post(@url,
              json: body,

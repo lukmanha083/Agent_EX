@@ -24,6 +24,7 @@ defmodule AgentExWeb.Features.ProjectManagementTest do
       |> fill_in(css("input[name='name']"), with: "Research Project")
       |> fill_in(css("input[name='description']"), with: "ML research workspace")
       |> fill_in(css("input[name='root_path']"), with: "/tmp/research")
+      |> fill_in(css("input[name='embedding_key']"), with: "sk-test-key-for-ci")
       |> click(button("Create Project"))
       |> visit("/projects")
       |> assert_has(css("[data-testid='project-grid']", text: "Research Project"))
