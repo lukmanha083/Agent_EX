@@ -347,7 +347,7 @@ defmodule AgentEx.Orchestrator do
   defp persist_task_result(run_id, task_id, result, usage, state) do
     Run.update_task(run_id, task_id, %{
       "status" => "completed",
-      "result" => truncate(result, 2000),
+      "result" => if(result, do: truncate(result, 2000), else: ""),
       "usage" => usage || 0
     })
 

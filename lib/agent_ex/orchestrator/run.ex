@@ -83,6 +83,10 @@ defmodule AgentEx.Orchestrator.Run do
     end
   end
 
+  defp parse_priority("high"), do: :high
+  defp parse_priority("low"), do: :low
+  defp parse_priority(_), do: :normal
+
   defp merge_task(tasks, task_id, updates) do
     Enum.map(tasks, fn task ->
       if task["id"] == task_id, do: Map.merge(task, updates), else: task
@@ -176,7 +180,7 @@ defmodule AgentEx.Orchestrator.Run do
               id: t["id"],
               specialist: t["specialist"],
               input: t["input"],
-              priority: String.to_existing_atom(t["priority"] || "normal"),
+              priority: parse_priority(t["priority"]),
               depends_on: t["depends_on"] || []
             }
           end)
