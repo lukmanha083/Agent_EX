@@ -93,7 +93,7 @@ defmodule AgentEx.Memory.Promotion do
           # Async skill extraction with timeout (60s) — non-blocking
           Task.Supervisor.start_child(AgentEx.TaskSupervisor, fn ->
             task =
-              Task.async(fn ->
+              Task.Supervisor.async_nolink(AgentEx.TaskSupervisor, fn ->
                 Reflector.reflect(user_id, project_id, agent_id, session_id, model_client)
               end)
 
