@@ -195,6 +195,9 @@ defmodule AgentEx.Orchestrator do
   defp do_dispatch(state, max_to_take) do
     {tasks, queue} = TaskQueue.take(state.queue, max_to_take, state.completed_ids)
 
+    # Stamp run_id on each task so Worker can broadcast agent tree events
+    tasks = Enum.map(tasks, &Map.put(&1, :run_id, state.run_id))
+
     active =
       Enum.reduce(tasks, state.active, fn task, acc ->
         Map.put(acc, task.id, :dispatched)

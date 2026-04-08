@@ -54,8 +54,19 @@
         <.message_bubble role={msg.role} content={msg.content} model={@model} user_initials={@user_initials} />
       </div>
 
-      <!-- Tool call cards -->
-      <div :for={event <- @events}>
+      <!-- Agent tree (shown during orchestration runs) -->
+      <.agent_tree
+        :if={@agent_tree != %{}}
+        tree={@agent_tree}
+        budget={@agent_tree_budget}
+        task_stats={@agent_tree_stats}
+      />
+
+      <!-- Orchestration warning banner -->
+      <.orchestration_banner active={@agent_tree != %{}} />
+
+      <!-- Tool call cards (non-orchestration runs) -->
+      <div :if={@agent_tree == %{}} :for={event <- @events}>
         <.tool_card
           :if={event.type == :tool_call}
           name={event.data.tool_name}
@@ -63,8 +74,8 @@
         />
       </div>
 
-      <!-- Pipeline stages -->
-      <.pipeline_stages stages={@stages} />
+      <!-- Pipeline stages (non-orchestration) -->
+      <.pipeline_stages :if={@agent_tree == %{}} stages={@stages} />
 
       <!-- Thinking indicator -->
       <.thinking_indicator active={@thinking} />

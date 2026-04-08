@@ -17,6 +17,12 @@ defmodule AgentEx.EventLoop.Event do
           | :fan_out_complete
           | :pipeline_complete
           | :pipeline_error
+          # Agent tree events (orchestration)
+          | :agent_spawn
+          | :agent_tool_call
+          | :agent_tool_result
+          | :agent_delegate
+          | :agent_complete
 
   @type t :: %__MODULE__{
           type: event_type(),

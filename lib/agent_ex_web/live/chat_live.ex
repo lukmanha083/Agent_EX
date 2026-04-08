@@ -4,6 +4,7 @@ defmodule AgentExWeb.ChatLive do
   alias AgentEx.{AgentStore, Chat, EventLoop, Memory, ToolAssembler}
   alias AgentEx.EventLoop.Event
 
+  import AgentExWeb.AgentTreeComponents
   import AgentExWeb.ChatComponents
   import AgentExWeb.ConversationComponents
   import AgentExWeb.CoreComponents, except: [button: 1]
@@ -48,7 +49,10 @@ defmodule AgentExWeb.ChatLive do
          user_initials: AgentExWeb.Layouts.initials(user.username || user.email),
          timezone: user.timezone || "Etc/UTC",
          conversation: nil,
-         conversations: conversations
+         conversations: conversations,
+         agent_tree: %{},
+         agent_tree_stats: %{completed: 0, total: 0},
+         agent_tree_budget: nil
        )}
     end
   end
@@ -84,7 +88,10 @@ defmodule AgentExWeb.ChatLive do
        events: [],
        stages: [],
        thinking: false,
-       run_id: nil
+       run_id: nil,
+       agent_tree: %{},
+       agent_tree_stats: %{completed: 0, total: 0},
+       agent_tree_budget: nil
      )}
   end
 
@@ -300,6 +307,9 @@ defmodule AgentExWeb.ChatLive do
        thinking: false,
        stages: [],
        run_id: nil,
+       agent_tree: %{},
+       agent_tree_stats: %{completed: 0, total: 0},
+       agent_tree_budget: nil,
        conversations:
          Chat.list_conversations(socket.assigns.current_scope.user.id, socket.assigns.project.id)
      )}
@@ -317,8 +327,55 @@ defmodule AgentExWeb.ChatLive do
        events: [],
        thinking: false,
        stages: [],
-       run_id: nil
+       run_id: nil,
+       agent_tree: %{},
+       agent_tree_stats: %{completed: 0, total: 0},
+       agent_tree_budget: nil
      )}
+  end
+
+  # -- Agent tree events (orchestration) --
+
+  defp handle_run_event(%Event{type: :agent_spawn} = event, socket) do
+    task_id = event.data.task_id
+    events = socket.assigns.events ++ [event]
+    order = map_size(socket.assigns.agent_tree)
+
+    node = %{
+      agent: event.data.agent,
+      model: event.data[:model],
+      status: :running,
+      tools: [],
+      children: [],
+      result_preview: nil,
+      error: nil,
+      order: order
+    }
+
+    tree = Map.put(socket.assigns.agent_tree, task_id, node)
+    stats = %{socket.assigns.agent_tree_stats | total: map_size(tree)}
+
+    {:noreply, assign(socket, events: events, agent_tree: tree, agent_tree_stats: stats)}
+  end
+
+  defp handle_run_event(%Event{type: :agent_tool_call} = event, socket) do
+    task_id = event.data.task_id
+    events = socket.assigns.events ++ [event]
+    tree = update_tree_node_tool_call(socket.assigns.agent_tree, task_id, event.data)
+    {:noreply, assign(socket, events: events, agent_tree: tree)}
+  end
+
+  defp handle_run_event(%Event{type: :agent_complete} = event, socket) do
+    task_id = event.data.task_id
+    events = socket.assigns.events ++ [event]
+    tree = update_tree_node_complete(socket.assigns.agent_tree, task_id, event.data)
+
+    completed =
+      Enum.count(tree, fn {_id, n} -> n && n.status in [:complete, :failed] end)
+
+    stats = %{socket.assigns.agent_tree_stats | completed: completed}
+
+    {:noreply, assign(socket, events: events, agent_tree: tree, agent_tree_stats: stats)}
   end
 
   defp handle_run_event(%Event{} = event, socket) do
@@ -477,7 +534,10 @@ defmodule AgentExWeb.ChatLive do
       events: [],
       stages: [],
       thinking: false,
-      run_id: nil
+      run_id: nil,
+      agent_tree: %{},
+      agent_tree_stats: %{completed: 0, total: 0},
+      agent_tree_budget: nil
     )
   end
 
@@ -770,4 +830,47 @@ defmodule AgentExWeb.ChatLive do
   end
 
   defp needs_reasoning?(_), do: false
+
+  # -- Agent tree helpers --
+
+  defp update_tree_node_tool_call(tree, task_id, data) do
+    Map.update(tree, task_id, nil, fn
+      nil ->
+        nil
+
+      node ->
+        tool_entry = %{
+          name: data.tool_name,
+          call_id: data.call_id,
+          status: :running,
+          duration_ms: nil
+        }
+
+        %{node | tools: node.tools ++ [tool_entry], status: :thinking}
+    end)
+  end
+
+  defp update_tree_node_complete(tree, task_id, data) do
+    Map.update(tree, task_id, nil, fn
+      nil ->
+        nil
+
+      node ->
+        tools = finalize_tools(node.tools)
+
+        %{
+          node
+          | status: data.status,
+            tools: tools,
+            result_preview: data[:result_preview],
+            error: data[:error]
+        }
+    end)
+  end
+
+  defp finalize_tools(tools) do
+    Enum.map(tools, fn t ->
+      if t.status == :running, do: %{t | status: :complete}, else: t
+    end)
+  end
 end
