@@ -2,6 +2,10 @@ defmodule AgentEx.Memory.WorkingMemory.Server do
   @moduledoc """
   Per-user, per-project, per-agent, per-session GenServer holding conversation messages (Tier 1).
   Registered via Registry keyed on `{user_id, project_id, agent_id, session_id}`.
+
+  Sessions auto-expire after an idle timeout (default: 30 minutes). On timeout,
+  the session stops gracefully — callers should use `Promotion.close_session_with_summary`
+  for explicit close with Tier 3 promotion.
   """
 
   use GenServer
@@ -10,7 +14,20 @@ defmodule AgentEx.Memory.WorkingMemory.Server do
 
   alias AgentEx.Memory.Message
 
-  defstruct [:user_id, :project_id, :agent_id, :session_id, :max_messages, messages: []]
+  require Logger
+
+  @default_idle_timeout :timer.minutes(30)
+
+  defstruct [
+    :user_id,
+    :project_id,
+    :agent_id,
+    :session_id,
+    :max_messages,
+    :idle_timeout,
+    messages: [],
+    last_activity: nil
+  ]
 
   # --- Client API ---
 
@@ -20,10 +37,11 @@ defmodule AgentEx.Memory.WorkingMemory.Server do
     agent_id = Keyword.fetch!(opts, :agent_id)
     session_id = Keyword.fetch!(opts, :session_id)
     max = Keyword.get(opts, :max_messages, default_max_messages())
+    idle_timeout = Keyword.get(opts, :idle_timeout, @default_idle_timeout)
 
     GenServer.start_link(
       __MODULE__,
-      {user_id, project_id, agent_id, session_id, max},
+      {user_id, project_id, agent_id, session_id, max, idle_timeout},
       name: via(user_id, project_id, agent_id, session_id)
     )
   end
@@ -74,16 +92,18 @@ defmodule AgentEx.Memory.WorkingMemory.Server do
   # --- Server callbacks ---
 
   @impl GenServer
-  def init({user_id, project_id, agent_id, session_id, max_messages}) do
+  def init({user_id, project_id, agent_id, session_id, max_messages, idle_timeout}) do
     state = %__MODULE__{
       user_id: user_id,
       project_id: project_id,
       agent_id: agent_id,
       session_id: session_id,
-      max_messages: max_messages
+      max_messages: max_messages,
+      idle_timeout: idle_timeout,
+      last_activity: System.monotonic_time(:millisecond)
     }
 
-    {:ok, state}
+    {:ok, state, idle_timeout}
   end
 
   @impl GenServer
@@ -98,23 +118,34 @@ defmodule AgentEx.Memory.WorkingMemory.Server do
         messages
       end
 
-    {:reply, :ok, %{state | messages: messages}}
+    state = %{state | messages: messages, last_activity: System.monotonic_time(:millisecond)}
+    {:reply, :ok, state, state.idle_timeout}
   end
 
   @impl GenServer
   def handle_call(:get_messages, _from, state) do
-    {:reply, state.messages, state}
+    {:reply, state.messages, state, state.idle_timeout}
   end
 
   @impl GenServer
   def handle_call({:get_recent, n}, _from, state) do
     recent = Enum.take(state.messages, -n)
-    {:reply, recent, state}
+    {:reply, recent, state, state.idle_timeout}
   end
 
   @impl GenServer
   def handle_call(:clear, _from, state) do
-    {:reply, :ok, %{state | messages: []}}
+    {:reply, :ok, %{state | messages: []}, state.idle_timeout}
+  end
+
+  @impl GenServer
+  def handle_info(:timeout, state) do
+    Logger.info(
+      "WorkingMemory: session #{state.session_id} for agent #{state.agent_id} " <>
+        "idle timeout (#{div(state.idle_timeout, 60_000)}min) — stopping"
+    )
+
+    {:stop, :normal, state}
   end
 
   defp via(user_id, project_id, agent_id, session_id) do
