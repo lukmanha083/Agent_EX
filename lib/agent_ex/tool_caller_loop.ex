@@ -163,6 +163,11 @@ defmodule AgentEx.ToolCallerLoop do
     last = List.last(generated)
 
     cond do
+      # ACT: LLM returned text — but check for hallucinated tool calls first
+      not has_tool_calls?(last) and iteration < context.max_iterations and
+          has_hallucinated_tool_call?(last) ->
+        retry_hallucinated_tool_call(context, generated, iteration)
+
       # ACT: LLM returned text — the loop is complete
       not has_tool_calls?(last) ->
         Logger.debug("ToolCallerLoop: ACT phase — final text response (iteration #{iteration})")
@@ -307,6 +312,28 @@ defmodule AgentEx.ToolCallerLoop do
     end)
   end
 
+  # -- Hallucinated tool call recovery --
+
+  defp retry_hallucinated_tool_call(context, generated, iteration) do
+    Logger.warning(
+      "ToolCallerLoop: detected hallucinated tool call in text (iteration #{iteration}), retrying"
+    )
+
+    correction =
+      Message.user(
+        "You wrote a tool call as text instead of using the function calling API. " <>
+          "Do NOT output tool calls as text or XML. Use the actual tools provided to you. " <>
+          "Call the appropriate delegate_to_* tool now."
+      )
+
+    all_messages = context.input_messages ++ generated ++ [correction]
+
+    case think(context, all_messages) do
+      {:ok, response} -> loop(context, generated ++ [correction, response], iteration + 1)
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   # -- Model dispatch (supports model_fn override) --
 
   defp think(%{model_fn: fun, tools: tools}, messages) when is_function(fun, 2) do
@@ -433,4 +460,14 @@ defmodule AgentEx.ToolCallerLoop do
 
   defp has_tool_calls?(%Message{tool_calls: calls}) when is_list(calls) and calls != [], do: true
   defp has_tool_calls?(_), do: false
+
+  # Detect when the LLM outputs a tool call as text instead of using the API
+  defp has_hallucinated_tool_call?(%Message{content: content})
+       when is_binary(content) do
+    String.contains?(content, "<tool_call>") or
+      String.contains?(content, "delegate_to_") or
+      Regex.match?(~r/"name"\s*:\s*"delegate_to_/, content)
+  end
+
+  defp has_hallucinated_tool_call?(_), do: false
 end
