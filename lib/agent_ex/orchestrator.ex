@@ -16,7 +16,7 @@ defmodule AgentEx.Orchestrator do
 
   use GenStage
 
-  alias AgentEx.Orchestrator.{BudgetTracker, Planner, TaskQueue}
+  alias AgentEx.Orchestrator.{BudgetTracker, Planner, Run, TaskQueue}
 
   require Logger
 
@@ -97,6 +97,9 @@ defmodule AgentEx.Orchestrator do
     model_fn = Keyword.get(opts, :model_fn)
     plan_opts = [budget_prompt: budget_prompt, model_fn: model_fn]
 
+    project_id = Keyword.get(opts, :project_id)
+    user_id = Keyword.get(opts, :user_id)
+
     case Planner.initial_plan(goal, specialist_list, state.model_client, plan_opts) do
       {:ok, tasks} ->
         queue = TaskQueue.push_many(state.queue, tasks)
@@ -104,6 +107,8 @@ defmodule AgentEx.Orchestrator do
         Logger.info(
           "Orchestrator [#{run_id}]: planned #{length(tasks)} tasks for goal: #{truncate(goal, 80)}"
         )
+
+        persist_run(run_id, goal, tasks, state, project_id, user_id)
 
         state = %{
           state
@@ -146,6 +151,8 @@ defmodule AgentEx.Orchestrator do
             else: state.budget
           )
     }
+
+    persist_task_result(state.run_id, task_id, result, usage, state)
 
     cond do
       state.iteration >= state.max_iterations ->
@@ -272,14 +279,85 @@ defmodule AgentEx.Orchestrator do
 
     reply =
       case result do
-        {:ok, final_text} -> {:ok, final_text, summary}
-        {:error, reason} -> {:error, reason}
+        {:ok, final_text} ->
+          persist_completion(state.run_id, final_text)
+          {:ok, final_text, summary}
+
+        {:error, reason} ->
+          persist_failure(state.run_id, reason)
+          {:error, reason}
       end
 
     if state.caller, do: GenStage.reply(state.caller, reply)
 
     state = %{state | status: :done, caller: nil}
     {:noreply, [], state}
+  end
+
+  # --- Persistence helpers ---
+
+  defp persist_run(run_id, goal, tasks, state, project_id, user_id) do
+    task_records =
+      Enum.map(tasks, fn t ->
+        %{
+          "id" => t.id,
+          "specialist" => t.specialist,
+          "input" => t.input,
+          "priority" => to_string(t.priority),
+          "depends_on" => t.depends_on,
+          "status" => "pending",
+          "result" => nil,
+          "usage" => 0
+        }
+      end)
+
+    deps =
+      tasks
+      |> Enum.filter(&(&1.depends_on != []))
+      |> Map.new(&{&1.id, &1.depends_on})
+
+    Run.create(%{
+      id: run_id,
+      project_id: project_id,
+      user_id: user_id,
+      goal: goal,
+      status: "running",
+      tasks: task_records,
+      dependency_graph: deps,
+      budget_total: if(state.budget, do: state.budget.total),
+      max_iterations: state.max_iterations,
+      started_at: DateTime.utc_now()
+    })
+  rescue
+    e -> Logger.debug("Orchestrator: run persistence failed: #{Exception.message(e)}")
+  end
+
+  defp persist_completion(run_id, result_text) do
+    Run.complete(run_id, result_text)
+  rescue
+    e -> Logger.debug("Orchestrator: completion persistence failed: #{Exception.message(e)}")
+  end
+
+  defp persist_failure(run_id, reason) do
+    Run.fail(run_id, reason)
+  rescue
+    e -> Logger.debug("Orchestrator: failure persistence failed: #{Exception.message(e)}")
+  end
+
+  defp persist_task_result(run_id, task_id, result, usage, state) do
+    Run.update_task(run_id, task_id, %{
+      "status" => "completed",
+      "result" => if(result, do: truncate(result, 2000), else: ""),
+      "usage" => usage || 0
+    })
+
+    Run.update_progress(run_id, %{
+      iteration: state.iteration,
+      budget_used: if(state.budget, do: state.budget.used, else: 0),
+      budget_velocity: if(state.budget, do: state.budget.velocity, else: 0.0)
+    })
+  rescue
+    e -> Logger.debug("Orchestrator: task persistence failed: #{Exception.message(e)}")
   end
 
   defp truncate(text, max) do

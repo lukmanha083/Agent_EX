@@ -91,7 +91,7 @@ defmodule AgentEx.AgentStore do
     |> Schema.changeset(attrs)
     |> Repo.insert(
       on_conflict: {:replace_all_except, [:id, :name, :inserted_at]},
-      conflict_target: {:unsafe_fragment, "name WHERE system = true"}
+      conflict_target: {:unsafe_fragment, "(name) WHERE system = true"}
     )
   end
 
