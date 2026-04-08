@@ -24,7 +24,7 @@ defmodule AgentExWeb.Features.ConversationHistoryTest do
   end
 
   describe "conversation creation and sidebar" do
-    test "new conversation appears in sidebar after sending message", %{
+    test "new conversation appears in sidebar after toggling history", %{
       session: session,
       user: user,
       project: project
@@ -42,6 +42,7 @@ defmodule AgentExWeb.Features.ConversationHistoryTest do
       session
       |> resize_window(1280, 900)
       |> visit("/chat/#{convo.id}")
+      |> click(css("button[aria-label='Toggle conversation history']"))
       |> assert_has(css("[data-testid='conversation-sidebar']"))
       |> assert_has(css("[data-testid='conversation-item-#{convo.id}']"))
     end
@@ -104,6 +105,7 @@ defmodule AgentExWeb.Features.ConversationHistoryTest do
         session
         |> resize_window(1280, 900)
         |> visit("/chat/#{convo.id}")
+        |> click(css("button[aria-label='Toggle conversation history']"))
         |> assert_has(css("[data-testid='conversation-item-#{convo.id}']"))
 
       accept_confirm(session, fn s ->
@@ -122,25 +124,27 @@ defmodule AgentExWeb.Features.ConversationHistoryTest do
   end
 
   describe "responsive layout" do
-    test "desktop (1280px): conversation sidebar visible", %{session: session} do
+    test "history panel hidden by default, visible after toggle", %{session: session} do
       session
       |> resize_window(1280, 900)
       |> visit("/chat")
+      |> refute_has(css("[data-testid='conversation-sidebar']"))
+      |> click(css("button[aria-label='Toggle conversation history']"))
       |> assert_has(css("[data-testid='conversation-sidebar']"))
     end
 
-    test "mobile (375px): history sheet trigger visible in chat header", %{session: session} do
+    test "toggle button visible on mobile", %{session: session} do
       session
       |> resize_window(375, 812)
       |> visit("/chat")
-      |> assert_has(css("#mobile-history [data-part='trigger']"))
+      |> assert_has(css("button[aria-label='Toggle conversation history']"))
     end
 
-    test "tablet (768px): history sheet trigger visible in chat header", %{session: session} do
+    test "toggle button visible on tablet", %{session: session} do
       session
       |> resize_window(768, 1024)
       |> visit("/chat")
-      |> assert_has(css("#mobile-history [data-part='trigger']"))
+      |> assert_has(css("button[aria-label='Toggle conversation history']"))
     end
   end
 
