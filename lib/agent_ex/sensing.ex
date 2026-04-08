@@ -316,6 +316,7 @@ defmodule AgentEx.Sensing do
     case ToolAgent.execute(tool_agent, individual_call) do
       %FunctionResult{is_error: false, content: content} -> {:ok, content}
       %FunctionResult{is_error: true, content: content} -> {:error, content}
+      other -> {:error, "unexpected result: #{inspect(other)}"}
     end
   end
 

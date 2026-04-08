@@ -50,6 +50,7 @@ defmodule AgentExWeb.ChatLive do
          timezone: user.timezone || "Etc/UTC",
          conversation: nil,
          conversations: conversations,
+         show_history: false,
          agent_tree: %{},
          agent_tree_stats: %{completed: 0, total: 0},
          agent_tree_budget: nil
@@ -107,6 +108,10 @@ defmodule AgentExWeb.ChatLive do
     {:noreply, push_patch(socket, to: ~p"/chat")}
   end
 
+  def handle_event("toggle_history", _params, socket) do
+    {:noreply, assign(socket, show_history: !socket.assigns.show_history)}
+  end
+
   def handle_event("send", %{"message" => raw_message}, socket) do
     message = String.trim(raw_message)
 
@@ -153,7 +158,15 @@ defmodule AgentExWeb.ChatLive do
     messages =
       socket.assigns.messages ++ [%{role: :assistant, content: "Cancelled by user."}]
 
-    {:noreply, assign(socket, messages: messages, events: [], stages: [])}
+    {:noreply,
+     assign(socket,
+       messages: messages,
+       events: [],
+       stages: [],
+       agent_tree: %{},
+       agent_tree_stats: %{completed: 0, total: 0},
+       agent_tree_budget: nil
+     )}
   end
 
   def handle_event("clear", _params, socket) do
@@ -229,7 +242,17 @@ defmodule AgentExWeb.ChatLive do
       EventLoop.RunRegistry.error_run(socket.assigns.run_id)
       error_text = "Agent crashed: #{inspect(reason)}"
       messages = socket.assigns.messages ++ [%{role: :assistant, content: error_text}]
-      {:noreply, assign(socket, messages: messages, thinking: false, stages: [], run_id: nil)}
+
+      {:noreply,
+       assign(socket,
+         messages: messages,
+         thinking: false,
+         stages: [],
+         run_id: nil,
+         agent_tree: %{},
+         agent_tree_stats: %{completed: 0, total: 0},
+         agent_tree_budget: nil
+       )}
     else
       {:noreply, socket}
     end

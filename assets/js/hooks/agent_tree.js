@@ -3,6 +3,7 @@
  */
 const AgentTree = {
   mounted() {
+    this._lastActiveNodeId = null
     this.scrollToActive()
   },
 
@@ -11,13 +12,14 @@ const AgentTree = {
   },
 
   scrollToActive() {
-    // Find the first node with a pulsing dot (running/thinking)
-    const active = this.el.querySelector('.animate-pulse')
-    if (active) {
-      const node = active.closest('[id^="agent-node-"]')
-      if (node) {
-        node.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-      }
+    const pulsingElements = this.el.querySelectorAll('.animate-pulse')
+    if (pulsingElements.length === 0) return
+
+    const lastPulsing = pulsingElements[pulsingElements.length - 1]
+    const node = lastPulsing.closest('[id^="agent-node-"]')
+    if (node && node.id !== this._lastActiveNodeId) {
+      this._lastActiveNodeId = node.id
+      node.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
     }
   }
 }
