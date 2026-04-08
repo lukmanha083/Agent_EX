@@ -167,4 +167,118 @@ defmodule AgentEx.SensingTest do
       assert %Message{role: :tool, content: ^observations} = message
     end
   end
+
+  describe "batch dispatch" do
+    setup do
+      tools = [
+        Tool.new(
+          name: "enrich",
+          description: "Enrich an item",
+          parameters: %{},
+          function: fn %{"items" => item, "prefix" => prefix} ->
+            {:ok, "#{prefix}:#{item}"}
+          end
+        ),
+        Tool.new(
+          name: "flaky_enrich",
+          description: "Sometimes fails",
+          parameters: %{},
+          function: fn %{"items" => item} ->
+            if item == "bad" do
+              {:error, "item '#{item}' is invalid"}
+            else
+              {:ok, "enriched:#{item}"}
+            end
+          end
+        )
+      ]
+
+      {:ok, agent} = ToolAgent.start_link(tools: tools)
+      %{agent: agent}
+    end
+
+    test "splits multi-item call into parallel Flow and merges results", %{agent: agent} do
+      calls = [
+        %FunctionCall{
+          id: "c1",
+          name: "enrich",
+          arguments: ~s({"items": ["a", "b", "c"], "prefix": "v1"})
+        }
+      ]
+
+      batch_config = %{tool_name: "enrich", items_key: "items", max_demand: 2}
+      {:ok, _message, observations} = Sensing.sense(agent, calls, batch: batch_config)
+
+      assert [%FunctionResult{call_id: "c1", is_error: false} = result] = observations
+      # All three items should appear in the merged content
+      assert result.content =~ "v1:a"
+      assert result.content =~ "v1:b"
+      assert result.content =~ "v1:c"
+    end
+
+    test "single-item list dispatches normally without Flow", %{agent: agent} do
+      calls = [
+        %FunctionCall{
+          id: "c1",
+          name: "enrich",
+          arguments: ~s({"items": ["only"], "prefix": "v1"})
+        }
+      ]
+
+      batch_config = %{tool_name: "enrich", items_key: "items", max_demand: 5}
+      {:ok, _message, observations} = Sensing.sense(agent, calls, batch: batch_config)
+
+      assert [%FunctionResult{call_id: "c1", is_error: false} = result] = observations
+      assert result.content =~ "v1:only"
+    end
+
+    test "non-matching tool name dispatches normally", %{agent: agent} do
+      calls = [
+        %FunctionCall{
+          id: "c1",
+          name: "enrich",
+          arguments: ~s({"items": ["a", "b"], "prefix": "v1"})
+        }
+      ]
+
+      # batch_config targets a different tool
+      batch_config = %{tool_name: "other_tool", items_key: "items", max_demand: 5}
+      {:ok, _message, observations} = Sensing.sense(agent, calls, batch: batch_config)
+
+      assert [%FunctionResult{call_id: "c1", is_error: false}] = observations
+    end
+
+    test "partial failures in batch produce merged result with error summary", %{agent: agent} do
+      calls = [
+        %FunctionCall{
+          id: "c1",
+          name: "flaky_enrich",
+          arguments: ~s({"items": ["good", "bad", "also_good"]})
+        }
+      ]
+
+      batch_config = %{tool_name: "flaky_enrich", items_key: "items", max_demand: 5}
+      {:ok, _message, observations} = Sensing.sense(agent, calls, batch: batch_config)
+
+      assert [%FunctionResult{call_id: "c1", is_error: false} = result] = observations
+      assert result.content =~ "enriched:good"
+      assert result.content =~ "enriched:also_good"
+      assert result.content =~ "1 batch item(s) failed"
+    end
+
+    test "all failures in batch produces error result", %{agent: agent} do
+      calls = [
+        %FunctionCall{
+          id: "c1",
+          name: "flaky_enrich",
+          arguments: ~s({"items": ["bad", "bad"]})
+        }
+      ]
+
+      batch_config = %{tool_name: "flaky_enrich", items_key: "items", max_demand: 5}
+      {:ok, _message, observations} = Sensing.sense(agent, calls, batch: batch_config)
+
+      assert [%FunctionResult{call_id: "c1", is_error: true}] = observations
+    end
+  end
 end
