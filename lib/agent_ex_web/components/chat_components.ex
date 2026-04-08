@@ -107,6 +107,7 @@ defmodule AgentExWeb.ChatComponents do
 
   defp render_markdown(content) when is_binary(content) do
     content
+    |> strip_tool_call_artifacts()
     |> Earmark.as_html!(compact_output: true, smartypants: false)
     |> HtmlSanitizeEx.markdown_html()
     |> Phoenix.HTML.raw()
@@ -145,4 +146,14 @@ defmodule AgentExWeb.ChatComponents do
   defp stage_badge_variant(:complete), do: "outline"
   defp stage_badge_variant(:error), do: "destructive"
   defp stage_badge_variant(_), do: "secondary"
+
+  # Strip <tool_call>...</tool_call> XML and bare JSON tool call blocks
+  # that the model sometimes emits as text instead of proper function calls
+  defp strip_tool_call_artifacts(content) do
+    content
+    |> String.replace(~r/<tool_call>[\s\S]*?<\/tool_call>/m, "")
+    |> String.replace(~r/<tool_response>[\s\S]*?<\/tool_response>/m, "")
+    |> String.replace(~r/<tool_call>[\s\S]*/m, "")
+    |> String.trim()
+  end
 end

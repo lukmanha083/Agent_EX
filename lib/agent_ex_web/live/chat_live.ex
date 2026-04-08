@@ -271,10 +271,35 @@ defmodule AgentExWeb.ChatLive do
 
   defp handle_run_event(%Event{type: :tool_call} = event, socket) do
     events = socket.assigns.events ++ [event]
+    tool_name = event.data.tool_name
 
     stages =
       socket.assigns.stages ++
-        [%{name: event.data.tool_name, call_id: event.data.call_id, status: :running}]
+        [%{name: tool_name, call_id: event.data.call_id, status: :running}]
+
+    # Build agent tree node for delegate_to_* tool calls in regular chat
+    socket =
+      if String.starts_with?(tool_name, "delegate_to_") do
+        agent_name = String.replace_prefix(tool_name, "delegate_to_", "")
+        order = map_size(socket.assigns.agent_tree)
+
+        node = %{
+          agent: agent_name,
+          model: nil,
+          status: :running,
+          tools: [],
+          children: [],
+          result_preview: nil,
+          error: nil,
+          order: order
+        }
+
+        tree = Map.put(socket.assigns.agent_tree, event.data.call_id, node)
+        stats = %{socket.assigns.agent_tree_stats | total: map_size(tree)}
+        assign(socket, agent_tree: tree, agent_tree_stats: stats)
+      else
+        maybe_add_tool_to_delegate_node(socket, event.data)
+      end
 
     {:noreply, assign(socket, events: events, stages: stages)}
   end
@@ -289,6 +314,24 @@ defmodule AgentExWeb.ChatLive do
           do: %{stage | status: :complete},
           else: stage
       end)
+
+    # Complete agent tree node for delegate_to_* results
+    socket =
+      if Map.has_key?(socket.assigns.agent_tree, result_call_id) do
+        status = if event.data[:is_error], do: :failed, else: :complete
+        preview = event.data[:content] && String.slice(event.data[:content], 0, 200)
+
+        tree =
+          Map.update!(socket.assigns.agent_tree, result_call_id, fn node ->
+            %{node | status: status, result_preview: preview}
+          end)
+
+        completed = Enum.count(tree, fn {_id, n} -> n.status in [:complete, :failed] end)
+        stats = %{socket.assigns.agent_tree_stats | completed: completed}
+        assign(socket, agent_tree: tree, agent_tree_stats: stats)
+      else
+        socket
+      end
 
     {:noreply, assign(socket, events: events, stages: stages)}
   end
@@ -895,5 +938,20 @@ defmodule AgentExWeb.ChatLive do
     Enum.map(tools, fn t ->
       if t.status == :running, do: %{t | status: :complete}, else: t
     end)
+  end
+
+  # For non-delegate tool calls, attach them to the currently running delegate node
+  defp maybe_add_tool_to_delegate_node(socket, data) do
+    active_delegate =
+      Enum.find(socket.assigns.agent_tree, fn {_id, node} -> node.status == :running end)
+
+    case active_delegate do
+      {delegate_id, _node} ->
+        tree = update_tree_node_tool_call(socket.assigns.agent_tree, delegate_id, data)
+        assign(socket, agent_tree: tree)
+
+      nil ->
+        socket
+    end
   end
 end
