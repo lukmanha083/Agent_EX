@@ -101,6 +101,9 @@ defmodule AgentEx.Memory.Promotion do
               {:ok, _result} ->
                 :ok
 
+              {:exit, reason} ->
+                Logger.warning("Reflector: crashed for session #{session_id}: #{inspect(reason)}")
+
               nil ->
                 Task.shutdown(task, :brutal_kill)
                 Logger.warning("Reflector: timed out after 60s for session #{session_id}")

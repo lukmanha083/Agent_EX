@@ -97,33 +97,13 @@ defmodule AgentEx.Memory.ProceduralMemory.Store do
   end
 
   @doc """
-  Prune low-confidence skills for an agent.
+  Prune low-confidence skills for an agent (atomic via GenServer).
 
   Removes skills with confidence < threshold after min_observations.
-  Returns the number of pruned skills.
+  Returns `{:ok, count}` with the number of pruned skills.
   """
   def prune(user_id, project_id, agent_id, opts \\ []) do
-    threshold = Keyword.get(opts, :threshold, @prune_confidence_threshold)
-    min_obs = Keyword.get(opts, :min_observations, @prune_min_observations)
-
-    skills = all(user_id, project_id, agent_id)
-
-    prunable =
-      Enum.filter(skills, fn skill ->
-        total = skill.success_count + skill.failure_count
-        total >= min_obs and skill.confidence < threshold
-      end)
-
-    Enum.each(prunable, fn skill ->
-      delete(user_id, project_id, agent_id, skill.name)
-    end)
-
-    if prunable != [] do
-      names = Enum.map_join(prunable, ", ", & &1.name)
-      Logger.info("ProceduralMemory: pruned #{length(prunable)} low-confidence skills: #{names}")
-    end
-
-    {:ok, length(prunable)}
+    GenServer.call(__MODULE__, {:prune, user_id, project_id, agent_id, opts})
   end
 
   # --- Tier callbacks ---
@@ -214,6 +194,31 @@ defmodule AgentEx.Memory.ProceduralMemory.Store do
     keys = :ets.match_object(state.ets_table, pattern) |> Enum.map(fn {k, _} -> k end)
 
     delete_keys(state, keys, user_id, project_id)
+    {:reply, {:ok, length(keys)}, state}
+  end
+
+  @impl GenServer
+  def handle_call({:prune, user_id, project_id, agent_id, opts}, _from, state) do
+    threshold = Keyword.get(opts, :threshold, @prune_confidence_threshold)
+    min_obs = Keyword.get(opts, :min_observations, @prune_min_observations)
+
+    pattern = {{user_id, project_id, agent_id, :_}, :_}
+
+    prunable =
+      :ets.match_object(state.ets_table, pattern)
+      |> Enum.filter(fn {_key, skill} ->
+        total = skill.success_count + skill.failure_count
+        total >= min_obs and skill.confidence < threshold
+      end)
+
+    keys = Enum.map(prunable, fn {k, _} -> k end)
+    delete_keys(state, keys, user_id, project_id)
+
+    if keys != [] do
+      names = Enum.map_join(prunable, ", ", fn {_, s} -> s.name end)
+      Logger.info("ProceduralMemory: pruned #{length(keys)} low-confidence skills: #{names}")
+    end
+
     {:reply, {:ok, length(keys)}, state}
   end
 

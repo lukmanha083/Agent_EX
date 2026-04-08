@@ -54,18 +54,18 @@ defmodule AgentEx.Memory.PersistentMemory.Store do
     index_key = {user_id, project_id, agent_id, type}
 
     case :ets.lookup(@index_name, index_key) do
-      [{^index_key, keys}] -> lookup_entries(keys)
+      [{^index_key, keys}] -> lookup_entries_by_type(keys, type)
       [] -> []
     end
   rescue
     ArgumentError -> []
   end
 
-  defp lookup_entries(keys) do
+  defp lookup_entries_by_type(keys, type) do
     Enum.flat_map(keys, fn key ->
       case :ets.lookup(@store_name, key) do
-        [{_k, entry}] -> [entry]
-        [] -> []
+        [{_k, entry}] when entry.type == type -> [entry]
+        _ -> []
       end
     end)
   end
