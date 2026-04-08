@@ -4123,7 +4123,30 @@ Planner.initial_plan(goal, agents, tools, budget)
   ├─ ToolAssembler: orchestrator_specialists/2 helper
   └─ End-to-end test: goal → orchestrate → result
 
-5f-H: Vertical Agent Tree UI
+5f-H1: Persistent Orchestration Runs (crash recovery + multi-session)
+  │
+  ├─ Migration: create orchestration_runs table
+  │   ├─ project_id, user_id, run_id, goal, status
+  │   ├─ tasks JSONB (full task list with status, result, usage per task)
+  │   ├─ dependency_graph JSONB (task_id → [depends_on])
+  │   ├─ budget_total, budget_used, budget_velocity, iteration
+  │   ├─ started_at, paused_at, completed_at
+  │   └─ ON DELETE CASCADE from projects
+  ├─ Ecto schema: AgentEx.Orchestrator.Run
+  ├─ Orchestrator.run: persist run on start, update on each task result
+  │   └─ Each report_result writes completed task to DB (not just memory)
+  ├─ Orchestrator.resume(run_id): reconstruct state from DB
+  │   ├─ Rebuild TaskQueue from tasks JSONB (skip completed, re-queue pending)
+  │   ├─ Rebuild BudgetTracker from budget_used/velocity
+  │   └─ Continue dispatching from where it left off
+  ├─ Orchestrator.pause(run_id): save state, stop dispatching
+  ├─ Orchestrator.list_runs(project_id): active + paused + completed runs
+  ├─ KG ingestion on completion: goal + task decomposition + outcomes
+  │   → entities (GOAL, TASK), facts (decomposed_into, assigned_to, depends_on)
+  │   → enables Phase 8 RL: find similar past goals, reuse plans
+  └─ Tests: persist, crash, resume cycle with model_fn mocks
+
+5f-H2: Vertical Agent Tree UI
   │
   ├─ New event types: :agent_spawn, :agent_tool_call, :agent_tool_result,
   │   :agent_delegate, :agent_complete (emitted by Specialist.Worker)
@@ -4133,6 +4156,9 @@ Planner.initial_plan(goal, agents, tools, budget)
   ├─ Sub-delegation renders as nested children with indent + tree lines
   ├─ Orchestrator at root, specialists as children, sub-specialists as grandchildren
   ├─ Wire into ChatLive: replace pipeline_stages with agent_tree during orchestrate runs
+  ├─ Long-running warning banner: "Do not shut down while tasks are running"
+  │   with [Pause] and [Cancel] buttons, progress summary (X/Y tasks, budget %)
+  ├─ Reconnect support: on LiveView reconnect, load run state from orchestration_runs
   ├─ JS hook: auto-scroll to active agent node, collapse completed branches
   └─ Pure CSS tree lines (border-l + pl- for indent, no JS library)
 ```
@@ -4223,6 +4249,9 @@ ChatLive builds tree state from events:
 | Create | `lib/agent_ex/specialist/worker.ex` | Per-task GenServer (temporary) |
 | Create | `lib/agent_ex/specialist/pool.ex` | ConsumerSupervisor for specialist processes |
 | Create | `lib/agent_ex/specialist/delegation.ex` | Transparent sub-specialist spawning |
+| Create | `priv/repo/migrations/*_create_orchestration_runs.exs` | Persistent run state for crash recovery |
+| Create | `lib/agent_ex/orchestrator/run.ex` | Ecto schema for orchestration_runs |
+| Modify | `lib/agent_ex/orchestrator.ex` | Persist run state on each task result, resume/pause API |
 | Create | `test/agent_ex/orchestrator/task_queue_test.exs` | TaskQueue unit tests |
 | Create | `test/agent_ex/orchestrator/budget_tracker_test.exs` | BudgetTracker unit tests |
 | Create | `test/agent_ex/orchestrator_test.exs` | Orchestrator GenStage integration tests |
@@ -4544,7 +4573,7 @@ The Run View should account for the revised orchestrator model:
 
 ---
 
-## Phase 8 — Hybrid Bridge (Remote Computer Use)
+## Phase 8 — Hybrid Bridge (Remote Computer Use) + RL Through Experience
 
 ### Core Insight
 
@@ -4552,6 +4581,26 @@ The Run View should account for the revised orchestrator model:
 is deployed to a server, tools like `ShellExec` and `FileSystem` execute on the
 server — not where the user's code, files, and environment live. This is the
 fundamental challenge of computer-use agents.
+
+**RL through experience:** The orchestration_runs table (Phase 5f-H1) and
+knowledge graph capture every orchestration: goals, task decompositions,
+specialist assignments, outcomes, and quality ratings. Phase 8 uses this
+history to improve future orchestrations:
+
+- **Plan reuse**: embed goal → find similar past goals → inject successful
+  task decompositions into Planner context
+- **Specialist reputation**: track success/failure rates per specialist per
+  task type → Planner favors reliable specialists
+- **Budget prediction**: "similar goals cost ~45K tokens" → auto-set budget
+- **Dependency learning**: "analyst always needs researcher first" → auto-add
+  depends_on edges in initial plans
+- **Quality feedback**: user rates final result → stored in orchestration_runs
+  → used as training signal for Planner prompt context
+
+Storage: orchestration_runs (structured run data) + KG entities/facts
+(goal→task→specialist relationships) + Tier 3 embeddings (goal similarity).
+The Planner receives past experience as context, not as fine-tuning — pure
+in-context learning via prompt injection.
 
 The solution: a **lightweight bridge** that runs on the user's machine, connects
 to the AgentEx server via WebSocket, and executes tool calls locally. The BEAM VM
