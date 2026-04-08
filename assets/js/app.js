@@ -1,6 +1,7 @@
 import "phoenix_html"
 import {Socket} from "phoenix"
 import {LiveSocket} from "phoenix_live_view"
+import AgentTree from "./hooks/agent_tree"
 import TimezoneDetect from "./hooks/timezone_detect"
 import Sortable from "./hooks/sortable"
 import WorkflowEditor from "./hooks/workflow_editor"
@@ -40,6 +41,7 @@ document.addEventListener('click', (e) => {
 }, true)
 
 let Hooks = {}
+Hooks.AgentTree = AgentTree
 Hooks.TimezoneDetect = TimezoneDetect
 Hooks.SaladUI = SaladUILib.SaladUIHook
 Hooks.Sortable = Sortable

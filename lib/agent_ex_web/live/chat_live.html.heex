@@ -1,33 +1,36 @@
 <div class="flex h-full">
-  <!-- Conversation sidebar (desktop only) -->
-  <div class="hidden lg:block lg:w-52 flex-shrink-0">
-    <.conversation_sidebar
-      conversations={@conversations}
-      current_id={@conversation && @conversation.id}
-      timezone={@timezone}
-    />
+  <!-- Conversation sidebar (toggleable, hidden by default) -->
+  <div class={[
+    "flex-shrink-0 transition-all duration-200 ease-in-out overflow-hidden",
+    @show_history && "w-52 border-r border-gray-800" || "w-0"
+  ]}>
+    <div class="w-52 h-full">
+      <.conversation_sidebar
+        conversations={@conversations}
+        current_id={@conversation && @conversation.id}
+        timezone={@timezone}
+      />
+    </div>
   </div>
 
   <!-- Chat area -->
   <div class="flex flex-col flex-1 min-w-0">
     <!-- Header -->
     <header class="flex items-center gap-2 md:gap-3 px-3 md:px-4 h-14 border-b border-gray-800 bg-gray-900/50">
-      <!-- History sheet (mobile/tablet only) -->
-      <.sheet id="mobile-history" class="lg:hidden">
-        <.sheet_trigger>
-          <button type="button" class="flex items-center justify-center w-8 h-8 rounded-md text-gray-400 hover:bg-gray-800 hover:text-white transition-colors" aria-label="Conversation history">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4">
-              <path fill-rule="evenodd" d="M2 4.75A.75.75 0 0 1 2.75 4h14.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 4.75ZM2 10a.75.75 0 0 1 .75-.75h14.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 10Zm0 5.25a.75.75 0 0 1 .75-.75h14.5a.75.75 0 0 1 0 1.5H2.75a.75.75 0 0 1-.75-.75Z" clip-rule="evenodd" />
-            </svg>
-          </button>
-        </.sheet_trigger>
-        <.sheet_content side="left" class="w-72 p-0 bg-gray-900 border-r border-gray-800 [&>[data-part=close-trigger]]:hidden">
-          <.conversation_sidebar
-            conversations={@conversations}
-            current_id={@conversation && @conversation.id}
-          />
-        </.sheet_content>
-      </.sheet>
+      <!-- History toggle button -->
+      <button
+        type="button"
+        phx-click="toggle_history"
+        class={[
+          "flex items-center justify-center w-8 h-8 rounded-md transition-colors",
+          @show_history && "bg-gray-800 text-white" || "text-gray-400 hover:bg-gray-800 hover:text-white"
+        ]}
+        aria-label="Toggle conversation history"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4">
+          <path fill-rule="evenodd" d="M2 4.75A.75.75 0 0 1 2.75 4h14.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 4.75ZM2 10a.75.75 0 0 1 .75-.75h14.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 10Zm0 5.25a.75.75 0 0 1 .75-.75h14.5a.75.75 0 0 1 0 1.5H2.75a.75.75 0 0 1-.75-.75Z" clip-rule="evenodd" />
+        </svg>
+      </button>
       <.badge :if={assigns[:current_project]} variant="outline" class="text-indigo-400 border-indigo-500/30">{@current_project.name}</.badge>
       <.badge variant="secondary">{@model}</.badge>
       <div class="ml-auto flex items-center gap-1">
@@ -54,8 +57,19 @@
         <.message_bubble role={msg.role} content={msg.content} model={@model} user_initials={@user_initials} />
       </div>
 
-      <!-- Tool call cards -->
-      <div :for={event <- @events}>
+      <!-- Agent tree (shown during orchestration runs) -->
+      <.agent_tree
+        :if={@agent_tree != %{}}
+        tree={@agent_tree}
+        budget={@agent_tree_budget}
+        task_stats={@agent_tree_stats}
+      />
+
+      <!-- Orchestration warning banner -->
+      <.orchestration_banner active={@agent_tree != %{}} />
+
+      <!-- Tool call cards (non-orchestration runs) -->
+      <div :if={@agent_tree == %{}} :for={event <- @events}>
         <.tool_card
           :if={event.type == :tool_call}
           name={event.data.tool_name}
@@ -63,8 +77,8 @@
         />
       </div>
 
-      <!-- Pipeline stages -->
-      <.pipeline_stages stages={@stages} />
+      <!-- Pipeline stages (non-orchestration) -->
+      <.pipeline_stages :if={@agent_tree == %{}} stages={@stages} />
 
       <!-- Thinking indicator -->
       <.thinking_indicator active={@thinking} />

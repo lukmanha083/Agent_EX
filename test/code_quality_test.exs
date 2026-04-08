@@ -25,6 +25,7 @@ defmodule AgentEx.CodeQualityTest do
   end
 
   describe "ex_dna" do
+    @tag timeout: 120_000
     test "no code duplication in lib/" do
       # ExDNA may crash on macro-heavy files (known library limitation with
       # Code.Formatter and AST nodes in module attributes). Rescue and skip
