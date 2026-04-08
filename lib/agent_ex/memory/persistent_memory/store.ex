@@ -3,7 +3,11 @@ defmodule AgentEx.Memory.PersistentMemory.Store do
   Tier 2: Persistent memory using ETS (fast reads) backed by per-project DETS (disk persistence).
   Keys are `{user_id, project_id, agent_id, key}` for per-user, per-project, per-agent isolation.
 
-  DETS files are opened lazily per-project via DetsManager, not at boot.
+  ## Upgrades
+  - Secondary index ETS table for O(1) type-based lookups
+  - `write_concurrency: true` for parallel writes from multiple processes
+  - 5-second sync interval (down from 30s) to reduce data loss window
+  - ETS `match_object` patterns instead of `foldl` for faster scans
   """
 
   use GenServer
@@ -16,6 +20,8 @@ defmodule AgentEx.Memory.PersistentMemory.Store do
   require Logger
 
   @store_name :persistent_memory
+  @index_name :persistent_memory_idx
+  @default_sync_interval :timer.seconds(5)
 
   # --- Client API ---
 
@@ -45,19 +51,23 @@ defmodule AgentEx.Memory.PersistentMemory.Store do
 
   @doc "Return all entries matching `(user_id, project_id, agent_id)` with the given type."
   def get_by_type(user_id, project_id, agent_id, type) do
-    :ets.foldl(
-      fn
-        {{^user_id, ^project_id, ^agent_id, _key}, entry}, acc ->
-          if entry.type == type, do: [entry | acc], else: acc
+    index_key = {user_id, project_id, agent_id, type}
 
-        _, acc ->
-          acc
-      end,
-      [],
-      @store_name
-    )
+    case :ets.lookup(@index_name, index_key) do
+      [{^index_key, keys}] -> lookup_entries(keys)
+      [] -> []
+    end
   rescue
     ArgumentError -> []
+  end
+
+  defp lookup_entries(keys) do
+    Enum.flat_map(keys, fn key ->
+      case :ets.lookup(@store_name, key) do
+        [{_k, entry}] -> [entry]
+        [] -> []
+      end
+    end)
   end
 
   @doc "Delete a single entry by `(user_id, project_id, agent_id, key)`."
@@ -75,16 +85,12 @@ defmodule AgentEx.Memory.PersistentMemory.Store do
     GenServer.call(__MODULE__, {:delete_by_project, user_id, project_id})
   end
 
-  @doc "Return all entries for `(user_id, project_id, agent_id)`. Reads directly from ETS."
+  @doc "Return all entries for `(user_id, project_id, agent_id)`. Uses ETS match_object."
   def all(user_id, project_id, agent_id) do
-    :ets.foldl(
-      fn
-        {{^user_id, ^project_id, ^agent_id, _key}, entry}, acc -> [entry | acc]
-        _, acc -> acc
-      end,
-      [],
-      @store_name
-    )
+    pattern = {{user_id, project_id, agent_id, :_}, :_}
+
+    :ets.match_object(@store_name, pattern)
+    |> Enum.map(fn {_key, entry} -> entry end)
   rescue
     ArgumentError -> []
   end
@@ -136,10 +142,25 @@ defmodule AgentEx.Memory.PersistentMemory.Store do
   @impl GenServer
   def init(_opts) do
     sync_interval =
-      Application.get_env(:agent_ex, :persistent_memory_sync_interval, :timer.seconds(30))
+      Application.get_env(:agent_ex, :persistent_memory_sync_interval, @default_sync_interval)
 
     ets_table =
-      :ets.new(@store_name, [:set, :named_table, :public, read_concurrency: true])
+      :ets.new(@store_name, [
+        :set,
+        :named_table,
+        :public,
+        read_concurrency: true,
+        write_concurrency: true
+      ])
+
+    # Secondary index: {user_id, project_id, agent_id, type} → [ets_key]
+    :ets.new(@index_name, [
+      :set,
+      :named_table,
+      :public,
+      read_concurrency: true,
+      write_concurrency: true
+    ])
 
     schedule_sync(sync_interval)
 
@@ -152,10 +173,14 @@ defmodule AgentEx.Memory.PersistentMemory.Store do
     ets_key = {user_id, project_id, agent_id, key}
     root_path = DetsManager.root_path_for(user_id, project_id)
 
+    # Look up old entry to update index if type changed
+    old_type = lookup_entry_type(ets_key)
+
     if root_path do
       case ensure_dets_and_insert(root_path, ets_key, entry) do
         :ok ->
           :ets.insert(state.ets_table, {ets_key, entry})
+          update_index(user_id, project_id, agent_id, ets_key, type, old_type)
           {:reply, :ok, state}
 
         {:error, reason} ->
@@ -164,6 +189,7 @@ defmodule AgentEx.Memory.PersistentMemory.Store do
     else
       Logger.warning("PersistentMemory: no root_path for project #{project_id}, ETS-only save")
       :ets.insert(state.ets_table, {ets_key, entry})
+      update_index(user_id, project_id, agent_id, ets_key, type, old_type)
       {:reply, :ok, state}
     end
   end
@@ -172,6 +198,10 @@ defmodule AgentEx.Memory.PersistentMemory.Store do
   def handle_call({:delete, user_id, project_id, agent_id, key}, _from, state) do
     ets_key = {user_id, project_id, agent_id, key}
     root_path = DetsManager.root_path_for(user_id, project_id)
+
+    # Remove from index before deleting
+    old_type = lookup_entry_type(ets_key)
+    if old_type, do: remove_from_index(user_id, project_id, agent_id, ets_key, old_type)
 
     if root_path do
       case resolve_dets(root_path) do
@@ -186,33 +216,21 @@ defmodule AgentEx.Memory.PersistentMemory.Store do
 
   @impl GenServer
   def handle_call({:delete_all, user_id, project_id, agent_id}, _from, state) do
-    keys =
-      :ets.foldl(
-        fn
-          {{^user_id, ^project_id, ^agent_id, _} = k, _}, acc -> [k | acc]
-          _, acc -> acc
-        end,
-        [],
-        state.ets_table
-      )
+    pattern = {{user_id, project_id, agent_id, :_}, :_}
+    keys = :ets.match_object(state.ets_table, pattern) |> Enum.map(fn {k, _} -> k end)
 
     delete_keys(state, keys, user_id, project_id)
+    clear_agent_index(user_id, project_id, agent_id)
     {:reply, {:ok, length(keys)}, state}
   end
 
   @impl GenServer
   def handle_call({:delete_by_project, user_id, project_id}, _from, state) do
-    keys =
-      :ets.foldl(
-        fn
-          {{^user_id, ^project_id, _, _} = k, _}, acc -> [k | acc]
-          _, acc -> acc
-        end,
-        [],
-        state.ets_table
-      )
+    pattern = {{user_id, project_id, :_, :_}, :_}
+    keys = :ets.match_object(state.ets_table, pattern) |> Enum.map(fn {k, _} -> k end)
 
     delete_keys(state, keys, user_id, project_id)
+    clear_project_index(user_id, project_id)
     {:reply, {:ok, length(keys)}, state}
   end
 
@@ -222,8 +240,10 @@ defmodule AgentEx.Memory.PersistentMemory.Store do
       {:ok, dets_ref} ->
         count =
           :dets.foldl(
-            fn {key, value}, acc ->
-              :ets.insert(state.ets_table, {key, value})
+            fn {key, value} = record, acc ->
+              :ets.insert(state.ets_table, record)
+              {user_id, project_id, agent_id, _k} = key
+              add_to_index(user_id, project_id, agent_id, key, value.type)
               acc + 1
             end,
             0,
@@ -240,17 +260,11 @@ defmodule AgentEx.Memory.PersistentMemory.Store do
 
   @impl GenServer
   def handle_call({:evict_project, user_id, project_id}, _from, state) do
-    keys =
-      :ets.foldl(
-        fn
-          {{^user_id, ^project_id, _, _} = k, _}, acc -> [k | acc]
-          _, acc -> acc
-        end,
-        [],
-        state.ets_table
-      )
+    pattern = {{user_id, project_id, :_, :_}, :_}
+    keys = :ets.match_object(state.ets_table, pattern) |> Enum.map(fn {k, _} -> k end)
 
     Enum.each(keys, fn key -> :ets.delete(state.ets_table, key) end)
+    clear_project_index(user_id, project_id)
     {:reply, {:ok, length(keys)}, state}
   end
 
@@ -265,6 +279,69 @@ defmodule AgentEx.Memory.PersistentMemory.Store do
   def terminate(_reason, state) do
     sync_all_projects(state.ets_table)
     :ok
+  end
+
+  # --- Index management ---
+
+  defp update_index(user_id, project_id, agent_id, ets_key, new_type, old_type) do
+    if old_type && old_type != new_type do
+      remove_from_index(user_id, project_id, agent_id, ets_key, old_type)
+    end
+
+    add_to_index(user_id, project_id, agent_id, ets_key, new_type)
+  end
+
+  defp add_to_index(user_id, project_id, agent_id, ets_key, type) do
+    index_key = {user_id, project_id, agent_id, type}
+
+    case :ets.lookup(@index_name, index_key) do
+      [{^index_key, keys}] ->
+        unless ets_key in keys do
+          :ets.insert(@index_name, {index_key, [ets_key | keys]})
+        end
+
+      [] ->
+        :ets.insert(@index_name, {index_key, [ets_key]})
+    end
+  end
+
+  defp remove_from_index(user_id, project_id, agent_id, ets_key, type) do
+    index_key = {user_id, project_id, agent_id, type}
+
+    case :ets.lookup(@index_name, index_key) do
+      [{^index_key, keys}] ->
+        remaining = List.delete(keys, ets_key)
+
+        if remaining == [] do
+          :ets.delete(@index_name, index_key)
+        else
+          :ets.insert(@index_name, {index_key, remaining})
+        end
+
+      [] ->
+        :ok
+    end
+  end
+
+  defp lookup_entry_type(ets_key) do
+    case :ets.lookup(@store_name, ets_key) do
+      [{_k, entry}] -> entry.type
+      [] -> nil
+    end
+  end
+
+  defp clear_agent_index(user_id, project_id, agent_id) do
+    pattern = {{user_id, project_id, agent_id, :_}, :_}
+
+    :ets.match_object(@index_name, pattern)
+    |> Enum.each(fn {k, _} -> :ets.delete(@index_name, k) end)
+  end
+
+  defp clear_project_index(user_id, project_id) do
+    pattern = {{user_id, project_id, :_, :_}, :_}
+
+    :ets.match_object(@index_name, pattern)
+    |> Enum.each(fn {k, _} -> :ets.delete(@index_name, k) end)
   end
 
   # --- Private helpers ---

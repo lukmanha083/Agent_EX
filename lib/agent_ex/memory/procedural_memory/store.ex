@@ -4,6 +4,12 @@ defmodule AgentEx.Memory.ProceduralMemory.Store do
 
   Stores `Skill` structs keyed by `{user_id, project_id, agent_id, skill_name}`.
   DETS files are opened lazily per-project via DetsManager.
+
+  ## Upgrades
+  - `write_concurrency: true` for parallel writes
+  - 5-second sync interval (down from 30s)
+  - ETS `match_object` patterns instead of `foldl` for faster scans
+  - Auto-prune low-confidence skills (< 0.3 after 5+ observations)
   """
 
   use GenServer
@@ -16,6 +22,9 @@ defmodule AgentEx.Memory.ProceduralMemory.Store do
   require Logger
 
   @store_name :procedural_memory
+  @default_sync_interval :timer.seconds(5)
+  @prune_min_observations 5
+  @prune_confidence_threshold 0.3
 
   # --- Client API ---
 
@@ -38,35 +47,20 @@ defmodule AgentEx.Memory.ProceduralMemory.Store do
     ArgumentError -> :not_found
   end
 
-  @doc "Return all skills for `(user_id, project_id, agent_id)`."
+  @doc "Return all skills for `(user_id, project_id, agent_id)`. Uses match_object."
   def all(user_id, project_id, agent_id) do
-    :ets.foldl(
-      fn
-        {{^user_id, ^project_id, ^agent_id, _}, skill}, acc -> [skill | acc]
-        _, acc -> acc
-      end,
-      [],
-      @store_name
-    )
+    pattern = {{user_id, project_id, agent_id, :_}, :_}
+
+    :ets.match_object(@store_name, pattern)
+    |> Enum.map(fn {_key, skill} -> skill end)
   rescue
     ArgumentError -> []
   end
 
   @doc "Return skills matching a domain."
   def get_by_domain(user_id, project_id, agent_id, domain) do
-    :ets.foldl(
-      fn
-        {{^user_id, ^project_id, ^agent_id, _}, skill}, acc ->
-          if skill.domain == domain, do: [skill | acc], else: acc
-
-        _, acc ->
-          acc
-      end,
-      [],
-      @store_name
-    )
-  rescue
-    ArgumentError -> []
+    all(user_id, project_id, agent_id)
+    |> Enum.filter(&(&1.domain == domain))
   end
 
   @doc "Return top skills sorted by confidence descending."
@@ -102,6 +96,36 @@ defmodule AgentEx.Memory.ProceduralMemory.Store do
     GenServer.call(__MODULE__, {:evict_project, user_id, project_id})
   end
 
+  @doc """
+  Prune low-confidence skills for an agent.
+
+  Removes skills with confidence < threshold after min_observations.
+  Returns the number of pruned skills.
+  """
+  def prune(user_id, project_id, agent_id, opts \\ []) do
+    threshold = Keyword.get(opts, :threshold, @prune_confidence_threshold)
+    min_obs = Keyword.get(opts, :min_observations, @prune_min_observations)
+
+    skills = all(user_id, project_id, agent_id)
+
+    prunable =
+      Enum.filter(skills, fn skill ->
+        total = skill.success_count + skill.failure_count
+        total >= min_obs and skill.confidence < threshold
+      end)
+
+    Enum.each(prunable, fn skill ->
+      delete(user_id, project_id, agent_id, skill.name)
+    end)
+
+    if prunable != [] do
+      names = Enum.map_join(prunable, ", ", & &1.name)
+      Logger.info("ProceduralMemory: pruned #{length(prunable)} low-confidence skills: #{names}")
+    end
+
+    {:ok, length(prunable)}
+  end
+
   # --- Tier callbacks ---
 
   @impl AgentEx.Memory.Tier
@@ -131,10 +155,16 @@ defmodule AgentEx.Memory.ProceduralMemory.Store do
   @impl GenServer
   def init(_opts) do
     sync_interval =
-      Application.get_env(:agent_ex, :procedural_memory_sync_interval, :timer.seconds(30))
+      Application.get_env(:agent_ex, :procedural_memory_sync_interval, @default_sync_interval)
 
     ets_table =
-      :ets.new(@store_name, [:set, :named_table, :public, read_concurrency: true])
+      :ets.new(@store_name, [
+        :set,
+        :named_table,
+        :public,
+        read_concurrency: true,
+        write_concurrency: true
+      ])
 
     schedule_sync(sync_interval)
 
@@ -180,15 +210,8 @@ defmodule AgentEx.Memory.ProceduralMemory.Store do
 
   @impl GenServer
   def handle_call({:delete_all, user_id, project_id, agent_id}, _from, state) do
-    keys =
-      :ets.foldl(
-        fn
-          {{^user_id, ^project_id, ^agent_id, _} = k, _}, acc -> [k | acc]
-          _, acc -> acc
-        end,
-        [],
-        state.ets_table
-      )
+    pattern = {{user_id, project_id, agent_id, :_}, :_}
+    keys = :ets.match_object(state.ets_table, pattern) |> Enum.map(fn {k, _} -> k end)
 
     delete_keys(state, keys, user_id, project_id)
     {:reply, {:ok, length(keys)}, state}
@@ -196,15 +219,8 @@ defmodule AgentEx.Memory.ProceduralMemory.Store do
 
   @impl GenServer
   def handle_call({:delete_by_project, user_id, project_id}, _from, state) do
-    keys =
-      :ets.foldl(
-        fn
-          {{^user_id, ^project_id, _, _} = k, _}, acc -> [k | acc]
-          _, acc -> acc
-        end,
-        [],
-        state.ets_table
-      )
+    pattern = {{user_id, project_id, :_, :_}, :_}
+    keys = :ets.match_object(state.ets_table, pattern) |> Enum.map(fn {k, _} -> k end)
 
     delete_keys(state, keys, user_id, project_id)
     {:reply, {:ok, length(keys)}, state}
@@ -234,15 +250,8 @@ defmodule AgentEx.Memory.ProceduralMemory.Store do
 
   @impl GenServer
   def handle_call({:evict_project, user_id, project_id}, _from, state) do
-    keys =
-      :ets.foldl(
-        fn
-          {{^user_id, ^project_id, _, _} = k, _}, acc -> [k | acc]
-          _, acc -> acc
-        end,
-        [],
-        state.ets_table
-      )
+    pattern = {{user_id, project_id, :_, :_}, :_}
+    keys = :ets.match_object(state.ets_table, pattern) |> Enum.map(fn {k, _} -> k end)
 
     Enum.each(keys, fn key -> :ets.delete(state.ets_table, key) end)
     {:reply, {:ok, length(keys)}, state}

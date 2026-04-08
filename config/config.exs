@@ -21,7 +21,7 @@ config :agent_ex,
   embedding_model: "text-embedding-3-large",
   embedding_dimensions: 1536,
   extraction_model: "gpt-4o-mini",
-  persistent_memory_sync_interval: :timer.seconds(30),
+  persistent_memory_sync_interval: :timer.seconds(5),
   working_memory_max_messages: 50
 
 # Phoenix endpoint

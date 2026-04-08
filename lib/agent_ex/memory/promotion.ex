@@ -90,9 +90,21 @@ defmodule AgentEx.Memory.Promotion do
                ) do
           Logger.info("Promotion: summarized session #{session_id} for agent #{agent_id}")
 
-          # Fire-and-forget skill extraction from observations (supervised)
+          # Async skill extraction with timeout (60s) — non-blocking
           Task.Supervisor.start_child(AgentEx.TaskSupervisor, fn ->
-            Reflector.reflect(user_id, project_id, agent_id, session_id, model_client)
+            task =
+              Task.async(fn ->
+                Reflector.reflect(user_id, project_id, agent_id, session_id, model_client)
+              end)
+
+            case Task.yield(task, 60_000) do
+              {:ok, _result} ->
+                :ok
+
+              nil ->
+                Task.shutdown(task, :brutal_kill)
+                Logger.warning("Reflector: timed out after 60s for session #{session_id}")
+            end
           end)
 
           {:ok, summary}
