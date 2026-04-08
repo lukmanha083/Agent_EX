@@ -25,11 +25,8 @@ defmodule AgentEx.Application do
       # Per-project DETS lifecycle manager (must start before stores)
       AgentEx.DetsManager,
 
-      # Agent config store (ETS + lazy per-project DETS)
-      AgentEx.AgentStore,
-
-      # HTTP tool config store (ETS + lazy per-project DETS)
-      AgentEx.HttpToolStore,
+      # Specialist delegation supervisor (Phase 5f)
+      {DynamicSupervisor, name: AgentEx.Specialist.DelegationSupervisor, strategy: :one_for_one},
 
       # EventLoop: ETS-based run tracking
       AgentEx.EventLoop.RunRegistry,
@@ -48,6 +45,18 @@ defmodule AgentEx.Application do
     ]
 
     opts = [strategy: :rest_for_one, name: AgentEx.Supervisor]
-    Supervisor.start_link(children, opts)
+
+    case Supervisor.start_link(children, opts) do
+      {:ok, pid} ->
+        # Register system agents after Repo is ready (non-blocking)
+        Task.Supervisor.start_child(AgentEx.TaskSupervisor, fn ->
+          AgentEx.Defaults.register_system_agents()
+        end)
+
+        {:ok, pid}
+
+      error ->
+        error
+    end
   end
 end
