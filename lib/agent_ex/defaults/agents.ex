@@ -74,25 +74,25 @@ defmodule AgentEx.Defaults.Agents do
         "Create pyproject.toml for any project with external dependencies"
       ],
       tool_guidance: ~s"""
-        ## Tool workflow (follow this exactly)
-        1. search_find_files → check what exists
-        2. Think: synthesize the COMPLETE file content in your head
-        3. filesystem_write_file → create/overwrite the file in ONE call
-        4. shell_run_command → verify (uv run python file.py)
-        5. Report result — DONE
+      ## Tool workflow (follow this exactly)
+      1. search_find_files → check what exists
+      2. Think: synthesize the COMPLETE file content in your head
+      3. filesystem_write_file → create/overwrite the file in ONE call
+      4. shell_run_command → verify (uv run python file.py)
+      5. Report result — DONE
 
-        ## Example: create todo.py
-        → search_find_files(pattern: "todo.py")
-        → filesystem_write_file(path: "todo.py", content: "...complete file...")
-        → shell_run_command(command: "uv run python todo.py")
-        → Report: "Created todo.py, verified it runs"
+      ## Example: create todo.py
+      → search_find_files(pattern: "todo.py")
+      → filesystem_write_file(path: "todo.py", content: "...complete file...")
+      → shell_run_command(command: "uv run python todo.py")
+      → Report: "Created todo.py, verified it runs"
 
-        ## Modifying existing files
-        → editor_read(path: "file.py") → read current content
-        → filesystem_write_file(path: "file.py", content: "...full new content...") → overwrite
+      ## Modifying existing files
+      → editor_read(path: "file.py") → read current content
+      → filesystem_write_file(path: "file.py", content: "...full new content...") → overwrite
 
-        NEVER call editor_edit/editor_append in a loop. Max 3 tool calls per file.
-        """,
+      NEVER call editor_edit/editor_append in a loop. Max 3 tool calls per file.
+      """,
       provider: "anthropic",
       model: "claude-opus-4-6",
       context_window: 250_000,
@@ -144,25 +144,24 @@ defmodule AgentEx.Defaults.Agents do
         "Report test results with pass/fail counts and failure details"
       ],
       scope: "Python test files, type checking, linting — not source code modification",
-      tool_guidance:
-      ~s"""
-        ## Tool workflow (follow this exactly)
-        1. editor_read → read source code to understand what to test
-        2. Think: synthesize COMPLETE test file in your head
-        3. filesystem_write_file → create tests/test_*.py in ONE call
-        4. shell_run_command → `uv add --dev pytest mypy ruff`
-        5. shell_run_command → `uv run pytest -v`
-        6. Report results — DONE
+      tool_guidance: ~s"""
+      ## Tool workflow (follow this exactly)
+      1. editor_read → read source code to understand what to test
+      2. Think: synthesize COMPLETE test file in your head
+      3. filesystem_write_file → create tests/test_*.py in ONE call
+      4. shell_run_command → `uv add --dev pytest mypy ruff`
+      5. shell_run_command → `uv run pytest -v`
+      6. Report results — DONE
 
-        ## Example: test todo.py
-        → editor_read(path: "todo.py")
-        → filesystem_write_file(path: "tests/test_todo.py", content: "...complete test file...")
-        → shell_run_command(command: "uv add --dev pytest")
-        → shell_run_command(command: "uv run pytest tests/test_todo.py -v")
-        → Report: "8 passed, 0 failed"
+      ## Example: test todo.py
+      → editor_read(path: "todo.py")
+      → filesystem_write_file(path: "tests/test_todo.py", content: "...complete test file...")
+      → shell_run_command(command: "uv add --dev pytest")
+      → shell_run_command(command: "uv run pytest tests/test_todo.py -v")
+      → Report: "8 passed, 0 failed"
 
-        NEVER call editor_edit/editor_append in a loop. Max 5 tool calls total.
-        """,
+      NEVER call editor_edit/editor_append in a loop. Max 5 tool calls total.
+      """,
       output_format:
         "## Test Results\n" <>
           "- Tests: X passed, Y failed\n" <>
@@ -226,22 +225,21 @@ defmodule AgentEx.Defaults.Agents do
         "Compare against existing tests if available — flag untested critical paths"
       ],
       scope: "Read-only code review — does not create or modify files",
-      tool_guidance:
-      ~s"""
-        ## Tool workflow (follow this exactly)
-        1. search_find_files → find source and test files
-        2. editor_read → read each file completely
-        3. Think: analyze code quality, security, correctness
-        4. Report findings with severity ratings — DONE
+      tool_guidance: ~s"""
+      ## Tool workflow (follow this exactly)
+      1. search_find_files → find source and test files
+      2. editor_read → read each file completely
+      3. Think: analyze code quality, security, correctness
+      4. Report findings with severity ratings — DONE
 
-        ## Example: review todo.py
-        → search_find_files(pattern: "*.py")
-        → editor_read(path: "todo.py")
-        → editor_read(path: "tests/test_todo.py")
-        → Report review with Critical/Warning/Suggestion sections
+      ## Example: review todo.py
+      → search_find_files(pattern: "*.py")
+      → editor_read(path: "todo.py")
+      → editor_read(path: "tests/test_todo.py")
+      → Report review with Critical/Warning/Suggestion sections
 
-        Read-only — NEVER modify files. Max 4 tool calls.
-        """,
+      Read-only — NEVER modify files. Max 4 tool calls.
+      """,
       output_format:
         "## Code Review: `filename.py`\n\n" <>
           "### Critical\n" <>
