@@ -47,12 +47,12 @@ defmodule AgentEx.Defaults do
   end
 
   @doc """
-  Seed user-owned copies of default agents into a project.
+  Seed default tools into a project.
 
-  Only seeds if the project has no user agents yet (idempotent).
-  Unlike system agents, these are mutable — users can edit/delete them.
+  Seeds HTTP tools (project-scoped). System agents are shared globally
+  and don't require per-project seeding.
 
-  Returns `:ok` if seeded, `:already_seeded` if project already has agents.
+  Returns `:ok`.
   """
   def seed_project(user_id, project_id, _opts \\ []) do
     # System agents are shared globally — no per-project agent seeding needed.

@@ -463,11 +463,15 @@ defmodule AgentEx.ModelClient do
   """
   def anthropic_mcp_servers(servers) when is_list(servers) do
     Enum.map(servers, fn server ->
+      name = Map.get(server, :name) || Map.get(server, "name")
+      url = Map.get(server, :url) || Map.get(server, "url")
+      token = Map.get(server, :token) || Map.get(server, "token")
+
       %{
         "type" => "url",
-        "name" => server.name,
-        "url" => server.url,
-        "authorization_token" => Map.get(server, :token)
+        "name" => name,
+        "url" => url,
+        "authorization_token" => token
       }
       |> Enum.reject(fn {_k, v} -> is_nil(v) end)
       |> Map.new()

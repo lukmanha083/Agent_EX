@@ -15,7 +15,7 @@ defmodule AgentEx.ModelClientTest do
 
     test "openrouter/2 sets provider and default base_url" do
       client = ModelClient.openrouter("moonshotai/kimi-k2.5")
-      assert client.model == "kimi-k2.5"
+      assert client.model == "moonshotai/kimi-k2.5"
       assert client.provider == :openrouter
       assert client.base_url == "https://openrouter.ai/api/v1"
     end

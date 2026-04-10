@@ -130,8 +130,8 @@ defmodule AgentEx.Chat do
     |> String.slice(0, 60)
   end
 
-  defp safe_provider_atom(provider) when provider in ["openai", "anthropic", "openrouter"],
-    do: String.to_existing_atom(provider)
-
+  defp safe_provider_atom("openai"), do: :openai
+  defp safe_provider_atom("anthropic"), do: :anthropic
+  defp safe_provider_atom("openrouter"), do: :openrouter
   defp safe_provider_atom(_), do: :openai
 end

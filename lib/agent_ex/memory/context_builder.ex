@@ -248,12 +248,13 @@ defmodule AgentEx.Memory.ContextBuilder do
 
   # Fast-path: check if agent has any accumulated data across tiers.
   # Uses ETS lookups (O(1)) and Registry check — no DB or embedding calls.
-  defp agent_has_no_data?(scope, session_id) do
+  defp agent_has_no_data?({_user_id, project_id, agent_id} = scope, session_id) do
     has_persistent = gather_persistent(scope) != ""
     has_procedural = gather_procedural(scope) != ""
     has_conversation = gather_conversation(scope, session_id) != []
+    has_semantic = AgentEx.Memory.SemanticMemory.Store.has_memories?(project_id, agent_id)
 
-    not has_persistent and not has_procedural and not has_conversation
+    not has_persistent and not has_procedural and not has_conversation and not has_semantic
   rescue
     _ -> false
   end

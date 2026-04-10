@@ -84,13 +84,12 @@ defmodule AgentEx.Memory.SemanticMemory.Store do
     {:ok, count}
   end
 
-  @doc "Check if an agent has any semantic memories (cheap SQL count, no embedding)."
+  @doc "Check if an agent has any semantic memories (cheap SQL exists, no embedding)."
   def has_memories?(project_id, agent_id) do
     from(m in Memory,
-      where: m.project_id == ^project_id and m.agent_id == ^agent_id,
-      select: count(m.id)
+      where: m.project_id == ^project_id and m.agent_id == ^agent_id
     )
-    |> Repo.one!() > 0
+    |> Repo.exists?()
   rescue
     error ->
       Logger.warning("has_memories? failed: #{inspect(error)}")

@@ -45,7 +45,8 @@ defmodule AgentEx.Message do
           content: String.t() | [FunctionResult.t()],
           source: String.t() | nil,
           tool_calls: [FunctionCall.t()] | nil,
-          usage: map() | nil
+          usage: map() | nil,
+          metadata: map()
         }
 
   def system(content), do: %__MODULE__{role: :system, content: content}

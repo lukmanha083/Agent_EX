@@ -317,9 +317,10 @@ defmodule AgentExWeb.ChatLive do
           timestamp: event.timestamp
         })
       else
-        socket
-        |> maybe_add_tool_to_delegate_node(event.data)
-        |> append_agent_log(event.data.call_id, %{
+        socket = maybe_add_tool_to_delegate_node(socket, event.data)
+        log_target = active_delegate_id(socket) || event.data.call_id
+
+        append_agent_log(socket, log_target, %{
           type: :tool_call,
           tool: tool_name,
           args: event.data[:arguments],
@@ -948,6 +949,13 @@ defmodule AgentExWeb.ChatLive do
     Enum.map(tools, fn t ->
       if t.status == :running, do: %{t | status: :complete}, else: t
     end)
+  end
+
+  defp active_delegate_id(socket) do
+    case Enum.find(socket.assigns.agent_tree, fn {_id, node} -> node.status == :running end) do
+      {id, _} -> id
+      nil -> nil
+    end
   end
 
   # For non-delegate tool calls, attach them to the currently running delegate node

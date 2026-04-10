@@ -171,7 +171,7 @@ defmodule AgentExWeb.AgentTreeComponents do
         <span>Agent is working...</span>
       </div>
       <div :for={entry <- @logs} class="flex gap-2">
-        <span class={["shrink-0", log_entry_color(entry.type)]}>
+        <span class={["shrink-0", log_entry_color(log_entry_color_key(entry))]}>
           {log_entry_icon(entry.type)}
         </span>
         <span class="text-gray-400 break-all">
@@ -237,9 +237,17 @@ defmodule AgentExWeb.AgentTreeComponents do
   defp log_entry_icon(:result), do: "="
   defp log_entry_icon(_), do: "-"
 
+  defp log_entry_color_key(%{type: type, is_error: is_error})
+       when type in [:tool_result, :result],
+       do: {type, is_error}
+
+  defp log_entry_color_key(%{type: type}), do: type
+
   defp log_entry_color(:tool_call), do: "text-yellow-500"
-  defp log_entry_color(:tool_result), do: "text-green-500"
-  defp log_entry_color(:result), do: "text-indigo-400"
+  defp log_entry_color({:tool_result, true}), do: "text-red-400"
+  defp log_entry_color({:tool_result, _}), do: "text-green-500"
+  defp log_entry_color({:result, true}), do: "text-red-400"
+  defp log_entry_color({:result, _}), do: "text-indigo-400"
   defp log_entry_color(_), do: "text-gray-500"
 
   defp format_log_entry(%{type: :tool_call, tool: tool, args: args}) do
@@ -253,6 +261,10 @@ defmodule AgentExWeb.AgentTreeComponents do
 
   defp format_log_entry(%{type: :tool_result, content: content}) do
     content || "ok"
+  end
+
+  defp format_log_entry(%{type: :result, is_error: true, content: content}) do
+    "ERR: #{content || "failed"}"
   end
 
   defp format_log_entry(%{type: :result, content: content}) do

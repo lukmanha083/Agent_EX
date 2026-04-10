@@ -117,7 +117,7 @@ defmodule AgentEx.EventLoop do
 
           {:error, reason} ->
             Logger.warning("EventLoop [#{run_id}]: failed in #{total_ms}ms — #{inspect(reason)}")
-            broadcast(run_id, :pipeline_error, %{reason: inspect(reason)})
+            broadcast(run_id, :pipeline_error, %{reason: inspect(reason), duration_ms: total_ms})
             RunRegistry.error_run(run_id)
             result
         end

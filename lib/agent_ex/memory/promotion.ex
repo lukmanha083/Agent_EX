@@ -157,7 +157,17 @@ defmodule AgentEx.Memory.Promotion do
       Logger.info("Promotion: summarized delegate session #{session_id} for agent #{agent_id}")
       {:ok, summary}
     else
-      _ -> {:error, :promotion_failed}
+      {:ok, %Message{content: nil}} ->
+        Logger.info("Promotion: LLM returned nil content for session #{session_id}")
+        {:error, :empty_summary}
+
+      {:ok, %Message{content: ""}} ->
+        Logger.info("Promotion: LLM returned empty content for session #{session_id}")
+        {:error, :empty_summary}
+
+      {:error, reason} ->
+        Logger.warning("Promotion: promote_from_messages failed: #{inspect(reason)}")
+        {:error, reason}
     end
   rescue
     e ->
