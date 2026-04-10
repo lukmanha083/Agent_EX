@@ -4295,6 +4295,300 @@ ChatLive builds tree state from events:
 
 ---
 
+## Phase 5g — Specialist Memory Unification
+
+### Problem
+
+Two execution paths exist for specialist agents, with fundamentally different
+memory capabilities:
+
+| Capability | Pipe.delegate_tool → Pipe.through | Pipe.orchestrate → Specialist.execute → ToolCallerLoop |
+|---|---|---|
+| Tier 1 (working memory) | **No** — messages not stored | **Partial** — only if memory_opts passed |
+| Tier 2 (persistent facts) | **No** — no observation recording | **Yes** — Observer records tool observations |
+| Tier 3 (semantic memory) | **No** — no session promotion | **No** — EventLoop promotion not wired |
+| Tier 4 (procedural skills) | **No** — no reflection triggered | **No** — Reflector never called for specialists |
+| Context injection | **Skipped** (expensive, returns empty) | **Not passed** (memory_opts missing) |
+| Context compression | **No** — no context_window threading | **No** — not plumbed through |
+
+Result: specialists are stateless one-shot workers. They can't learn from
+experience, recall past tasks, or accumulate skills — every delegation starts
+from zero. This wastes the BEAM's ability to maintain per-agent state.
+
+### Goal
+
+Unify both execution paths so specialists accumulate memory across sessions:
+- **Tier 1**: Store conversation turns (task input + tool calls + result)
+- **Tier 2**: Record tool observations for later skill extraction
+- **Tier 3**: Promote session summaries after task completion
+- **Tier 4**: Extract skills via Reflector so agents improve over time
+- **Context injection**: Inject accumulated knowledge on future delegations
+  (fast path — skip embedding queries when Tier 3 is empty)
+
+### Solution
+
+**Replace `Pipe.through`'s internal loop with `ToolCallerLoop.run`** so both
+paths share the same memory pipeline. This is the single highest-leverage
+change — it wires in Tier 1 storage, Tier 2 observation recording, and
+context injection in one shot.
+
+### Architecture
+
+```text
+BEFORE (two separate loops):
+
+  Pipe.delegate_tool → Pipe.through → do_loop (no memory)
+  Pipe.orchestrate → Specialist.execute → ToolCallerLoop.run (partial memory)
+
+AFTER (unified loop):
+
+  Pipe.delegate_tool → Pipe.through → ToolCallerLoop.run (full memory)
+  Pipe.orchestrate → Specialist.execute → ToolCallerLoop.run (full memory)
+
+  Both paths:
+  1. Inject context (Tier 2/3/4/KG) — with fast-path skip when empty
+  2. Store input messages (Tier 1)
+  3. Record observations (Tier 2 → Tier 4 on close)
+  4. Store final response (Tier 1)
+  5. Promote on completion (Tier 3 summary + Tier 4 skills)
+```
+
+### Implementation Steps
+
+```text
+5g-A: Replace Pipe.through internal loop with ToolCallerLoop.run
+  │
+  ├─ Pipe.through: replace run_loop/do_loop with ToolCallerLoop.run
+  │   ├─ Build context with tool_agent, model_client, messages, tools
+  │   ├─ Pass memory_opts, intervention, max_iterations
+  │   ├─ Extract final text + usage from {:ok, generated} return
+  │   └─ Keep backwards compatibility (still returns {text, usage})
+  ├─ Remove run_loop/3, do_loop/4, think/2 (private Pipe loop functions)
+  ├─ Keep maybe_inject_memory/2 as fallback for non-ToolCallerLoop callers
+  └─ Tests: verify delegate tools still work with ToolCallerLoop backend
+
+5g-B: Wire memory_opts through delegate agent path
+  │
+  ├─ AgentBridge.delegate_tool_from_config: restore memory_opts construction
+  │   ├─ agent_id: "u#{user_id}_p#{project_id}_#{config.id}"
+  │   ├─ session_id: generate per-delegation session ID (ephemeral)
+  │   ├─ context_window: from agent model config
+  │   └─ Pass to Pipe.delegate_tool opts
+  ├─ Pipe.delegate_tool: forward memory_opts to through()
+  ├─ Pipe.through: forward memory_opts to ToolCallerLoop.run
+  └─ Tests: verify Tier 1 messages stored, Tier 2 observations recorded
+
+5g-C: Fast-path context injection (skip when empty)
+  │
+  ├─ ContextBuilder.build: add fast-path check before spawning 5 Tasks
+  │   ├─ Check Tier 2 has entries for agent_id (ETS lookup, O(1))
+  │   ├─ Check Tier 4 has skills for agent_id (ETS lookup, O(1))
+  │   ├─ If both empty AND no KG entities → skip all 5 Tasks, return []
+  │   └─ Only spawn expensive Tasks (Tier 3 vector search, KG query)
+  │       when there's actual data to retrieve
+  ├─ This eliminates the latency for fresh agents (first few delegations)
+  │   while enabling full context injection once memories accumulate
+  └─ Tests: benchmark build() with empty vs populated agent memory
+
+5g-D: Promote specialist sessions on delegate completion
+  │
+  ├─ Pipe.delegate_tool: after through() returns, trigger promotion
+  │   ├─ Spawn async Task for Promotion.close_session_with_summary
+  │   ├─ Non-blocking — don't wait for promotion to return result
+  │   ├─ Same pattern as EventLoop.maybe_promote_on_completion
+  │   └─ Only for agents (not orchestrator, which has orchestrator: true)
+  ├─ Promotion flow: Tier 1 messages → LLM summary → Tier 3 + Tier 4
+  │   ├─ Tier 3: embed session summary, store for future retrieval
+  │   └─ Tier 4: Reflector extracts skills from observations
+  └─ Tests: verify promotion creates Tier 3 entry + Tier 4 skill
+
+5g-E: Thread context_window through Specialist path
+  │
+  ├─ Specialist struct: add context_window field
+  ├─ Specialist.execute: pass context_window to ToolCallerLoop.run opts
+  ├─ Pool/Worker: thread context_window from agent config
+  ├─ ToolCallerLoop: mid-run compression now works for specialists
+  └─ Tests: verify compression triggers for long specialist conversations
+```
+
+### Memory Lifecycle After Unification
+
+```text
+First delegation to python_coder:
+  ContextBuilder.build → ETS check → empty → skip (fast, <1ms)
+  ToolCallerLoop runs → records 5 observations to Tier 2
+  Promotion → LLM summarizes → Tier 3 + Tier 4 skill extraction
+  Agent now has: 1 semantic memory + 1 skill
+
+Second delegation to python_coder:
+  ContextBuilder.build → ETS check → has data → spawn Tasks
+  Tier 2: "Previous observations: wrote files, ran tests"
+  Tier 3: "Session summary: created todo.py with dataclasses"
+  Tier 4: "Skill: use editor_write then shell_run_command to verify"
+  → Agent starts with context of what it's done before
+
+Tenth delegation to python_coder:
+  Agent has accumulated 10 session summaries + refined skills
+  Knows: project structure, naming conventions, test patterns
+  Skills have high confidence from repeated successful observations
+  → Agent performs faster and more accurately than first delegation
+```
+
+### Files
+
+| Action | File | Purpose |
+|---|---|---|
+| Modify | `lib/agent_ex/pipe.ex` | Replace internal loop with ToolCallerLoop.run |
+| Modify | `lib/agent_ex/agent_bridge.ex` | Restore memory_opts for delegate agents |
+| Modify | `lib/agent_ex/memory/context_builder.ex` | Fast-path skip when agent has no data |
+| Modify | `lib/agent_ex/specialist.ex` | Add context_window field, pass to loop |
+| Modify | `lib/agent_ex/specialist/worker.ex` | Thread context_window |
+| Modify | `lib/agent_ex/specialist/pool.ex` | Thread context_window |
+| Create | `test/agent_ex/pipe_memory_test.exs` | Delegate + memory integration tests |
+
+---
+
+## Phase 5h — Server-Side MCP Integration
+
+### Problem
+
+AgentEx has client-side MCP support (`AgentEx.MCP.Client`) for stdio/HTTP
+transports, but all tool execution goes through ToolCallerLoop — the LLM
+calls a tool, we execute it locally, feed the result back. This means:
+
+1. **Remote MCP servers require a proxy** — GitHub, Context7, Stripe, etc.
+   need client-side code to connect, authenticate, and relay
+2. **No server-side execution** — every tool call round-trips through our
+   BEAM process even when Anthropic could call the MCP server directly
+3. **Higher latency** — local relay adds network hops vs server-side
+
+### Solution
+
+Anthropic's API supports `mcp_servers` parameter — pass MCP server URLs
+and Claude calls them directly during inference. No client-side relay needed
+for URL-accessible MCP servers.
+
+**Two MCP modes:**
+
+| Mode | Transport | Execution | Use case |
+|---|---|---|---|
+| Client-side (existing) | stdio / HTTP | ToolCallerLoop → MCP.Client | Local tools, private servers |
+| Server-side (new) | SSE / URL | Anthropic API calls directly | Public MCP endpoints |
+
+### Architecture
+
+```text
+User request
+    │
+    ▼
+Orchestrator (ToolCallerLoop)
+    │
+    ├── Local tools (editor, shell, filesystem)
+    │   └── Executed via Sensing → ToolAgent (existing)
+    │
+    ├── Client-side MCP tools (private servers)
+    │   └── MCP.Client → stdio/HTTP transport (existing)
+    │
+    └── Server-side MCP tools (public endpoints)
+        └── Passed as mcp_servers to Anthropic API (new)
+        └── Claude calls them directly during inference
+        └── Results come back as mcp_tool_use / mcp_tool_result blocks
+```
+
+### MCP Servers to Support
+
+| Server | Endpoint | Capability |
+|---|---|---|
+| **Context7** | `https://mcp.context7.com/sse` | Library documentation lookup |
+| **GitHub** | `https://mcp.github.com/sse` | Repository operations, PR management |
+| **Fetch** | `https://mcp.anthropic.com/fetch/sse` | Web content fetching |
+
+### Implementation Steps
+
+```text
+5h-A: MCP Server Registry (Database + UI)
+  │
+  ├─ Migration: create mcp_servers table
+  │   ├─ id, project_id, name, url, auth_token (encrypted)
+  │   ├─ enabled boolean, provider (anthropic/openrouter)
+  │   └─ ON DELETE CASCADE from projects
+  ├─ Ecto schema: AgentEx.MCP.ServerConfig
+  ├─ CRUD context: AgentEx.MCP.Servers (list, create, update, delete)
+  ├─ Vault integration: auth tokens stored via project secrets
+  └─ Seed default servers (Context7, GitHub, Fetch) on project creation
+
+5h-B: MCP Server Management UI
+  │
+  ├─ New LiveView: MCPServersLive (list + add/edit dialog)
+  ├─ Server card: name, URL, status indicator, enable/disable toggle
+  ├─ Auth token input (masked, stored in Vault)
+  ├─ Test connection button (ping server endpoint)
+  ├─ Add to sidebar navigation after "Tools"
+  └─ Wallaby feature tests
+
+5h-C: Wire MCP Servers into ModelClient
+  │
+  ├─ ToolAssembler: load enabled MCP servers for project
+  ├─ Pass mcp_servers config to ModelClient.create via opts
+  ├─ ModelClient: include in Anthropic request body (already implemented)
+  ├─ Response parser: handle mcp_tool_use / mcp_tool_result blocks
+  │   (already implemented in parse_response)
+  └─ Agent tree UI: show MCP tool calls in log panel
+
+5h-D: OpenRouter MCP Support
+  │
+  ├─ Check if OpenRouter passes through mcp_servers parameter
+  ├─ If supported: add mcp_servers to OpenRouter request encoding
+  ├─ If not: document limitation (Anthropic direct only)
+  └─ Update provider_helpers with MCP support flags
+
+5h-E: Default MCP Server Templates
+  │
+  ├─ Context7: documentation lookup for any library
+  │   ├─ Tools: resolve-library-id, query-docs
+  │   └─ Use case: agents can look up current docs while coding
+  ├─ GitHub: repository operations
+  │   ├─ Tools: create-issue, list-PRs, read-file, search-code
+  │   └─ Use case: orchestrator creates issues/PRs from task results
+  ├─ Fetch: web content retrieval
+  │   └─ Use case: agents fetch external resources during tasks
+  └─ Register as default servers (opt-in, user provides auth tokens)
+```
+
+### Data Model
+
+```text
+┌──────────────────────────────────────────────────────────┐
+│                    mcp_servers                             │
+│                                                            │
+│  id (uuid PK)                                             │
+│  project_id (FK → projects, CASCADE)                      │
+│  name (string, unique per project)                        │
+│  url (string, SSE/URL endpoint)                           │
+│  provider (string: "anthropic" | "openrouter")            │
+│  enabled (boolean, default true)                          │
+│  auth_token_key (string, vault reference e.g. "mcp:github")│
+│  tools_filter (string[], optional — limit available tools) │
+│  inserted_at / updated_at                                 │
+└──────────────────────────────────────────────────────────┘
+```
+
+### Files
+
+| Action | File | Purpose |
+|---|---|---|
+| Create | `priv/repo/migrations/*_create_mcp_servers.exs` | Database table |
+| Create | `lib/agent_ex/mcp/server_config.ex` | Ecto schema |
+| Create | `lib/agent_ex/mcp/servers.ex` | CRUD context |
+| Create | `lib/agent_ex_web/live/mcp_servers_live.ex` | Management UI |
+| Create | `lib/agent_ex_web/live/mcp_servers_live.html.heex` | Template |
+| Modify | `lib/agent_ex/tool_assembler.ex` | Load MCP servers, pass to ModelClient |
+| Modify | `lib/agent_ex_web/router.ex` | Add /mcp-servers route |
+| Modify | `lib/agent_ex_web/components/layouts/app.html.heex` | Sidebar nav link |
+| Modify | `lib/agent_ex/defaults.ex` | Seed default MCP server templates |
+
+---
+
 ## Phase 6 — Flow Builder + Triggers
 
 ### Problem
