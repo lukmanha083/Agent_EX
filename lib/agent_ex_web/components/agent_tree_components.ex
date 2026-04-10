@@ -22,6 +22,8 @@ defmodule AgentExWeb.AgentTreeComponents do
   attr(:tree, :map, required: true)
   attr(:budget, :map, default: nil)
   attr(:task_stats, :map, default: %{completed: 0, total: 0})
+  attr(:logs, :map, default: %{})
+  attr(:expanded, :string, default: nil)
 
   def agent_tree(assigns) do
     ~H"""
@@ -41,6 +43,8 @@ defmodule AgentExWeb.AgentTreeComponents do
           :for={{task_id, node} <- sorted_nodes(@tree)}
           task_id={task_id}
           node={node}
+          logs={Map.get(@logs, task_id, [])}
+          expanded={@expanded == task_id}
         />
       </div>
 
@@ -66,6 +70,8 @@ defmodule AgentExWeb.AgentTreeComponents do
   """
   attr(:task_id, :string, required: true)
   attr(:node, :map, required: true)
+  attr(:logs, :list, default: [])
+  attr(:expanded, :boolean, default: false)
 
   def agent_node(assigns) do
     ~H"""
@@ -76,9 +82,19 @@ defmodule AgentExWeb.AgentTreeComponents do
         <span class="text-xs" aria-hidden="true">&#x1F916;</span>
         <span class="font-medium text-gray-300 text-xs">{@node.agent}</span>
         <span :if={@node[:model]} class="text-[10px] text-gray-600">{@node.model}</span>
-        <.badge variant={node_badge_variant(@node.status)} class="ml-auto text-[9px]">
-          {format_status(@node.status)}
-        </.badge>
+        <button
+          type="button"
+          phx-click="toggle_agent_log"
+          phx-value-id={@task_id}
+          class={[
+            "ml-auto cursor-pointer hover:opacity-80 transition-opacity",
+            @expanded && "ring-1 ring-indigo-500 rounded"
+          ]}
+        >
+          <.badge variant={node_badge_variant(@node.status)} class="text-[9px]">
+            {format_status(@node.status)}
+          </.badge>
+        </button>
       </div>
 
       <%!-- Tool calls --%>
@@ -108,6 +124,9 @@ defmodule AgentExWeb.AgentTreeComponents do
         {String.slice(@node.error, 0, 120)}
       </div>
 
+      <%!-- Expandable log panel --%>
+      <.agent_log_panel :if={@expanded} logs={@logs} />
+
       <%!-- Sub-delegated children --%>
       <div :if={@node[:children] && @node.children != []} class="ml-5 mt-1 border-l border-gray-700/50 pl-3 space-y-1">
         <.agent_node
@@ -135,6 +154,30 @@ defmodule AgentExWeb.AgentTreeComponents do
         <path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495ZM10 5a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 10 5Zm0 9a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clip-rule="evenodd" />
       </svg>
       <span>Orchestration in progress — do not close this page while tasks are running</span>
+    </div>
+    """
+  end
+
+  @doc """
+  Expandable log panel showing agent activity (tool calls, results).
+  """
+  attr(:logs, :list, required: true)
+
+  def agent_log_panel(assigns) do
+    ~H"""
+    <div class="ml-6 mt-2 rounded-md border border-gray-800 bg-gray-950 p-2 max-h-60 overflow-y-auto font-mono text-[11px] space-y-1">
+      <div :if={@logs == []} class="flex items-center gap-2 text-gray-600">
+        <span class="w-1.5 h-1.5 rounded-full bg-yellow-500 animate-pulse shrink-0" />
+        <span>Agent is working...</span>
+      </div>
+      <div :for={entry <- @logs} class="flex gap-2">
+        <span class={["shrink-0", log_entry_color(entry.type)]}>
+          {log_entry_icon(entry.type)}
+        </span>
+        <span class="text-gray-400 break-all">
+          {format_log_entry(entry)}
+        </span>
+      </div>
     </div>
     """
   end
@@ -188,4 +231,33 @@ defmodule AgentExWeb.AgentTreeComponents do
 
   defp format_duration(ms) when ms < 1000, do: "#{ms}ms"
   defp format_duration(ms), do: "#{Float.round(ms / 1000, 1)}s"
+
+  defp log_entry_icon(:tool_call), do: ">"
+  defp log_entry_icon(:tool_result), do: "<"
+  defp log_entry_icon(:result), do: "="
+  defp log_entry_icon(_), do: "-"
+
+  defp log_entry_color(:tool_call), do: "text-yellow-500"
+  defp log_entry_color(:tool_result), do: "text-green-500"
+  defp log_entry_color(:result), do: "text-indigo-400"
+  defp log_entry_color(_), do: "text-gray-500"
+
+  defp format_log_entry(%{type: :tool_call, tool: tool, args: args}) do
+    preview = if args, do: String.slice(to_string(args), 0, 120), else: ""
+    "#{tool}(#{preview})"
+  end
+
+  defp format_log_entry(%{type: :tool_result, content: content, is_error: true}) do
+    "ERR: #{content || "unknown error"}"
+  end
+
+  defp format_log_entry(%{type: :tool_result, content: content}) do
+    content || "ok"
+  end
+
+  defp format_log_entry(%{type: :result, content: content}) do
+    "Done: #{content || "completed"}"
+  end
+
+  defp format_log_entry(_), do: "..."
 end
