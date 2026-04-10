@@ -131,8 +131,11 @@
     <span class="text-base font-semibold text-white">AgentEx</span>
   </div>
 
-  <!-- Sidebar -->
-  <aside class="hidden lg:flex lg:w-56 flex-col flex-shrink-0 bg-gray-900 border-r border-gray-800">
+  <!-- Sidebar (hidden when no project exists — first-time setup) -->
+  <aside class={[
+    "hidden flex-col flex-shrink-0 bg-gray-900 border-r border-gray-800",
+    assigns[:current_project] && "lg:flex lg:w-56"
+  ]}>
     <!-- Logo -->
     <div class="flex items-center gap-2.5 h-14 px-3 lg:px-4 border-b border-gray-800">
       <img src={~p"/images/logo-icon.svg"} alt="AgentEx" class="h-8 w-8 shrink-0 mx-auto lg:mx-0" />
