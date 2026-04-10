@@ -53,6 +53,8 @@ defmodule AgentExWeb.ChatLive do
          show_history: false,
          agent_tree: %{},
          agent_tree_stats: %{completed: 0, total: 0},
+         agent_logs: %{},
+         expanded_agent: nil,
          agent_tree_budget: nil
        )}
     end
@@ -110,6 +112,13 @@ defmodule AgentExWeb.ChatLive do
 
   def handle_event("toggle_history", _params, socket) do
     {:noreply, assign(socket, show_history: !socket.assigns.show_history)}
+  end
+
+  def handle_event("toggle_agent_log", %{"id" => task_id}, socket) do
+    expanded =
+      if socket.assigns.expanded_agent == task_id, do: nil, else: task_id
+
+    {:noreply, assign(socket, expanded_agent: expanded)}
   end
 
   def handle_event("send", %{"message" => raw_message}, socket) do
@@ -251,7 +260,9 @@ defmodule AgentExWeb.ChatLive do
          run_id: nil,
          agent_tree: %{},
          agent_tree_stats: %{completed: 0, total: 0},
-         agent_tree_budget: nil
+         agent_tree_budget: nil,
+         agent_logs: %{},
+         expanded_agent: nil
        )}
     else
       {:noreply, socket}
@@ -296,9 +307,24 @@ defmodule AgentExWeb.ChatLive do
 
         tree = Map.put(socket.assigns.agent_tree, event.data.call_id, node)
         stats = %{socket.assigns.agent_tree_stats | total: map_size(tree)}
-        assign(socket, agent_tree: tree, agent_tree_stats: stats)
+
+        socket
+        |> assign(agent_tree: tree, agent_tree_stats: stats)
+        |> append_agent_log(event.data.call_id, %{
+          type: :tool_call,
+          tool: "delegate_to_#{agent_name}",
+          args: nil,
+          timestamp: event.timestamp
+        })
       else
-        maybe_add_tool_to_delegate_node(socket, event.data)
+        socket
+        |> maybe_add_tool_to_delegate_node(event.data)
+        |> append_agent_log(event.data.call_id, %{
+          type: :tool_call,
+          tool: tool_name,
+          args: event.data[:arguments],
+          timestamp: event.timestamp
+        })
       end
 
     {:noreply, assign(socket, events: events, stages: stages)}
@@ -328,9 +354,24 @@ defmodule AgentExWeb.ChatLive do
 
         completed = Enum.count(tree, fn {_id, n} -> n.status in [:complete, :failed] end)
         stats = %{socket.assigns.agent_tree_stats | completed: completed}
-        assign(socket, agent_tree: tree, agent_tree_stats: stats)
-      else
+
         socket
+        |> assign(agent_tree: tree, agent_tree_stats: stats)
+        |> append_agent_log(result_call_id, %{
+          type: :result,
+          content: preview,
+          is_error: event.data[:is_error],
+          timestamp: event.timestamp
+        })
+      else
+        # Tool result inside a delegate — find the active delegate and log it
+        append_agent_log_to_active(socket, %{
+          type: :tool_result,
+          call_id: result_call_id,
+          content: event.data[:content] && String.slice(event.data[:content], 0, 300),
+          is_error: event.data[:is_error],
+          timestamp: event.timestamp
+        })
       end
 
     {:noreply, assign(socket, events: events, stages: stages)}
@@ -502,11 +543,15 @@ defmodule AgentExWeb.ChatLive do
           AgentEx.Message.user(message)
         ]
 
+        # Orchestrator skips reasoning_first — it should plan and delegate quickly,
+        # not spend 2 extra LLM rounds reasoning. The system prompt already enforces
+        # the Reason → Plan → Delegate workflow.
         EventLoop.run(run_id, tool_agent, client, input_messages, tools,
           memory: orchestrator_memory,
           context_window: orchestrator_memory.context_window,
-          tool_timeout: 120_000,
-          reasoning_first: reasoning_capable?(socket.assigns.model) and needs_reasoning?(message),
+          tool_timeout: 180_000,
+          max_iterations: 10,
+          reasoning_first: true,
           metadata: %{user_id: user.id}
         )
 
@@ -862,41 +907,6 @@ defmodule AgentExWeb.ChatLive do
 
   defp project_agent_id(user, project), do: "u#{user.id}_p#{project.id}_chat"
 
-  # Only enable reasoning_first for models that can reliably distinguish
-  # text reasoning from tool calls. Smaller models (Haiku, mini, nano)
-  # tend to hallucinate XML tool calls as text when tools are unavailable.
-  @reasoning_capable_patterns ~w[opus sonnet gpt-5.4 o3 o4 kimi-k2]
-  defp reasoning_capable?(model) when is_binary(model) do
-    model_lower = String.downcase(model)
-
-    Enum.any?(@reasoning_capable_patterns, fn pattern ->
-      String.contains?(model_lower, pattern)
-    end) and not String.contains?(model_lower, "mini") and
-      not String.contains?(model_lower, "nano")
-  end
-
-  defp reasoning_capable?(_), do: false
-
-  # Skip reasoning for short/simple messages; use it for complex tasks
-  # that benefit from planning before tool use.
-  @planning_signals ~w[
-    plan build create implement design refactor migrate
-    analyze compare review audit investigate debug
-    step-by-step multi-step workflow pipeline setup
-    architecture structure organize integrate deploy
-  ]
-  @min_reasoning_words 15
-
-  defp needs_reasoning?(message) when is_binary(message) do
-    word_count = length(String.split(message))
-    lower = String.downcase(message)
-
-    word_count >= @min_reasoning_words or
-      Enum.any?(@planning_signals, &String.contains?(lower, &1))
-  end
-
-  defp needs_reasoning?(_), do: false
-
   # -- Agent tree helpers --
 
   defp update_tree_node_tool_call(tree, task_id, data) do
@@ -952,6 +962,24 @@ defmodule AgentExWeb.ChatLive do
 
       nil ->
         socket
+    end
+  end
+
+  # -- Agent log helpers --
+
+  defp append_agent_log(socket, task_id, entry) do
+    logs = socket.assigns.agent_logs
+    existing = Map.get(logs, task_id, [])
+    assign(socket, agent_logs: Map.put(logs, task_id, existing ++ [entry]))
+  end
+
+  defp append_agent_log_to_active(socket, entry) do
+    active =
+      Enum.find(socket.assigns.agent_tree, fn {_id, node} -> node.status == :running end)
+
+    case active do
+      {delegate_id, _} -> append_agent_log(socket, delegate_id, entry)
+      nil -> socket
     end
   end
 end
