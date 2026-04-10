@@ -220,7 +220,6 @@ defmodule AgentEx.ToolAssembler do
   end
 
   @valid_statuses %{
-    "pending" => :pending,
     "in_progress" => :in_progress,
     "completed" => :completed,
     "failed" => :failed

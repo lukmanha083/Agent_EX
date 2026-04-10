@@ -543,9 +543,9 @@ defmodule AgentExWeb.ChatLive do
           AgentEx.Message.user(message)
         ]
 
-        # Orchestrator skips reasoning_first — it should plan and delegate quickly,
-        # not spend 2 extra LLM rounds reasoning. The system prompt already enforces
-        # the Reason → Plan → Delegate workflow.
+        # Orchestrator uses reasoning_first with adaptive thinking — the model
+        # decides when to reason deeply vs act immediately. For Anthropic, this
+        # is a single API call (built-in thinking). For other providers, 2 calls.
         EventLoop.run(run_id, tool_agent, client, input_messages, tools,
           memory: orchestrator_memory,
           context_window: orchestrator_memory.context_window,

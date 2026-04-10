@@ -19,22 +19,20 @@ defmodule AgentEx.Memory.SemanticMemory.Store do
 
   def store(project_id, agent_id, text, type \\ "general", session_id \\ "") do
     with {:ok, vector} <- Embeddings.embed(text, project_id: project_id) do
-      result =
-        %Memory{}
-        |> Memory.changeset(%{
-          project_id: project_id,
-          agent_id: agent_id,
-          content: text,
-          memory_type: type,
-          session_id: session_id,
-          embedding: vector
-        })
-        |> Repo.insert()
-
-      # Invalidate ETS cache so next query picks up the new memory
-      Cache.invalidate(project_id, agent_id)
-
-      result
+      %Memory{}
+      |> Memory.changeset(%{
+        project_id: project_id,
+        agent_id: agent_id,
+        content: text,
+        memory_type: type,
+        session_id: session_id,
+        embedding: vector
+      })
+      |> Repo.insert()
+      |> tap(fn
+        {:ok, _} -> Cache.invalidate(project_id, agent_id)
+        _ -> :ok
+      end)
     end
   end
 
@@ -94,7 +92,9 @@ defmodule AgentEx.Memory.SemanticMemory.Store do
     )
     |> Repo.one!() > 0
   rescue
-    _ -> false
+    error ->
+      Logger.warning("has_memories? failed: #{inspect(error)}")
+      false
   end
 
   # --- Tier callbacks ---
