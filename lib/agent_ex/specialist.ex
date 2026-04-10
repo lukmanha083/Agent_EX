@@ -13,6 +13,7 @@ defmodule AgentEx.Specialist do
     :model_client,
     :description,
     :role,
+    :context_window,
     tools: [],
     plugins: [],
     intervention: [],
@@ -85,6 +86,11 @@ defmodule AgentEx.Specialist do
     ]
 
     loop_opts = if model_fn, do: Keyword.put(loop_opts, :model_fn, model_fn), else: loop_opts
+
+    loop_opts =
+      if specialist.context_window,
+        do: Keyword.put(loop_opts, :context_window, specialist.context_window),
+        else: loop_opts
 
     case ToolCallerLoop.run(tool_agent, specialist.model_client, messages, tools, loop_opts) do
       {:ok, generated} ->

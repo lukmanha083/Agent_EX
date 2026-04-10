@@ -24,7 +24,11 @@ defmodule AgentEx.AgentBridge do
   Each agent becomes: delegate_to_<name>(task) -> runs agent's full loop -> returns result.
   """
   def delegate_tools(user_id, project_id, model_client, opts \\ []) do
-    AgentStore.list(user_id, project_id)
+    user_agents = AgentStore.list(user_id, project_id)
+    system_agents = AgentStore.list_system()
+
+    (user_agents ++ system_agents)
+    |> Enum.uniq_by(& &1.name)
     |> Enum.map(fn config ->
       delegate_tool_from_config(config, user_id, project_id, model_client, opts)
     end)
@@ -64,17 +68,17 @@ defmodule AgentEx.AgentBridge do
         ModelClient.new(model: config.model, provider: agent_provider, project_id: project_id)
       end
 
-    # Resolve context_window from agent's own model
+    # Full memory (Tier 1-4) for delegate agents — enables skill accumulation
     agent_context_window = AgentEx.ProviderHelpers.context_window_for(config.model)
+    run_id = opts[:run_id]
 
     memory_opts =
       case opts[:memory] do
-        %{session_id: sid} ->
+        %{session_id: _sid} ->
           %{
             user_id: user_id,
             project_id: project_id,
             agent_id: "u#{user_id}_p#{project_id}_#{config.id}",
-            session_id: sid,
             context_window: agent_context_window
           }
 
@@ -82,7 +86,9 @@ defmodule AgentEx.AgentBridge do
           nil
       end
 
-    pipe_opts = if memory_opts, do: [memory: memory_opts], else: []
+    pipe_opts =
+      [run_id: run_id, memory: memory_opts]
+      |> Enum.reject(fn {_k, v} -> is_nil(v) end)
 
     Pipe.delegate_tool(config.name, pipe_agent, agent_model_client, pipe_opts)
   end

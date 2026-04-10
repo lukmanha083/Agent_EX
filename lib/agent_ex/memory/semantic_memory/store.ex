@@ -10,7 +10,7 @@ defmodule AgentEx.Memory.SemanticMemory.Store do
   import Pgvector.Ecto.Query
 
   alias AgentEx.Memory.Embeddings
-  alias AgentEx.Memory.SemanticMemory.Memory
+  alias AgentEx.Memory.SemanticMemory.{Cache, Memory}
   alias AgentEx.Repo
 
   require Logger
@@ -19,16 +19,22 @@ defmodule AgentEx.Memory.SemanticMemory.Store do
 
   def store(project_id, agent_id, text, type \\ "general", session_id \\ "") do
     with {:ok, vector} <- Embeddings.embed(text, project_id: project_id) do
-      %Memory{}
-      |> Memory.changeset(%{
-        project_id: project_id,
-        agent_id: agent_id,
-        content: text,
-        memory_type: type,
-        session_id: session_id,
-        embedding: vector
-      })
-      |> Repo.insert()
+      result =
+        %Memory{}
+        |> Memory.changeset(%{
+          project_id: project_id,
+          agent_id: agent_id,
+          content: text,
+          memory_type: type,
+          session_id: session_id,
+          embedding: vector
+        })
+        |> Repo.insert()
+
+      # Invalidate ETS cache so next query picks up the new memory
+      Cache.invalidate(project_id, agent_id)
+
+      result
     end
   end
 
@@ -78,6 +84,17 @@ defmodule AgentEx.Memory.SemanticMemory.Store do
       |> Repo.delete_all()
 
     {:ok, count}
+  end
+
+  @doc "Check if an agent has any semantic memories (cheap SQL count, no embedding)."
+  def has_memories?(project_id, agent_id) do
+    from(m in Memory,
+      where: m.project_id == ^project_id and m.agent_id == ^agent_id,
+      select: count(m.id)
+    )
+    |> Repo.one!() > 0
+  rescue
+    _ -> false
   end
 
   # --- Tier callbacks ---

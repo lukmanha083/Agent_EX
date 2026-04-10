@@ -37,7 +37,7 @@ defmodule AgentEx.Message do
   end
 
   @enforce_keys [:role, :content]
-  defstruct [:role, :content, :source, :tool_calls, :usage]
+  defstruct [:role, :content, :source, :tool_calls, :usage, metadata: %{}]
 
   @type role :: :system | :user | :assistant | :tool
   @type t :: %__MODULE__{
