@@ -102,7 +102,8 @@ defmodule AgentEx.Pipe do
         intervention: agent.intervention || [],
         memory: memory_opts,
         tool_timeout: 180_000,
-        reasoning_first: true
+        # Skip reasoning_first when model_fn is provided (test mode)
+        reasoning_first: Keyword.get(opts, :model_fn) == nil
       ]
       |> maybe_put_opt(:model_fn, Keyword.get(opts, :model_fn))
       |> maybe_put_opt(:context_window, memory_opts && memory_opts[:context_window])
@@ -211,7 +212,8 @@ defmodule AgentEx.Pipe do
   def delegate_tool(name, %Agent{} = agent, model_client, opts \\ []) do
     Tool.new(
       name: "delegate_to_#{name}",
-      description: "Delegate a task to #{name}. #{truncate_description(agent.system_message, 200)}",
+      description:
+        "Delegate a task to #{name}. #{truncate_description(agent.system_message, 200)}",
       kind: :write,
       parameters: %{
         "type" => "object",

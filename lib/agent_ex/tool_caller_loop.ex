@@ -147,9 +147,8 @@ defmodule AgentEx.ToolCallerLoop do
   # -- Built-in thinking: single API call with internal reasoning --
 
   defp supports_builtin_thinking?(nil), do: false
-  defp supports_builtin_thinking?(%{model_fn: fun}) when is_function(fun, 2), do: false
 
-  # Anthropic direct API: always supports extended thinking
+  # Anthropic direct API: always supports adaptive thinking
   defp supports_builtin_thinking?(%{provider: :anthropic}), do: true
 
   # OpenRouter: unified reasoning parameter works for all thinking-capable models

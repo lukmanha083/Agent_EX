@@ -169,8 +169,7 @@ defmodule AgentEx.ToolAssembler do
     [
       AgentEx.Tool.new(
         name: "create_task",
-        description:
-          "Create a task in your plan. Break work into steps before delegating.",
+        description: "Create a task in your plan. Break work into steps before delegating.",
         parameters: %{
           "type" => "object",
           "properties" => %{
@@ -421,5 +420,4 @@ defmodule AgentEx.ToolAssembler do
       _ -> Enum.join(parts, ". ")
     end
   end
-
 end

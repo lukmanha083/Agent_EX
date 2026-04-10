@@ -180,7 +180,10 @@ defmodule AgentEx.ModelClient do
       citations = extract_citations(text_blocks)
 
       message = Message.assistant(text)
-      message = if citations != [], do: %{message | metadata: %{citations: citations}}, else: message
+
+      message =
+        if citations != [], do: %{message | metadata: %{citations: citations}}, else: message
+
       {:ok, message}
     end
   end
