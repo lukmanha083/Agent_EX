@@ -109,6 +109,8 @@ defmodule AgentEx.ToolCallerLoop do
     # Store incoming task messages AFTER injecting context
     maybe_store_input_messages(input_messages, memory_opts)
 
+    mcp_servers = Keyword.get(opts, :mcp_servers)
+
     context = %{
       tool_agent: tool_agent,
       model_client: model_client,
@@ -121,7 +123,8 @@ defmodule AgentEx.ToolCallerLoop do
       tool_timeout: tool_timeout,
       intervention: intervention,
       memory: memory_opts,
-      context_window: context_window
+      context_window: context_window,
+      mcp_servers: mcp_servers
     }
 
     reasoning_first = Keyword.get(opts, :reasoning_first, false)
@@ -385,6 +388,11 @@ defmodule AgentEx.ToolCallerLoop do
     fun.(messages, tools)
   end
 
+  defp think(%{model_client: client, tools: tools, mcp_servers: mcp}, messages)
+       when not is_nil(mcp) do
+    ModelClient.create(client, messages, tools: tools, mcp_servers: mcp)
+  end
+
   defp think(%{model_client: client, tools: tools}, messages) do
     ModelClient.create(client, messages, tools: tools)
   end
@@ -394,6 +402,11 @@ defmodule AgentEx.ToolCallerLoop do
   defp think_with_reasoning(%{model_fn: fun, tools: tools}, messages)
        when is_function(fun, 2) do
     fun.(messages, tools)
+  end
+
+  defp think_with_reasoning(%{model_client: client, tools: tools, mcp_servers: mcp}, messages)
+       when not is_nil(mcp) do
+    ModelClient.create(client, messages, tools: tools, thinking: true, mcp_servers: mcp)
   end
 
   defp think_with_reasoning(%{model_client: client, tools: tools}, messages) do

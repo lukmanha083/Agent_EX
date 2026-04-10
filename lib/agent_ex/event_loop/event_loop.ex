@@ -48,6 +48,7 @@ defmodule AgentEx.EventLoop do
     # Wrap model function with think event broadcasting
     # Preserves any caller-supplied :model_fn (e.g. test stubs)
     caller_model_fn = Keyword.get(opts, :model_fn)
+    mcp_servers = Keyword.get(opts, :mcp_servers)
 
     model_fn = fn msgs, tls ->
       broadcast(run_id, :think_start, %{message_count: length(msgs)})
@@ -56,7 +57,7 @@ defmodule AgentEx.EventLoop do
         if caller_model_fn do
           caller_model_fn.(msgs, tls)
         else
-          ModelClient.create(model_client, msgs, tools: tls)
+          ModelClient.create(model_client, msgs, build_create_opts(tls, mcp_servers))
         end
 
       case result do
@@ -241,4 +242,7 @@ defmodule AgentEx.EventLoop do
         acc
     end)
   end
+
+  defp build_create_opts(tools, nil), do: [tools: tools]
+  defp build_create_opts(tools, mcp_servers), do: [tools: tools, mcp_servers: mcp_servers]
 end

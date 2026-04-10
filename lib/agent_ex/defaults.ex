@@ -16,6 +16,7 @@ defmodule AgentEx.Defaults do
 
   alias AgentEx.{AgentConfig, AgentStore}
   alias AgentEx.Defaults.{Agents, Tools}
+  alias AgentEx.MCP.Servers, as: McpServers
 
   require Logger
 
@@ -56,8 +57,8 @@ defmodule AgentEx.Defaults do
   """
   def seed_project(user_id, project_id, _opts \\ []) do
     # System agents are shared globally — no per-project agent seeding needed.
-    # Only seed HTTP tools (project-scoped).
     seed_tools(user_id, project_id)
+    seed_mcp_servers(project_id)
     :ok
   end
 
@@ -74,6 +75,45 @@ defmodule AgentEx.Defaults do
 
         {:error, reason} ->
           Logger.warning("Defaults: failed to seed tool '#{template.name}': #{inspect(reason)}")
+      end
+    end)
+  end
+
+  @mcp_server_templates [
+    %{
+      name: "context7",
+      description:
+        "Library documentation lookup — resolve library IDs and query current docs for any framework or package",
+      url: "https://mcp.context7.com/sse",
+      provider: "anthropic"
+    },
+    %{
+      name: "fetch",
+      description: "Web content fetching — retrieve and extract content from URLs",
+      url: "https://mcp.anthropic.com/fetch/sse",
+      provider: "anthropic"
+    }
+  ]
+
+  defp seed_mcp_servers(project_id) do
+    Enum.each(@mcp_server_templates, fn template ->
+      attrs =
+        template
+        |> Map.put(:project_id, project_id)
+        |> Map.put(:enabled, true)
+
+      case McpServers.create(attrs) do
+        {:ok, _} ->
+          Logger.info("Defaults: seeded MCP server '#{template.name}' for project #{project_id}")
+
+        {:error, %Ecto.Changeset{}} ->
+          # Unique constraint (already exists) — skip
+          :ok
+
+        {:error, reason} ->
+          Logger.warning(
+            "Defaults: failed to seed MCP server '#{template.name}': #{inspect(reason)}"
+          )
       end
     end)
   end
