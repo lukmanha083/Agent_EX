@@ -70,7 +70,7 @@ defmodule AgentExWeb.AgentComponents do
             <p class="text-[10px] text-gray-500">{@agent.provider}/{@agent.model}</p>
           </div>
         </div>
-        <div class="flex gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-within:opacity-100 transition-opacity">
+        <div :if={@agent.user_id != nil} class="flex gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-within:opacity-100 transition-opacity">
           <button
             type="button"
             phx-click="edit_agent"
@@ -112,6 +112,9 @@ defmodule AgentExWeb.AgentComponents do
         </.badge>
         <.badge :if={sandbox_configured?(@agent, @project_root_path)} variant="outline" class="text-[10px] text-amber-400 border-amber-500/30">
           sandboxed
+        </.badge>
+        <.badge :if={@agent.user_id == nil} variant="outline" class="text-[10px] text-cyan-400 border-cyan-500/30">
+          system
         </.badge>
       </div>
     </div>

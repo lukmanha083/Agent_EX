@@ -64,6 +64,7 @@ defmodule AgentEx.ToolAssembler do
     delegate_tools =
       AgentBridge.delegate_tools(user_id, project_id, model_client,
         available_tools: available,
+        run_id: opts[:run_id],
         memory: opts[:memory]
       )
 
@@ -168,15 +169,13 @@ defmodule AgentEx.ToolAssembler do
     [
       AgentEx.Tool.new(
         name: "create_task",
-        description:
-          "Create a task in your plan. Use this to break work into steps before delegating. " <>
-            "Each task should be a single, focused unit of work for one specialist agent.",
+        description: "Create a task in your plan. Break work into steps before delegating.",
         parameters: %{
           "type" => "object",
           "properties" => %{
             "title" => %{
               "type" => "string",
-              "description" => "Short description of the task (what needs to be done)"
+              "description" => "Short description of the task"
             }
           },
           "required" => ["title"]
@@ -189,28 +188,19 @@ defmodule AgentEx.ToolAssembler do
       ),
       AgentEx.Tool.new(
         name: "update_task",
-        description:
-          "Update a task's status and optionally record which agent handled it and the result. " <>
-            "Call this after delegating to an agent to track progress.",
+        description: "Update a task's status after delegation completes.",
         parameters: %{
           "type" => "object",
           "properties" => %{
-            "task_id" => %{
-              "type" => "integer",
-              "description" => "The task ID returned by create_task"
-            },
+            "task_id" => %{"type" => "integer", "description" => "The task ID"},
             "status" => %{
               "type" => "string",
               "enum" => ["in_progress", "completed", "failed"],
-              "description" => "New status for the task"
-            },
-            "agent" => %{
-              "type" => "string",
-              "description" => "Name of the specialist agent handling this task"
+              "description" => "New status"
             },
             "result" => %{
               "type" => "string",
-              "description" => "Brief summary of the result or error"
+              "description" => "Brief summary of the result"
             }
           },
           "required" => ["task_id", "status"]
@@ -220,19 +210,34 @@ defmodule AgentEx.ToolAssembler do
       ),
       AgentEx.Tool.new(
         name: "list_tasks",
-        description:
-          "Show all tasks in your current plan with their status. " <>
-            "Use this to review progress before deciding next steps.",
-        parameters: %{
-          "type" => "object",
-          "properties" => %{}
-        },
+        description: "Show all tasks with their status.",
+        parameters: %{"type" => "object", "properties" => %{}},
         kind: :read,
-        function: fn _args ->
-          {:ok, AgentEx.TaskList.format_tasks(run_id)}
-        end
+        function: fn _args -> {:ok, AgentEx.TaskList.format_tasks(run_id)} end
       )
     ]
+  end
+
+  @valid_statuses %{
+    "in_progress" => :in_progress,
+    "completed" => :completed,
+    "failed" => :failed
+  }
+
+  defp execute_update_task(run_id, args) do
+    case Map.get(@valid_statuses, args["status"]) do
+      nil ->
+        {:error, "Invalid status: #{args["status"]}"}
+
+      status ->
+        updates = %{status: status}
+        updates = if args["result"], do: Map.put(updates, :result, args["result"]), else: updates
+
+        case AgentEx.TaskList.update_task(run_id, args["task_id"], updates) do
+          {:ok, t} -> {:ok, "Task ##{t.id} updated: #{t.status} — #{t.title}"}
+          {:error, :not_found} -> {:error, "Task ##{args["task_id"]} not found"}
+        end
+    end
   end
 
   defp validate_md_filename(filename) do
@@ -262,7 +267,9 @@ defmodule AgentEx.ToolAssembler do
   Falls back to a simple assistant prompt when no agents are defined.
   """
   def orchestrator_prompt(user_id, project_id) do
-    agents = AgentStore.list(user_id, project_id)
+    user_agents = AgentStore.list(user_id, project_id)
+    system_agents = AgentStore.list_system()
+    agents = Enum.uniq_by(user_agents ++ system_agents, & &1.name)
 
     if agents == [] do
       """
@@ -294,38 +301,31 @@ defmodule AgentEx.ToolAssembler do
         end)
 
       """
-      You are an AI orchestrator. Your role: reason, plan, delegate, synthesize.
-      You NEVER produce code, files, or commands directly — you ALWAYS delegate action to specialists.
-
-      ## Session startup
-      Check .memory/ for plan.md and progress.md to resume previous work. If none exist, start fresh.
+      You are an AI orchestrator. You reason, plan, delegate, and synthesize — never act directly.
 
       ## Specialists
       #{agent_descriptions}
 
-      ## Mandatory workflow for every task
-      1. **Reason** — analyze the user's request, break it into steps
-      2. **Plan** — decide which specialist(s) to use and in what order
-      3. **Delegate** — call delegate_to_* tools to dispatch each step. ALWAYS use the tool call API — never write tool calls as text
-      4. **Review** — read the specialist's result, verify it meets the goal
-      5. **Synthesize** — summarize what was done and present the result to the user
-      6. Save progress to .memory/*.md via save_note (plan.md, progress.md, decisions.md)
+      ## How you work
+      1. Reason about the user's request — what needs to be done and in what order
+      2. Break it into tasks with create_task — one task per unit of work
+      3. Delegate each task to the best specialist — include clear instructions
+      4. Track progress with update_task after each delegation completes
+      5. If a specialist reports failures (test failures, review issues), reason about
+         what went wrong and delegate a fix to the appropriate specialist
+      6. Synthesize the final result when all tasks are done
 
-      ## When to answer directly (NO delegation)
-      ONLY answer directly for: greetings, simple factual questions about the project,
-      explanations of code you can read, or clarifying questions back to the user.
-      If the user asks you to CREATE, WRITE, MODIFY, BUILD, RUN, EXECUTE, or DELETE
-      anything — you MUST delegate to a specialist. No exceptions.
+      ## Delegation principles
+      - Tell specialists to use filesystem_write_file for creating/modifying files
+      - Tell specialists to verify their work with shell_run_command
+      - Include the WHAT and WHY in delegation — the specialist knows HOW
+      - The user expects working files on disk, not code displayed in chat
 
-      ## Rules
-      - You CANNOT write files, generate code to files, or run commands — delegate those to specialists
-      - You CAN read files (editor_read, search_grep, search_find_files) to inform your plan
-      - One focused task per delegation — don't combine unrelated operations
-      - NEVER output tool calls as text or XML — always use the function calling API
-      - Report delegation errors to user instead of retrying endlessly
+      ## Answer directly (no delegation) for
+      Greetings, factual questions, code explanations, clarifying questions.
 
       ## Missing capabilities
-      If no specialist can handle a task, tell the user what's missing and suggest an agent config (name, role, model, tools). Link: [Create agent](/agents)
+      If no specialist can handle a task, tell the user: [Create agent](/agents)
       """
     end
   end
@@ -419,36 +419,5 @@ defmodule AgentEx.ToolAssembler do
       [] -> "specialist agent"
       _ -> Enum.join(parts, ". ")
     end
-  end
-
-  @valid_statuses %{
-    "pending" => :pending,
-    "in_progress" => :in_progress,
-    "completed" => :completed,
-    "failed" => :failed
-  }
-
-  defp execute_update_task(run_id, args) do
-    task_id = args["task_id"]
-
-    case Map.get(@valid_statuses, args["status"]) do
-      nil ->
-        {:error,
-         "Invalid status: #{args["status"]}. Use: pending, in_progress, completed, failed"}
-
-      status ->
-        updates = build_task_updates(status, args)
-
-        case AgentEx.TaskList.update_task(run_id, task_id, updates) do
-          {:ok, t} -> {:ok, "Task ##{t.id} updated: #{t.status} — #{t.title}"}
-          {:error, :not_found} -> {:error, "Task ##{task_id} not found"}
-        end
-    end
-  end
-
-  defp build_task_updates(status, args) do
-    base = %{status: status}
-    base = if args["agent"], do: Map.put(base, :agent, args["agent"]), else: base
-    if args["result"], do: Map.put(base, :result, args["result"]), else: base
   end
 end

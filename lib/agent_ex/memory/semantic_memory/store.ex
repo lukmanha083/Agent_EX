@@ -10,7 +10,7 @@ defmodule AgentEx.Memory.SemanticMemory.Store do
   import Pgvector.Ecto.Query
 
   alias AgentEx.Memory.Embeddings
-  alias AgentEx.Memory.SemanticMemory.Memory
+  alias AgentEx.Memory.SemanticMemory.{Cache, Memory}
   alias AgentEx.Repo
 
   require Logger
@@ -29,6 +29,10 @@ defmodule AgentEx.Memory.SemanticMemory.Store do
         embedding: vector
       })
       |> Repo.insert()
+      |> tap(fn
+        {:ok, _} -> Cache.invalidate(project_id, agent_id)
+        _ -> :ok
+      end)
     end
   end
 
@@ -78,6 +82,18 @@ defmodule AgentEx.Memory.SemanticMemory.Store do
       |> Repo.delete_all()
 
     {:ok, count}
+  end
+
+  @doc "Check if an agent has any semantic memories (cheap SQL exists, no embedding)."
+  def has_memories?(project_id, agent_id) do
+    from(m in Memory,
+      where: m.project_id == ^project_id and m.agent_id == ^agent_id
+    )
+    |> Repo.exists?()
+  rescue
+    error ->
+      Logger.warning("has_memories? failed: #{inspect(error)}")
+      false
   end
 
   # --- Tier callbacks ---

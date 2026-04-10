@@ -9,7 +9,7 @@ defmodule AgentEx.ProviderTools do
   Only tools compatible with our ModelClient API paths are listed:
   - Anthropic: Messages API (`/v1/messages`) — rich builtin support
   - OpenAI: Chat Completions API (`/chat/completions`) — no server-side builtins
-  - Moonshot: Chat Completions compatible — `$web_search` builtin
+  - OpenRouter: Chat Completions compatible — `web_search` builtin
 
   All builtins are enabled by default. Users can disable individual ones
   via `AgentConfig.disabled_builtins` (per agent) or `User.disabled_builtins`
@@ -42,12 +42,12 @@ defmodule AgentEx.ProviderTools do
   # web_search_preview, code_interpreter, file_search are Responses API only.
   @openai_builtins []
 
-  # Moonshot Chat Completions compatible builtins
-  @moonshot_builtins [
+  # OpenRouter Chat Completions compatible builtins
+  @openrouter_builtins [
     %{
-      name: "$web_search",
+      name: "web_search",
       type: "builtin_function",
-      description: "Search the web using Moonshot's built-in search",
+      description: "Search the web using OpenRouter's built-in search",
       kind: :read
     }
   ]
@@ -55,7 +55,7 @@ defmodule AgentEx.ProviderTools do
   @builtins_by_provider %{
     "anthropic" => @anthropic_builtins,
     "openai" => @openai_builtins,
-    "moonshot" => @moonshot_builtins
+    "openrouter" => @openrouter_builtins
   }
 
   @doc "List all available builtin tool specs for a provider."

@@ -13,11 +13,11 @@ defmodule AgentEx.ModelClientTest do
       assert client.base_url == "https://api.openai.com/v1"
     end
 
-    test "moonshot/2 sets provider and default base_url" do
-      client = ModelClient.moonshot("kimi-k2.5")
-      assert client.model == "kimi-k2.5"
-      assert client.provider == :moonshot
-      assert client.base_url == "https://api.moonshot.cn/v1"
+    test "openrouter/2 sets provider and default base_url" do
+      client = ModelClient.openrouter("moonshotai/kimi-k2.5")
+      assert client.model == "moonshotai/kimi-k2.5"
+      assert client.provider == :openrouter
+      assert client.base_url == "https://openrouter.ai/api/v1"
     end
 
     test "anthropic/2 sets provider and default base_url" do
@@ -34,9 +34,9 @@ defmodule AgentEx.ModelClientTest do
     end
 
     test "custom base_url overrides provider default" do
-      client = ModelClient.moonshot("kimi-k2.5", base_url: "http://localhost:8080")
+      client = ModelClient.openrouter("kimi-k2.5", base_url: "http://localhost:8080")
       assert client.base_url == "http://localhost:8080"
-      assert client.provider == :moonshot
+      assert client.provider == :openrouter
     end
 
     test "explicit api_key is stored" do
@@ -93,7 +93,7 @@ defmodule AgentEx.ModelClientTest do
                ModelClient.parse_response(body, :openai)
     end
 
-    test "moonshot uses same format as openai" do
+    test "openrouter uses same format as openai" do
       body = %{
         "choices" => [
           %{"message" => %{"content" => "Kimi says hi"}}
@@ -101,7 +101,7 @@ defmodule AgentEx.ModelClientTest do
       }
 
       assert {:ok, %Message{content: "Kimi says hi"}} =
-               ModelClient.parse_response(body, :moonshot)
+               ModelClient.parse_response(body, :openrouter)
     end
   end
 
@@ -217,13 +217,13 @@ defmodule AgentEx.ModelClientTest do
   end
 
   describe "Tool.to_schema/2 — provider-specific encoding" do
-    test "builtin tool for moonshot" do
-      tool = Tool.builtin("$web_search")
-      schema = Tool.to_schema(tool, :moonshot)
+    test "builtin tool for openrouter" do
+      tool = Tool.builtin("web_search")
+      schema = Tool.to_schema(tool, :openrouter)
 
       assert schema == %{
                "type" => "builtin_function",
-               "function" => %{"name" => "$web_search"}
+               "function" => %{"name" => "web_search"}
              }
     end
 
@@ -295,9 +295,9 @@ defmodule AgentEx.ModelClientTest do
 
   describe "Tool.builtin/2" do
     test "creates a builtin tool" do
-      tool = Tool.builtin("$web_search")
+      tool = Tool.builtin("web_search")
       assert tool.kind == :builtin
-      assert tool.name == "$web_search"
+      assert tool.name == "web_search"
       assert tool.function == nil
       assert Tool.builtin?(tool)
       refute Tool.read?(tool)
@@ -305,7 +305,7 @@ defmodule AgentEx.ModelClientTest do
     end
 
     test "builtin tool cannot be executed locally" do
-      tool = Tool.builtin("$web_search")
+      tool = Tool.builtin("web_search")
       assert {:error, _} = Tool.execute(tool, %{})
     end
   end

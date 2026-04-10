@@ -125,6 +125,57 @@ defmodule AgentEx.Memory.Promotion do
   end
 
   @doc """
+  Promote from pre-fetched messages (used by Pipe.delegate_tool where the
+  session may be stopped before async promotion runs).
+  """
+  def promote_from_messages(user_id, project_id, agent_id, session_id, messages, model_client) do
+    transcript =
+      messages
+      |> Enum.take(-50)
+      |> Enum.map_join("\n", fn msg ->
+        role = if is_atom(msg.role), do: Atom.to_string(msg.role), else: msg.role || "unknown"
+        content = if is_binary(msg.content), do: msg.content, else: ""
+        "#{role}: #{content}"
+      end)
+
+    summary_messages = [
+      Message.system(@summary_system_prompt),
+      Message.user("Summarize this conversation:\n\n#{transcript}")
+    ]
+
+    with {:ok, %Message{content: summary}} when is_binary(summary) and summary != "" <-
+           ModelClient.create(model_client, summary_messages),
+         {:ok, _} <-
+           Memory.store_memory(
+             user_id,
+             project_id,
+             agent_id,
+             "Session summary (#{session_id}):\n#{summary}",
+             "session_summary",
+             session_id
+           ) do
+      Logger.info("Promotion: summarized delegate session #{session_id} for agent #{agent_id}")
+      {:ok, summary}
+    else
+      {:ok, %Message{content: nil}} ->
+        Logger.info("Promotion: LLM returned nil content for session #{session_id}")
+        {:error, :empty_summary}
+
+      {:ok, %Message{content: ""}} ->
+        Logger.info("Promotion: LLM returned empty content for session #{session_id}")
+        {:error, :empty_summary}
+
+      {:error, reason} ->
+        Logger.warning("Promotion: promote_from_messages failed: #{inspect(reason)}")
+        {:error, reason}
+    end
+  rescue
+    e ->
+      Logger.warning("Promotion: promote_from_messages failed: #{Exception.message(e)}")
+      {:error, :promotion_failed}
+  end
+
+  @doc """
   Build a save_memory tool for an agent.
 
   When the LLM calls this tool, the fact is embedded and stored in Tier 3

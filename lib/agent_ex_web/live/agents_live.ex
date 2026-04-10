@@ -25,7 +25,7 @@ defmodule AgentExWeb.AgentsLive do
        |> put_flash(:error, "No project available. Please create one first.")
        |> redirect(to: ~p"/projects")}
     else
-      agents = AgentStore.list(user.id, project.id)
+      agents = load_all_agents(user.id, project.id)
       default_provider = "openai"
       default_model = default_model_for(default_provider)
 
@@ -126,11 +126,9 @@ defmodule AgentExWeb.AgentsLive do
 
         case AgentStore.save(config) do
           {:ok, _config} ->
-            agents = AgentStore.list(user.id, project.id)
-
             {:noreply,
              socket
-             |> assign(agents: agents, show_import: false)
+             |> assign(agents: load_all_agents(user.id, project.id), show_import: false)
              |> put_flash(:info, "Agent imported: #{config.name}")}
 
           {:error, reason} ->
@@ -199,11 +197,9 @@ defmodule AgentExWeb.AgentsLive do
 
     case AgentStore.save(config) do
       {:ok, _config} ->
-        agents = AgentStore.list(user.id, project.id)
-
         {:noreply,
          socket
-         |> assign(agents: agents, show_editor: false, editing: nil)
+         |> assign(agents: load_all_agents(user.id, project.id), show_editor: false, editing: nil)
          |> put_flash(
            :info,
            if(socket.assigns.editing, do: "Agent updated", else: "Agent created")
@@ -220,11 +216,9 @@ defmodule AgentExWeb.AgentsLive do
 
     case AgentStore.delete(user.id, project.id, id) do
       :ok ->
-        agents = AgentStore.list(user.id, project.id)
-
         {:noreply,
          socket
-         |> assign(agents: agents)
+         |> assign(agents: load_all_agents(user.id, project.id))
          |> put_flash(:info, "Agent deleted")}
 
       {:error, reason} ->
@@ -421,5 +415,12 @@ defmodule AgentExWeb.AgentsLive do
       "" -> nil
       trimmed -> trimmed
     end
+  end
+
+  defp load_all_agents(user_id, project_id) do
+    user_agents = AgentStore.list(user_id, project_id)
+    system_agents = AgentStore.list_system()
+    # User agents shadow system agents with the same name
+    Enum.uniq_by(user_agents ++ system_agents, & &1.name)
   end
 end

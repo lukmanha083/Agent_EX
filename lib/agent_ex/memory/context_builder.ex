@@ -22,6 +22,20 @@ defmodule AgentEx.Memory.ContextBuilder do
   - `:context_window` — model context window size (used to calculate budgets dynamically)
   """
   def build(user_id, project_id, agent_id, session_id, opts \\ []) do
+    scope = {user_id, project_id, agent_id}
+
+    # Fast path: skip expensive Task spawns if agent has no accumulated data.
+    # ETS lookups are O(1), conversation check is a Registry lookup.
+    if agent_has_no_data?(scope, session_id) do
+      return_empty()
+    else
+      build_full(scope, session_id, opts)
+    end
+  end
+
+  defp return_empty, do: []
+
+  defp build_full(scope, session_id, opts) do
     semantic_query = opts[:semantic_query] || ""
     context_window = opts[:context_window]
 
@@ -29,17 +43,33 @@ defmodule AgentEx.Memory.ContextBuilder do
       TokenBudget.calculate(context_window)
       |> Map.merge(opts[:budgets] || %{})
 
-    scope = {user_id, project_id, agent_id}
-
-    tasks = [
+    # Phase 1: cheap tiers (ETS lookups + Registry) — no external API calls
+    cheap_tasks = [
       Task.async(fn -> gather_persistent(scope) end),
-      Task.async(fn -> gather_knowledge_graph(scope, semantic_query) end),
-      Task.async(fn -> gather_semantic(scope, semantic_query) end),
       Task.async(fn -> gather_procedural(scope) end),
       Task.async(fn -> gather_conversation(scope, session_id) end)
     ]
 
-    [persistent, kg, semantic, procedural, conversation] = Task.await_many(tasks, 30_000)
+    [persistent, procedural, conversation] = Task.await_many(cheap_tasks, 10_000)
+
+    # Phase 2: expensive tiers — ONLY if cheap tiers have data
+    # Tier 3 (semantic) requires embedding API call + pgvector search.
+    # Tier 3 is populated by promotion which also writes to Tier 2/4,
+    # so if Tier 2 and 4 are both empty, Tier 3 is guaranteed empty.
+    has_accumulated_data = persistent != "" or procedural != ""
+
+    {semantic, kg} =
+      if has_accumulated_data and semantic_query != "" do
+        expensive_tasks = [
+          Task.async(fn -> gather_semantic(scope, semantic_query) end),
+          Task.async(fn -> gather_knowledge_graph(scope, semantic_query) end)
+        ]
+
+        [sem, kg_result] = Task.await_many(expensive_tasks, 30_000)
+        {sem, kg_result}
+      else
+        {"", ""}
+      end
 
     system_parts =
       [
@@ -147,7 +177,27 @@ defmodule AgentEx.Memory.ContextBuilder do
   defp gather_knowledge_graph(scope, query), do: gather_tier(KnowledgeGraph.Store, scope, query)
 
   defp gather_semantic(_scope, ""), do: ""
-  defp gather_semantic(scope, query), do: gather_tier(SemanticMemory.Store, scope, query)
+
+  defp gather_semantic({_uid, project_id, agent_id}, query) do
+    # Use ETS cache to avoid redundant embedding API calls.
+    # Cache hit: <1ms (ETS lookup). Miss: 50-200ms (OpenAI embed + pgvector).
+    if SemanticMemory.Store.has_memories?(project_id, agent_id) do
+      fetch_semantic_cached(project_id, agent_id, query)
+    else
+      ""
+    end
+  end
+
+  defp fetch_semantic_cached(project_id, agent_id, query) do
+    case SemanticMemory.Cache.get_or_fetch(project_id, agent_id, query) do
+      {:ok, results} when results != [] ->
+        content = Enum.map_join(results, "\n", fn r -> "- #{r.content}" end)
+        "## Relevant Past Context\n#{content}"
+
+      _ ->
+        ""
+    end
+  end
 
   defp gather_tier(module, scope, query) do
     case module.to_context_messages(scope, query) do
@@ -195,4 +245,17 @@ defmodule AgentEx.Memory.ContextBuilder do
   end
 
   defp truncate_conversation(_, _), do: []
+
+  # Fast-path: check if agent has any accumulated data across tiers.
+  # Uses ETS lookups (O(1)) and Registry check — no DB or embedding calls.
+  defp agent_has_no_data?({_user_id, project_id, agent_id} = scope, session_id) do
+    has_persistent = gather_persistent(scope) != ""
+    has_procedural = gather_procedural(scope) != ""
+    has_conversation = gather_conversation(scope, session_id) != []
+    has_semantic = AgentEx.Memory.SemanticMemory.Store.has_memories?(project_id, agent_id)
+
+    not has_persistent and not has_procedural and not has_conversation and not has_semantic
+  rescue
+    _ -> false
+  end
 end

@@ -33,7 +33,9 @@ defmodule AgentEx.Pipe do
       |> Pipe.merge(lead_researcher, client)
   """
 
-  alias AgentEx.{Memory, Message, ModelClient, Orchestrator, Sensing, Specialist, Tool, ToolAgent}
+  alias AgentEx.EventLoop.BroadcastHandler
+  alias AgentEx.Memory.Promotion
+  alias AgentEx.{Message, ModelClient, Orchestrator, Specialist, Tool, ToolAgent}
 
   require Logger
 
@@ -87,46 +89,33 @@ defmodule AgentEx.Pipe do
     ]
 
     tools = agent.tools
-    tools_map = Map.new(tools, fn %Tool{name: name} = t -> {name, t} end)
-
     {:ok, tool_agent} = ToolAgent.start_link(tools: tools)
 
-    memory_opts =
-      case opts[:memory] do
-        %{user_id: uid, project_id: pid, agent_id: aid, session_id: sid} = mem ->
-          %{
-            user_id: uid,
-            project_id: pid,
-            agent_id: aid,
-            session_id: sid,
-            context_window: Map.get(mem, :context_window)
-          }
+    memory_opts = resolve_memory_opts(opts[:memory], agent.name)
 
-        %{user_id: uid, project_id: pid, session_id: sid} = mem ->
-          %{
-            user_id: uid,
-            project_id: pid,
-            agent_id: agent.name,
-            session_id: sid,
-            context_window: Map.get(mem, :context_window)
-          }
+    # Start working memory session before ToolCallerLoop (needed for Tier 1 storage)
+    maybe_start_session(memory_opts)
 
-        _ ->
-          nil
-      end
-
-    ctx = %{
-      tool_agent: tool_agent,
-      model_client: model_client,
-      model_fn: Keyword.get(opts, :model_fn),
-      tools: tools,
-      tools_map: tools_map,
-      intervention: agent.intervention,
-      max_iterations: agent.max_iterations
-    }
+    loop_opts =
+      [
+        max_iterations: agent.max_iterations,
+        intervention: agent.intervention || [],
+        memory: memory_opts,
+        tool_timeout: 180_000,
+        # Skip reasoning_first when model_fn is provided (test mode)
+        reasoning_first: Keyword.get(opts, :model_fn) == nil
+      ]
+      |> maybe_put_opt(:model_fn, Keyword.get(opts, :model_fn))
+      |> maybe_put_opt(:context_window, memory_opts && memory_opts[:context_window])
 
     try do
-      run_loop(ctx, messages, memory_opts)
+      case AgentEx.ToolCallerLoop.run(tool_agent, model_client, messages, tools, loop_opts) do
+        {:ok, generated} ->
+          {extract_final_text(generated), extract_usage(generated)}
+
+        {:error, reason} ->
+          {"Error: #{inspect(reason)}", %{input_tokens: 0, output_tokens: 0}}
+      end
     after
       GenServer.stop(tool_agent)
     end
@@ -223,7 +212,8 @@ defmodule AgentEx.Pipe do
   def delegate_tool(name, %Agent{} = agent, model_client, opts \\ []) do
     Tool.new(
       name: "delegate_to_#{name}",
-      description: "Delegate a task to #{name}. #{agent.system_message}",
+      description:
+        "Delegate a task to #{name}. #{truncate_description(agent.system_message, 200)}",
       kind: :write,
       parameters: %{
         "type" => "object",
@@ -233,11 +223,26 @@ defmodule AgentEx.Pipe do
         "required" => ["task"]
       },
       function: fn %{"task" => task} ->
-        {result, usage} = through(task, agent, model_client, opts)
+        # Add broadcast handler for inner tool calls if run_id is available
+        agent_with_broadcast = maybe_add_broadcast(agent, opts[:run_id])
+
+        # Generate session_id per delegation so memory + promotion share it
+        session_id = generate_session_id()
+
+        delegate_opts =
+          Keyword.update(opts, :memory, nil, fn
+            %{} = mem -> Map.put(mem, :session_id, session_id)
+            other -> other
+          end)
+
+        t_start = System.monotonic_time(:millisecond)
+        {result, usage} = through(task, agent_with_broadcast, model_client, delegate_opts)
+        duration_ms = System.monotonic_time(:millisecond) - t_start
 
         if model_client do
           Logger.info(
-            "Pipe.delegate_tool: agent=#{name} usage=#{inspect(usage)} project_id=#{inspect(model_client.project_id)}"
+            "Pipe.delegate_tool: agent=#{name} duration=#{duration_ms}ms " <>
+              "usage=#{inspect(usage)} project_id=#{inspect(model_client.project_id)}"
           )
 
           if model_client.project_id && (usage.input_tokens > 0 or usage.output_tokens > 0) do
@@ -252,106 +257,106 @@ defmodule AgentEx.Pipe do
           end
         end
 
-        report = build_memory_report(name, Keyword.put(opts, :semantic_query, task))
-        {:ok, result <> report}
+        # Promote: session summary → Tier 3, skill extraction → Tier 4 (async)
+        maybe_promote_delegate(delegate_opts[:memory], model_client)
+
+        {:ok, result}
       end
     )
   end
 
-  defp build_memory_report(agent_name, opts) do
-    case opts[:memory] do
-      %{user_id: uid, project_id: pid, session_id: sid} = mem ->
-        aid = Map.get(mem, :agent_id) || agent_name
-        semantic_query = opts[:semantic_query] || ""
-        Memory.ContextBuilder.build_report(uid, pid, aid, sid, semantic_query: semantic_query)
+  defp maybe_promote_delegate(nil, _model_client), do: :ok
+
+  defp maybe_promote_delegate(%{user_id: uid, project_id: pid, agent_id: aid} = mem, mc) do
+    sid = Map.get(mem, :session_id)
+    if is_nil(sid), do: throw(:no_session)
+
+    messages = AgentEx.Memory.get_messages(uid, pid, aid, sid)
+
+    if messages != [] do
+      Task.Supervisor.start_child(AgentEx.TaskSupervisor, fn ->
+        try do
+          Promotion.promote_from_messages(uid, pid, aid, sid, messages, mc)
+        rescue
+          e -> Logger.warning("Pipe: delegate promotion failed: #{Exception.message(e)}")
+        end
+      end)
+    end
+  catch
+    :no_session -> :ok
+  end
+
+  defp maybe_promote_delegate(_, _), do: :ok
+
+  defp maybe_add_broadcast(%Agent{} = agent, nil), do: agent
+
+  defp maybe_add_broadcast(%Agent{} = agent, run_id) do
+    handler = BroadcastHandler.new(run_id)
+    %{agent | intervention: (agent.intervention || []) ++ [handler]}
+  end
+
+  # -- Private helpers --
+
+  defp resolve_memory_opts(nil, _agent_name), do: nil
+
+  defp resolve_memory_opts(%{user_id: uid, project_id: pid} = mem, agent_name) do
+    %{
+      user_id: uid,
+      project_id: pid,
+      agent_id: Map.get(mem, :agent_id) || agent_name,
+      session_id: Map.get(mem, :session_id, generate_session_id()),
+      context_window: Map.get(mem, :context_window)
+    }
+  end
+
+  defp resolve_memory_opts(_, _), do: nil
+
+  defp truncate_description(nil, _max), do: ""
+  defp truncate_description(text, max) when byte_size(text) <= max, do: text
+
+  defp truncate_description(text, max) do
+    String.slice(text, 0, max) <> "..."
+  end
+
+  defp generate_session_id do
+    "delegate-#{Base.url_encode64(:crypto.strong_rand_bytes(8), padding: false)}"
+  end
+
+  defp maybe_start_session(nil), do: :ok
+
+  defp maybe_start_session(%{user_id: uid, project_id: pid, agent_id: aid, session_id: sid}) do
+    case AgentEx.Memory.start_session(uid, pid, aid, sid) do
+      {:ok, _} -> :ok
+      {:error, {:already_started, _}} -> :ok
+      {:error, reason} -> Logger.warning("Pipe: failed to start session: #{inspect(reason)}")
+    end
+  end
+
+  defp maybe_start_session(_), do: :ok
+
+  defp maybe_put_opt(opts, _key, nil), do: opts
+  defp maybe_put_opt(opts, key, value), do: Keyword.put(opts, key, value)
+
+  defp extract_final_text(generated) do
+    generated
+    |> Enum.reverse()
+    |> Enum.find_value("", fn
+      %Message{role: :assistant, content: content} when is_binary(content) and content != "" ->
+        content
 
       _ ->
-        ""
-    end
-  rescue
-    error ->
-      Logger.warning("Pipe: build_memory_report failed: #{inspect(error)}")
-      ""
+        nil
+    end)
   end
 
-  # -- Private: loop execution --
+  defp extract_usage(generated) do
+    Enum.reduce(generated, %{input_tokens: 0, output_tokens: 0}, fn
+      %Message{usage: %{input_tokens: i, output_tokens: o}}, acc ->
+        %{acc | input_tokens: acc.input_tokens + i, output_tokens: acc.output_tokens + o}
 
-  defp run_loop(ctx, messages, memory_opts) do
-    messages = maybe_inject_memory(messages, memory_opts)
-    ctx = Map.put(ctx, :input_messages, messages)
-    usage = %{input_tokens: 0, output_tokens: 0}
-
-    case think(ctx, messages) do
-      {:ok, response} -> do_loop(ctx, [response], 0, add_usage(usage, response))
-      {:error, reason} -> {"Error: #{inspect(reason)}", usage}
-    end
-  end
-
-  defp do_loop(ctx, generated, iteration, usage) do
-    last = List.last(generated)
-
-    cond do
-      not has_tool_calls?(last) ->
-        {last.content || "", usage}
-
-      iteration >= ctx.max_iterations ->
-        Logger.warning("Pipe: hit max_iterations (#{ctx.max_iterations})")
-        {last.content || "", usage}
-
-      true ->
-        {:ok, result_message, _observations} =
-          Sensing.sense(ctx.tool_agent, last.tool_calls,
-            intervention: ctx.intervention,
-            tools_map: ctx.tools_map,
-            intervention_context: %{iteration: iteration, generated_messages: generated}
-          )
-
-        all_messages = ctx.input_messages ++ generated ++ [result_message]
-
-        case think(ctx, all_messages) do
-          {:ok, response} ->
-            do_loop(
-              ctx,
-              generated ++ [result_message, response],
-              iteration + 1,
-              add_usage(usage, response)
-            )
-
-          {:error, reason} ->
-            {"Error: #{inspect(reason)}", usage}
-        end
-    end
-  end
-
-  defp add_usage(acc, %Message{usage: %{input_tokens: i, output_tokens: o}}) do
-    %{acc | input_tokens: acc.input_tokens + i, output_tokens: acc.output_tokens + o}
-  end
-
-  defp add_usage(acc, _), do: acc
-
-  # Dispatch to model_fn override or ModelClient.create
-  defp think(%{model_fn: fun, tools: tools}, messages) when is_function(fun, 2) do
-    fun.(messages, tools)
-  end
-
-  defp think(%{model_client: client, tools: tools}, messages) do
-    ModelClient.create(client, messages, tools: tools)
-  end
-
-  defp has_tool_calls?(%Message{tool_calls: calls}) when is_list(calls) and calls != [], do: true
-  defp has_tool_calls?(_), do: false
-
-  defp maybe_inject_memory(messages, nil), do: messages
-
-  defp maybe_inject_memory(messages, memory_opts) do
-    %{user_id: user_id, project_id: project_id, agent_id: agent_id, session_id: session_id} =
-      memory_opts
-
-    context_window = Map.get(memory_opts, :context_window)
-
-    Memory.inject_memory_context(messages, user_id, project_id, agent_id, session_id,
-      context_window: context_window
-    )
+      _, acc ->
+        acc
+    end)
   end
 
   @doc """

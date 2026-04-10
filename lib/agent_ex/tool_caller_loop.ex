@@ -98,7 +98,13 @@ defmodule AgentEx.ToolCallerLoop do
 
     # Inject agent-scoped context BEFORE storing, so stored messages don't
     # duplicate when inject_orchestrator_history reads them back
+    t_mem = System.monotonic_time(:millisecond)
     input_messages = maybe_inject_memory_context(input_messages, memory_opts)
+    mem_ms = System.monotonic_time(:millisecond) - t_mem
+
+    if mem_ms > 10 do
+      Logger.info("ToolCallerLoop: memory injection took #{mem_ms}ms")
+    end
 
     # Store incoming task messages AFTER injecting context
     maybe_store_input_messages(input_messages, memory_opts)
@@ -122,11 +128,14 @@ defmodule AgentEx.ToolCallerLoop do
 
     Logger.debug("ToolCallerLoop: starting THINK phase (initial)")
 
-    # When reasoning_first is enabled, the first LLM call has no tools.
-    # This forces the model to produce a text reasoning/plan. Then a second
-    # call WITH tools lets it decide: answer directly (text) or delegate (tool call).
     if reasoning_first do
-      run_with_reasoning(context, input_messages)
+      if supports_builtin_thinking?(context.model_client) do
+        # Single-call reasoning: model thinks internally (1 API call)
+        run_with_builtin_thinking(context, input_messages)
+      else
+        # Two-call reasoning: REASON without tools → DECIDE with tools (2 API calls)
+        run_with_reasoning(context, input_messages)
+      end
     else
       case think(context, input_messages) do
         {:ok, response} -> loop(context, [response], 0)
@@ -135,12 +144,48 @@ defmodule AgentEx.ToolCallerLoop do
     end
   end
 
-  # -- Reasoning-first: think without tools, then decide with tools --
+  # -- Built-in thinking: single API call with internal reasoning --
+
+  defp supports_builtin_thinking?(nil), do: false
+
+  # Anthropic direct API: always supports adaptive thinking
+  defp supports_builtin_thinking?(%{provider: :anthropic}), do: true
+
+  # OpenRouter: unified reasoning parameter works for all thinking-capable models
+  defp supports_builtin_thinking?(%{provider: :openrouter}), do: true
+
+  # OpenAI direct API: only o-series models
+  defp supports_builtin_thinking?(%{provider: :openai, model: model}) do
+    model_lower = String.downcase(model)
+    String.starts_with?(model_lower, "o3") or String.starts_with?(model_lower, "o4")
+  end
+
+  defp supports_builtin_thinking?(_), do: false
+
+  defp run_with_builtin_thinking(context, input_messages) do
+    Logger.debug("ToolCallerLoop: THINK+REASON phase — built-in thinking (1 call)")
+    t_start = System.monotonic_time(:millisecond)
+
+    case think_with_reasoning(context, input_messages) do
+      {:ok, response} ->
+        ms = System.monotonic_time(:millisecond) - t_start
+        Logger.info("ToolCallerLoop: built-in thinking completed in #{ms}ms")
+        loop(context, [response], 0)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  # -- Reasoning-first fallback: think without tools, then decide with tools (2 calls) --
 
   defp run_with_reasoning(context, input_messages) do
     Logger.debug("ToolCallerLoop: REASON phase — thinking without tools")
+    t_reason = System.monotonic_time(:millisecond)
 
     with {:ok, reasoning} <- think_without_tools(context, input_messages) do
+      reason_ms = System.monotonic_time(:millisecond) - t_reason
+      Logger.info("ToolCallerLoop: REASON phase completed in #{reason_ms}ms")
       # Feed the reasoning back as a user message carrying the analysis,
       # so the conversation ends with a user message (required by Anthropic).
       reasoning_relay =
@@ -344,13 +389,26 @@ defmodule AgentEx.ToolCallerLoop do
     ModelClient.create(client, messages, tools: tools)
   end
 
-  # First call without tools — forces the LLM to reason with text
+  # Single call WITH tools and built-in thinking enabled.
+  # The model reasons internally and returns tools/text in one response.
+  defp think_with_reasoning(%{model_fn: fun, tools: tools}, messages)
+       when is_function(fun, 2) do
+    fun.(messages, tools)
+  end
+
+  defp think_with_reasoning(%{model_client: client, tools: tools}, messages) do
+    ModelClient.create(client, messages, tools: tools, thinking: true)
+  end
+
+  # First call without tools — forces the LLM to reason with text.
+  # Capped at 1024 tokens to keep reasoning concise and reduce latency.
+  # Fallback for providers without built-in thinking.
   defp think_without_tools(%{model_fn: fun}, messages) when is_function(fun, 2) do
     fun.(messages, [])
   end
 
   defp think_without_tools(%{model_client: client}, messages) do
-    ModelClient.create(client, messages, tools: [])
+    ModelClient.create(client, messages, tools: [], max_tokens: 1024)
   end
 
   # -- Memory integration helpers --

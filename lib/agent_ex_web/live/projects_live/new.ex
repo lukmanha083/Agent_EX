@@ -260,10 +260,10 @@ defmodule AgentExWeb.ProjectsLive.New do
 
   defp provider_label("anthropic"), do: "Anthropic"
   defp provider_label("openai"), do: "OpenAI"
-  defp provider_label("moonshot"), do: "Moonshot"
+  defp provider_label("openrouter"), do: "OpenRouter"
   defp provider_label(_), do: "LLM"
 
-  defp llm_key_placeholder("moonshot"), do: "sk-..."
+  defp llm_key_placeholder("openrouter"), do: "sk-or-..."
   defp llm_key_placeholder(_), do: "sk-..."
 
   defp format_errors(changeset) do

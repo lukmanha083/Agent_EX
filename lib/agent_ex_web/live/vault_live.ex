@@ -142,7 +142,7 @@ defmodule AgentExWeb.VaultLive do
     [
       {"llm:anthropic", "LLM: Anthropic"},
       {"llm:openai", "LLM: OpenAI"},
-      {"llm:moonshot", "LLM: Moonshot"},
+      {"llm:openrouter", "LLM: OpenRouter"},
       {"embedding:openai", "Embedding: OpenAI"}
     ]
   end

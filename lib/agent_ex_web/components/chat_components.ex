@@ -33,7 +33,7 @@ defmodule AgentExWeb.ChatComponents do
         "max-w-[75%] rounded-xl px-4 py-2.5 text-sm leading-relaxed",
         message_style(@role)
       ]}>
-        <div class="chat-markdown break-words">{render_markdown(@content)}</div>
+        <div class="chat-markdown break-words overflow-x-auto">{render_markdown(@content)}</div>
       </div>
 
       <div :if={@role == :user} class="flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold bg-gray-600 text-white">
