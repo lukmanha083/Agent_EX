@@ -99,7 +99,7 @@ defmodule AgentEx.Tool do
   end
 
   @doc "Convert to provider-specific tool schema."
-  def to_schema(%__MODULE__{kind: :builtin} = tool, :moonshot) do
+  def to_schema(%__MODULE__{kind: :builtin} = tool, :openrouter) do
     %{"type" => "builtin_function", "function" => %{"name" => tool.name}}
   end
 

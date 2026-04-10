@@ -23,13 +23,28 @@ defmodule AgentEx.ProviderHelpers do
       "claude-haiku-4-5-20251001",
       "claude-opus-4-20250514"
     ],
-    "moonshot" => [
-      "kimi-k2.5",
-      "kimi-k2-thinking",
-      "kimi-k2-thinking-turbo",
-      "moonshot-v1-128k",
-      "moonshot-v1-32k",
-      "moonshot-v1-8k"
+    "openrouter" => [
+      # Top trending
+      "qwen/qwen3.6-plus",
+      "deepseek/deepseek-v3.2",
+      "minimax/minimax-m2.7",
+      "minimax/minimax-m2.5",
+      # Reasoning
+      "moonshotai/kimi-k2.5",
+      "deepseek/deepseek-r1",
+      "x-ai/grok-4",
+      # Google
+      "google/gemini-2.5-flash",
+      "google/gemini-2.5-pro",
+      "google/gemma-4-31b-it",
+      "google/gemma-4-26b-a4b-it",
+      # Meta
+      "meta-llama/llama-4-maverick",
+      "meta-llama/llama-4-scout",
+      # Other
+      "deepseek/deepseek-v3.1",
+      "mistralai/mistral-large-2411",
+      "nvidia/llama-3.1-nemotron-ultra-253b"
     ]
   }
 
@@ -51,13 +66,23 @@ defmodule AgentEx.ProviderHelpers do
     "claude-sonnet-4-5-20250514" => 200_000,
     "claude-haiku-4-5-20251001" => 200_000,
     "claude-opus-4-20250514" => 200_000,
-    # Moonshot
-    "kimi-k2.5" => 256_000,
-    "kimi-k2-thinking" => 256_000,
-    "kimi-k2-thinking-turbo" => 256_000,
-    "moonshot-v1-128k" => 128_000,
-    "moonshot-v1-32k" => 32_000,
-    "moonshot-v1-8k" => 8_000
+    # OpenRouter
+    "qwen/qwen3.6-plus" => 131_072,
+    "deepseek/deepseek-v3.2" => 128_000,
+    "minimax/minimax-m2.7" => 1_048_576,
+    "minimax/minimax-m2.5" => 1_048_576,
+    "moonshotai/kimi-k2.5" => 256_000,
+    "deepseek/deepseek-r1" => 128_000,
+    "x-ai/grok-4" => 256_000,
+    "google/gemini-2.5-flash" => 1_048_576,
+    "google/gemini-2.5-pro" => 1_048_576,
+    "google/gemma-4-31b-it" => 256_000,
+    "google/gemma-4-26b-a4b-it" => 256_000,
+    "meta-llama/llama-4-maverick" => 1_048_576,
+    "meta-llama/llama-4-scout" => 512_000,
+    "deepseek/deepseek-v3.1" => 128_000,
+    "mistralai/mistral-large-2411" => 128_000,
+    "nvidia/llama-3.1-nemotron-ultra-253b" => 131_072
   }
 
   @default_context_window 32_000
@@ -67,13 +92,13 @@ defmodule AgentEx.ProviderHelpers do
   @provider_atoms %{
     "openai" => :openai,
     "anthropic" => :anthropic,
-    "moonshot" => :moonshot
+    "openrouter" => :openrouter
   }
 
   @provider_labels %{
     "openai" => "OpenAI",
     "anthropic" => "Anthropic",
-    "moonshot" => "Moonshot"
+    "openrouter" => "OpenRouter"
   }
 
   def valid_providers, do: @valid_providers
@@ -113,6 +138,6 @@ defmodule AgentEx.ProviderHelpers do
 
   def default_model_for("openai"), do: "gpt-5.4-mini"
   def default_model_for("anthropic"), do: "claude-sonnet-4-6"
-  def default_model_for("moonshot"), do: "kimi-k2.5"
+  def default_model_for("openrouter"), do: "moonshotai/kimi-k2.5"
   def default_model_for(_), do: "gpt-5.4-mini"
 end
