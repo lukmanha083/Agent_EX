@@ -15,7 +15,12 @@ defmodule AgentEx.MCP.Servers do
 
   # -- Listing --
 
-  @doc "List all MCP servers for a project (user + system, deduplicated)."
+  @doc """
+  List all MCP servers for a project (user + system, deduplicated by name).
+
+  User servers are listed first, so a user server with the same name as a
+  system server will shadow (override) the system entry.
+  """
   def list_all(project_id) do
     user_servers = list_user(project_id)
     system_servers = list_system()

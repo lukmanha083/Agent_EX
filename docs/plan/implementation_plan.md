@@ -6732,9 +6732,9 @@ from untrusted data in the same context window. When `browser_agent` visits a
 malicious website, the page content becomes part of the prompt and can contain
 hidden instructions that hijack the agent's behavior.
 
-**This cannot be fully solved.** Even OpenAI acknowledged (Feb 2026) that prompt
-injection in AI browsers "may never be fully patched." Defense in depth is the
-only viable strategy.
+**This cannot be fully solved.** OpenAI acknowledged in their December 2025
+ChatGPT system hardening post that prompt injection in AI browsers "may never
+be fully patched." Defense in depth is the only viable strategy.
 
 #### Attack Surfaces in Browser Automation
 
@@ -6820,8 +6820,8 @@ Every tool that reads external data is an attack surface:
 
 Flow:
 1. User provides cookies (browser extension export or OAuth popup)
-2. Stored in Vault: key="browser:{domain}", scoped to user+project
-3. SessionManager loads cookies into Wallaby session before navigation
+2. Stored in Vault: key="browser:{user_id}:{project_id}:{domain}", scoped to user+project+domain
+3. SessionManager loads cookies for the matching user/project/domain context only
 4. Agent interacts with authenticated page — never sees cookie values
 5. TTL expires → cookies deleted → user must re-authenticate
 ```

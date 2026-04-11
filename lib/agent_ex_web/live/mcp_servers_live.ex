@@ -95,12 +95,14 @@ defmodule AgentExWeb.McpServersLive do
           <div class="mt-auto flex items-center gap-2">
             <button
               type="button"
-              phx-click="toggle_server"
+              phx-click={unless server.system, do: "toggle_server"}
               phx-value-id={server.id}
-              class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors"
+              disabled={server.system}
+              class={"relative inline-flex h-5 w-9 shrink-0 rounded-full border-2 border-transparent transition-colors #{if server.system, do: "cursor-not-allowed opacity-50", else: "cursor-pointer"}"}
               style={if server.enabled, do: "background-color: rgb(79, 70, 229)", else: "background-color: rgb(55, 65, 81)"}
               role="switch"
               aria-checked={to_string(server.enabled)}
+              aria-disabled={to_string(server.system)}
               aria-label={"Toggle #{server.name}"}
             >
               <span
@@ -151,10 +153,6 @@ defmodule AgentExWeb.McpServersLive do
   end
 
   @impl true
-  def handle_event("new_server", _params, socket) do
-    {:noreply, assign(socket, show_editor: true, editing: nil, form: empty_form())}
-  end
-
   def handle_event("edit_server", %{"id" => id}, socket) do
     case Servers.get(id) do
       nil ->
