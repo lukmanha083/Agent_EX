@@ -31,6 +31,7 @@ defmodule AgentEx.Swarm do
 
   alias AgentEx.{Handoff, Memory, Message, ModelClient, Sensing, Tool, ToolAgent}
   alias AgentEx.Handoff.HandoffMessage
+  alias AgentEx.Plugins.GitWorktree.Coordinator, as: WorktreeCoordinator
 
   require Logger
 
@@ -55,13 +56,23 @@ defmodule AgentEx.Swarm do
 
   @type termination :: {:handoff, String.t()} | :text_response
 
+  @type worktree_opts :: %{
+          optional(:enabled) => boolean(),
+          optional(:repo_root) => String.t(),
+          optional(:rolling_branch) => String.t(),
+          optional(:base_branch) => String.t(),
+          optional(:merge_strategy) => :serial | :parallel,
+          optional(:auto_cleanup) => boolean()
+        }
+
   @type opts :: [
           start: String.t(),
           termination: termination(),
           max_iterations: pos_integer(),
           intervention: [AgentEx.Intervention.handler()],
           model_fn: ([Message.t()], [Tool.t()] -> {:ok, Message.t()} | {:error, term()}),
-          memory: %{user_id: term(), project_id: term(), session_id: String.t()} | nil
+          memory: %{user_id: term(), project_id: term(), session_id: String.t()} | nil,
+          worktree: worktree_opts() | nil
         ]
 
   @type result :: {:ok, [Message.t()], HandoffMessage.t() | nil} | {:error, term()}
@@ -79,6 +90,10 @@ defmodule AgentEx.Swarm do
   - `:memory` — `%{session_id: "..."}` to enable per-agent memory scoping.
     Each agent uses its name as `agent_id`. The session_id is shared so
     agents can operate within the same conversation session.
+  - `:worktree` — `%{enabled: true, repo_root: "/path/to/repo"}` to create
+    per-agent git worktrees for parallel codebase work. Each agent gets an
+    isolated working directory and branch. Merges to the rolling branch are
+    serialized on swarm completion. See `AgentEx.Plugins.GitWorktree`.
   """
   @spec run([Agent.t()], ModelClient.t(), [Message.t()], opts()) :: result()
   def run(agents, model_client, messages, opts \\ []) do
@@ -88,9 +103,14 @@ defmodule AgentEx.Swarm do
     intervention = Keyword.get(opts, :intervention, [])
     model_fn = Keyword.get(opts, :model_fn)
     memory_opts = Keyword.get(opts, :memory)
+    worktree_opts = Keyword.get(opts, :worktree)
 
     agents_map = Map.new(agents, fn %Agent{name: name} = agent -> {name, agent} end)
-    tool_agents = start_tool_agents(agents)
+
+    # Start worktree coordinator and create per-agent worktrees if enabled
+    {worktree_state, agents_map} = maybe_setup_worktrees(agents_map, worktree_opts)
+
+    tool_agents = start_tool_agents(agents_map)
 
     # Start memory sessions for each agent if memory is enabled
     if memory_opts do
@@ -105,7 +125,8 @@ defmodule AgentEx.Swarm do
       max_iterations: max_iterations,
       intervention: intervention,
       model_fn: model_fn,
-      memory: memory_opts
+      memory: memory_opts,
+      worktree: worktree_state
     }
 
     result =
@@ -122,6 +143,9 @@ defmodule AgentEx.Swarm do
     if memory_opts do
       stop_memory_sessions(agents, memory_opts)
     end
+
+    # Merge and clean up worktrees
+    maybe_teardown_worktrees(worktree_state)
 
     result
   end
@@ -275,12 +299,122 @@ defmodule AgentEx.Swarm do
     fun.(messages, tools)
   end
 
-  # Start a ToolAgent for each swarm agent (holds own tools + transfer tools)
-  defp start_tool_agents(agents) do
+  # Start a ToolAgent for each swarm agent (holds own tools + transfer tools).
+  # Accepts either a list of Agent structs or a map of name => Agent.
+  defp start_tool_agents(agents) when is_list(agents) do
     Map.new(agents, fn %Agent{name: name, tools: tools, handoffs: handoffs} ->
       all_tools = tools ++ Handoff.transfer_tools(handoffs)
       {:ok, pid} = ToolAgent.start_link(tools: all_tools, agent_id: name)
       {name, pid}
     end)
+  end
+
+  defp start_tool_agents(agents_map) when is_map(agents_map) do
+    start_tool_agents(Map.values(agents_map))
+  end
+
+  # -- Worktree helpers --
+
+  defp maybe_setup_worktrees(agents_map, nil), do: {nil, agents_map}
+  defp maybe_setup_worktrees(agents_map, %{enabled: false}), do: {nil, agents_map}
+
+  defp maybe_setup_worktrees(agents_map, %{enabled: true} = opts) do
+    repo_root = Map.fetch!(opts, :repo_root)
+    rolling_branch = Map.get(opts, :rolling_branch, "rolling")
+    base_branch = Map.get(opts, :base_branch)
+    auto_cleanup = Map.get(opts, :auto_cleanup, true)
+
+    coordinator_opts = [
+      repo_root: repo_root,
+      base_branch: base_branch || rolling_branch,
+      auto_cleanup: auto_cleanup
+    ]
+
+    {:ok, coordinator} = WorktreeCoordinator.start_link(coordinator_opts)
+
+    # Ensure rolling branch exists
+    ensure_rolling_branch(repo_root, rolling_branch, base_branch)
+
+    # Create worktrees in parallel
+    worktree_infos =
+      agents_map
+      |> Map.keys()
+      |> Task.async_stream(
+        fn name ->
+          {name, WorktreeCoordinator.create(coordinator, name, agent_id: name, base_branch: rolling_branch)}
+        end,
+        max_concurrency: System.schedulers_online(),
+        timeout: 30_000
+      )
+      |> Enum.reduce(%{}, fn {:ok, {name, result}}, acc ->
+        case result do
+          {:ok, info} ->
+            Logger.debug("Swarm: created worktree for agent '#{name}' at #{info.path}")
+            Map.put(acc, name, info)
+
+          {:error, reason} ->
+            Logger.warning("Swarm: failed to create worktree for '#{name}': #{inspect(reason)}")
+            acc
+        end
+      end)
+
+    # Inject worktree paths into agent system messages
+    augmented_agents_map =
+      Map.new(agents_map, fn {name, agent} ->
+        case Map.get(worktree_infos, name) do
+          nil ->
+            {name, agent}
+
+          info ->
+            worktree_context =
+              "\n\n[Worktree] Your isolated working directory: #{info.path}\n" <>
+                "[Worktree] Your branch: #{info.branch}\n" <>
+                "[Worktree] All file operations should use this directory."
+
+            {name, %{agent | system_message: agent.system_message <> worktree_context}}
+        end
+      end)
+
+    state = %{
+      coordinator: coordinator,
+      rolling_branch: rolling_branch,
+      worktree_infos: worktree_infos,
+      merge_strategy: Map.get(opts, :merge_strategy, :serial)
+    }
+
+    {state, augmented_agents_map}
+  end
+
+  defp maybe_setup_worktrees(agents_map, _other), do: {nil, agents_map}
+
+  defp maybe_teardown_worktrees(nil), do: :ok
+
+  defp maybe_teardown_worktrees(%{coordinator: coordinator, rolling_branch: rolling_branch} = state) do
+    # Merge all worktree branches into rolling branch (serialized)
+    if state.merge_strategy == :serial do
+      Enum.each(state.worktree_infos, fn {name, _info} ->
+        case WorktreeCoordinator.merge(coordinator, name, rolling_branch) do
+          :ok ->
+            Logger.info("Swarm: merged worktree '#{name}' into '#{rolling_branch}'")
+
+          {:error, reason} ->
+            Logger.warning("Swarm: failed to merge '#{name}': #{inspect(reason)}")
+        end
+      end)
+    end
+
+    # Coordinator cleanup happens via terminate/2
+    GenServer.stop(coordinator, :normal, 15_000)
+  end
+
+  defp ensure_rolling_branch(repo_root, rolling_branch, base_branch) do
+    case WorktreeCoordinator.git(repo_root, ["rev-parse", "--verify", rolling_branch]) do
+      {:ok, _} ->
+        :ok
+
+      {:error, _} ->
+        base = base_branch || "HEAD"
+        WorktreeCoordinator.git(repo_root, ["branch", rolling_branch, base])
+    end
   end
 end
