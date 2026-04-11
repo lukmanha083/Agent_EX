@@ -39,6 +39,11 @@ defmodule AgentExWeb.Features.ProjectManagementTest do
       File.mkdir_p!(root_a)
       File.mkdir_p!(root_b)
 
+      on_exit(fn ->
+        File.rm_rf(root_a)
+        File.rm_rf(root_b)
+      end)
+
       {:ok, project_a} =
         Projects.create_project(%{
           user_id: user.id,
@@ -89,6 +94,7 @@ defmodule AgentExWeb.Features.ProjectManagementTest do
     test "delete project shows success flash", %{session: session, user: user} do
       root = "/tmp/agent_ex_test/temp_project_#{System.unique_integer([:positive])}"
       File.mkdir_p!(root)
+      on_exit(fn -> File.rm_rf(root) end)
 
       {:ok, project} =
         Projects.create_project(%{
