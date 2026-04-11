@@ -16,7 +16,7 @@ defmodule AgentEx.EventLoop do
   """
 
   alias AgentEx.EventLoop.{BroadcastHandler, Event, RunRegistry}
-  alias AgentEx.{Memory, ModelClient, ToolCallerLoop}
+  alias AgentEx.{Memory, ModelClient, ToolAssembler, ToolCallerLoop}
 
   require Logger
 
@@ -114,12 +114,14 @@ defmodule AgentEx.EventLoop do
             })
 
             RunRegistry.complete_run(run_id)
+            ToolAssembler.cleanup_todo(run_id)
             result
 
           {:error, reason} ->
             Logger.warning("EventLoop [#{run_id}]: failed in #{total_ms}ms — #{inspect(reason)}")
             broadcast(run_id, :pipeline_error, %{reason: inspect(reason), duration_ms: total_ms})
             RunRegistry.error_run(run_id)
+            ToolAssembler.cleanup_todo(run_id)
             result
         end
       end)
@@ -147,6 +149,7 @@ defmodule AgentEx.EventLoop do
         Logger.warning("EventLoop: cancel called for unknown run #{run_id}")
     end
 
+    ToolAssembler.cleanup_todo(run_id)
     :ok
   end
 

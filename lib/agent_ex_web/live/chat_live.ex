@@ -170,18 +170,27 @@ defmodule AgentExWeb.ChatLive do
 
   def handle_event("submit_answer", %{"answer" => raw_answer}, socket) do
     answer = String.trim(raw_answer)
+    pid = socket.assigns.question_reply_to
 
-    if answer != "" and socket.assigns.question_reply_to do
-      send(socket.assigns.question_reply_to, {:user_answer, answer})
+    cond do
+      answer == "" or is_nil(pid) ->
+        {:noreply, socket}
 
-      {:noreply,
-       assign(socket,
-         pending_question: nil,
-         question_reply_to: nil,
-         thinking: true
-       )}
-    else
-      {:noreply, socket}
+      is_pid(pid) and Process.alive?(pid) ->
+        send(pid, {:user_answer, answer})
+
+        {:noreply,
+         assign(socket,
+           pending_question: nil,
+           question_reply_to: nil,
+           thinking: true
+         )}
+
+      true ->
+        {:noreply,
+         socket
+         |> assign(pending_question: nil, question_reply_to: nil, thinking: false)
+         |> put_flash(:error, "Agent is no longer waiting for an answer.")}
     end
   end
 

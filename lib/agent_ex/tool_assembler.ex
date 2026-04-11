@@ -286,7 +286,10 @@ defmodule AgentEx.ToolAssembler do
     case Todo.init(%{}) do
       {:stateful, tools, child_spec} ->
         case DynamicSupervisor.start_child(AgentEx.PluginSupervisor, child_spec) do
-          {:ok, _pid} ->
+          {:ok, pid} ->
+            # Track the server PID for cleanup when the run ends
+            register_todo_cleanup(run_id, pid)
+
             # Find the list tool to query full state after each write
             list_tool = Enum.find(tools, &(&1.name == "list"))
 
@@ -301,6 +304,31 @@ defmodule AgentEx.ToolAssembler do
 
       _ ->
         []
+    end
+  end
+
+  @todo_cleanup_table :agent_ex_todo_cleanup
+
+  defp register_todo_cleanup(run_id, pid) do
+    if :ets.info(@todo_cleanup_table) == :undefined do
+      :ets.new(@todo_cleanup_table, [:named_table, :public, :set])
+    end
+
+    :ets.insert(@todo_cleanup_table, {run_id, pid})
+  end
+
+  @doc "Clean up Todo server for a completed run. Called by EventLoop."
+  def cleanup_todo(run_id) do
+    if :ets.info(@todo_cleanup_table) != :undefined do
+      case :ets.lookup(@todo_cleanup_table, run_id) do
+        [{^run_id, pid}] ->
+          Todo.cleanup(pid)
+          DynamicSupervisor.terminate_child(AgentEx.PluginSupervisor, pid)
+          :ets.delete(@todo_cleanup_table, run_id)
+
+        [] ->
+          :ok
+      end
     end
   end
 
