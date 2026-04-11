@@ -8,7 +8,6 @@ defmodule AgentEx.Plugins.GitWorktreeTest do
   @moduletag :git_worktree
 
   setup do
-    # Create a temporary git repo for testing
     tmp_dir =
       Path.join(System.tmp_dir!(), "agent_ex_wt_test_#{System.unique_integer([:positive])}")
 
@@ -17,7 +16,6 @@ defmodule AgentEx.Plugins.GitWorktreeTest do
     System.cmd("git", ["config", "user.email", "test@test.com"], cd: tmp_dir)
     System.cmd("git", ["config", "user.name", "Test"], cd: tmp_dir)
 
-    # Create initial commit so branches work
     File.write!(Path.join(tmp_dir, "README.md"), "# Test repo")
     System.cmd("git", ["add", "."], cd: tmp_dir)
     System.cmd("git", ["commit", "-m", "initial commit"], cd: tmp_dir)
@@ -131,12 +129,11 @@ defmodule AgentEx.Plugins.GitWorktreeTest do
       {:ok, pid} = Coordinator.start_link(repo_root: repo)
       {:ok, info} = Coordinator.create(pid, "agent-1")
 
-      # Create a new file in the worktree
       File.write!(Path.join(info.path, "new_file.txt"), "hello")
 
       assert {:ok, status} = Coordinator.status(pid, "agent-1")
       assert status.has_changes == true
-      assert length(status.uncommitted_changes) > 0
+      assert status.uncommitted_changes != []
 
       GenServer.stop(pid)
     end
@@ -154,19 +151,16 @@ defmodule AgentEx.Plugins.GitWorktreeTest do
     test "merges worktree branch into target", %{repo: repo} do
       {:ok, pid} = Coordinator.start_link(repo_root: repo)
 
-      # Create a rolling branch
       System.cmd("git", ["branch", "rolling"], cd: repo)
 
       {:ok, info} = Coordinator.create(pid, "agent-1", base_branch: "rolling")
 
-      # Make a commit in the worktree
       File.write!(Path.join(info.path, "feature.txt"), "new feature")
       System.cmd("git", ["add", "."], cd: info.path)
       System.cmd("git", ["commit", "-m", "add feature"], cd: info.path)
 
       assert :ok = Coordinator.merge(pid, "agent-1", "rolling")
 
-      # Verify the file exists on rolling branch
       System.cmd("git", ["checkout", "rolling"], cd: repo)
       assert File.exists?(Path.join(repo, "feature.txt"))
 
@@ -180,15 +174,15 @@ defmodule AgentEx.Plugins.GitWorktreeTest do
 
       {:ok, info} = Coordinator.create(pid, "agent-1", base_branch: "rolling")
 
-      # Create conflicting change on rolling branch via a temp worktree
-      rolling_wt = Path.join(System.tmp_dir!(), "rolling_wt_#{System.unique_integer([:positive])}")
+      rolling_wt =
+        Path.join(System.tmp_dir!(), "rolling_wt_#{System.unique_integer([:positive])}")
+
       System.cmd("git", ["worktree", "add", rolling_wt, "rolling"], cd: repo)
       File.write!(Path.join(rolling_wt, "conflict.txt"), "rolling version")
       System.cmd("git", ["add", "."], cd: rolling_wt)
       System.cmd("git", ["commit", "-m", "rolling change"], cd: rolling_wt)
       System.cmd("git", ["worktree", "remove", "--force", rolling_wt], cd: repo)
 
-      # Create conflicting change in agent worktree
       File.write!(Path.join(info.path, "conflict.txt"), "agent version")
       System.cmd("git", ["add", "."], cd: info.path)
       System.cmd("git", ["commit", "-m", "agent change"], cd: info.path)
@@ -243,7 +237,6 @@ defmodule AgentEx.Plugins.GitWorktreeTest do
 
       GenServer.stop(pid, :normal)
 
-      # Worktree directories should be removed
       refute File.dir?(info_a.path)
       refute File.dir?(info_b.path)
     end
@@ -254,10 +247,8 @@ defmodule AgentEx.Plugins.GitWorktreeTest do
       {:ok, info} = Coordinator.create(pid, "agent-1")
       GenServer.stop(pid, :normal)
 
-      # Worktree should still exist
       assert File.dir?(info.path)
 
-      # Manual cleanup
       System.cmd("git", ["worktree", "remove", "--force", info.path], cd: repo)
       System.cmd("git", ["worktree", "prune"], cd: repo)
     end
@@ -293,7 +284,6 @@ defmodule AgentEx.Plugins.GitWorktreeTest do
       {:ok, info_b} = Coordinator.create(pid, "agent-b")
       {:ok, info_c} = Coordinator.create(pid, "agent-c")
 
-      # Commit in all 3 worktrees concurrently
       tasks =
         [info_a, info_b, info_c]
         |> Enum.map(fn info ->
@@ -302,20 +292,16 @@ defmodule AgentEx.Plugins.GitWorktreeTest do
             File.write!(file, "work from #{info.name}")
             System.cmd("git", ["add", "."], cd: info.path)
 
-            System.cmd("git", ["commit", "-m", "commit from #{info.name}"],
-              cd: info.path
-            )
+            System.cmd("git", ["commit", "-m", "commit from #{info.name}"], cd: info.path)
           end)
         end)
 
       results = Task.await_many(tasks, 15_000)
 
-      # All should succeed (exit code 0)
       Enum.each(results, fn {_output, code} ->
         assert code == 0
       end)
 
-      # Verify git integrity
       {_output, 0} = System.cmd("git", ["fsck", "--no-dangling"], cd: repo)
 
       GenServer.stop(pid)

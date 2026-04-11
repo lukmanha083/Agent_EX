@@ -61,7 +61,7 @@ defmodule AgentEx.Swarm do
           optional(:repo_root) => String.t(),
           optional(:rolling_branch) => String.t(),
           optional(:base_branch) => String.t(),
-          optional(:merge_strategy) => :serial | :parallel,
+          optional(:merge_strategy) => :serial,
           optional(:auto_cleanup) => boolean()
         }
 
@@ -326,13 +326,24 @@ defmodule AgentEx.Swarm do
 
     {:ok, coordinator} = WorktreeCoordinator.start_link(coordinator_opts)
 
-    WorktreeCoordinator.ensure_branch(coordinator, rolling_branch, base_branch)
+    case WorktreeCoordinator.ensure_branch(coordinator, rolling_branch, base_branch) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "Swarm: failed to ensure rolling branch '#{rolling_branch}': #{inspect(reason)}"
+        )
+    end
 
     worktree_infos =
       agents_map
       |> Map.keys()
       |> Enum.reduce(%{}, fn name, acc ->
-        case WorktreeCoordinator.create(coordinator, name, agent_id: name, base_branch: rolling_branch) do
+        case WorktreeCoordinator.create(coordinator, name,
+               agent_id: name,
+               base_branch: rolling_branch
+             ) do
           {:ok, info} ->
             Logger.debug("Swarm: created worktree for agent '#{name}' at #{info.path}")
             Map.put(acc, name, info)
@@ -373,20 +384,19 @@ defmodule AgentEx.Swarm do
 
   defp maybe_teardown_worktrees(nil), do: :ok
 
-  defp maybe_teardown_worktrees(%{coordinator: coordinator, rolling_branch: rolling_branch} = state) do
-    if state.merge_strategy == :serial do
-      Enum.each(state.worktree_infos, fn {name, _info} ->
-        case WorktreeCoordinator.merge(coordinator, name, rolling_branch) do
-          :ok ->
-            Logger.info("Swarm: merged worktree '#{name}' into '#{rolling_branch}'")
+  defp maybe_teardown_worktrees(
+         %{coordinator: coordinator, rolling_branch: rolling_branch} = state
+       ) do
+    Enum.each(state.worktree_infos, fn {name, _info} ->
+      case WorktreeCoordinator.merge(coordinator, name, rolling_branch) do
+        :ok ->
+          Logger.info("Swarm: merged worktree '#{name}' into '#{rolling_branch}'")
 
-          {:error, reason} ->
-            Logger.warning("Swarm: failed to merge '#{name}': #{inspect(reason)}")
-        end
-      end)
-    end
+        {:error, reason} ->
+          Logger.warning("Swarm: failed to merge '#{name}': #{inspect(reason)}")
+      end
+    end)
 
-    # Delete each worktree explicitly, then stop the coordinator
     Enum.each(state.worktree_infos, fn {name, _info} ->
       WorktreeCoordinator.delete(coordinator, name, force: true)
     end)

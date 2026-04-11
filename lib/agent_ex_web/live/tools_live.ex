@@ -449,7 +449,7 @@ defmodule AgentExWeb.ToolsLive do
      |> put_flash(:info, msg)}
   end
 
-  defp do_save_builtin_mcp({:error, changeset}, params, socket) do
+  defp do_save_builtin_mcp({:error, %Ecto.Changeset{} = changeset}, params, socket) do
     errors = Enum.map_join(changeset.errors, ", ", fn {field, {msg, _}} -> "#{field} #{msg}" end)
 
     form = %{
@@ -464,6 +464,10 @@ defmodule AgentExWeb.ToolsLive do
      socket
      |> assign(builtin_mcp_form: form)
      |> put_flash(:error, "Failed: #{errors}")}
+  end
+
+  defp do_save_builtin_mcp({:error, reason}, _params, socket) do
+    {:noreply, put_flash(socket, :error, "Failed: #{inspect(reason)}")}
   end
 
   defp build_builtin_mcp_attrs(params, project_id) do

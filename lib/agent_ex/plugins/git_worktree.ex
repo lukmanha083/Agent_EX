@@ -31,8 +31,8 @@ defmodule AgentEx.Plugins.GitWorktree do
 
   @behaviour AgentEx.ToolPlugin
 
-  alias AgentEx.Tool
   alias AgentEx.Plugins.GitWorktree.Coordinator
+  alias AgentEx.Tool
 
   @impl true
   def manifest do
@@ -66,16 +66,12 @@ defmodule AgentEx.Plugins.GitWorktree do
       ]
       |> Enum.reject(fn {_k, v} -> is_nil(v) end)
 
-    # Start coordinator eagerly so tool closures can capture the pid.
-    # PluginRegistry will re-parent it under PluginSupervisor via child_spec.
-    {:ok, coordinator} = Coordinator.start_link(coordinator_opts)
-
     tools = [
-      create_worktree_tool(coordinator),
-      list_worktrees_tool(coordinator),
-      worktree_status_tool(coordinator),
-      merge_worktree_tool(coordinator),
-      delete_worktree_tool(coordinator)
+      create_worktree_tool(),
+      list_worktrees_tool(),
+      worktree_status_tool(),
+      merge_worktree_tool(),
+      delete_worktree_tool()
     ]
 
     child_spec = %{
@@ -83,13 +79,6 @@ defmodule AgentEx.Plugins.GitWorktree do
       start: {Coordinator, :start_link, [coordinator_opts]},
       restart: :permanent
     }
-
-    # Stop the eagerly-started coordinator — PluginRegistry will start a new
-    # one via child_spec. The tool closures hold the pid, which will be
-    # replaced when PluginRegistry starts the supervised instance.
-    # NOTE: When used standalone (not via PluginRegistry), the caller should
-    # start the coordinator themselves and pass tools directly.
-    GenServer.stop(coordinator, :normal)
 
     {:stateful, tools, child_spec}
   end
@@ -104,11 +93,8 @@ defmodule AgentEx.Plugins.GitWorktree do
   end
 
   # -- Tool definitions --
-  # Each tool receives the coordinator module for Process.whereis lookup.
-  # When started via PluginSupervisor, the coordinator is findable by scanning
-  # supervisor children. We use a simple helper to locate it.
 
-  defp create_worktree_tool(_coordinator) do
+  defp create_worktree_tool do
     Tool.new(
       name: "create_worktree",
       description:
@@ -120,11 +106,13 @@ defmodule AgentEx.Plugins.GitWorktree do
         "properties" => %{
           "name" => %{
             "type" => "string",
-            "description" => "Unique name for the worktree (used as directory name and branch suffix)"
+            "description" =>
+              "Unique name for the worktree (used as directory name and branch suffix)"
           },
           "agent_id" => %{
             "type" => "string",
-            "description" => "Agent ID to associate with this worktree (optional, defaults to name)"
+            "description" =>
+              "Agent ID to associate with this worktree (optional, defaults to name)"
           },
           "base_branch" => %{
             "type" => "string",
@@ -143,7 +131,12 @@ defmodule AgentEx.Plugins.GitWorktree do
             {:ok, info} ->
               {:ok,
                Jason.encode!(
-                 %{name: info.name, path: info.path, branch: info.branch, agent_id: info.agent_id},
+                 %{
+                   name: info.name,
+                   path: info.path,
+                   branch: info.branch,
+                   agent_id: info.agent_id
+                 },
                  pretty: true
                )}
 
@@ -155,10 +148,11 @@ defmodule AgentEx.Plugins.GitWorktree do
     )
   end
 
-  defp list_worktrees_tool(_coordinator) do
+  defp list_worktrees_tool do
     Tool.new(
       name: "list_worktrees",
-      description: "List all active git worktrees with their paths, branches, and agent assignments.",
+      description:
+        "List all active git worktrees with their paths, branches, and agent assignments.",
       parameters: %{
         "type" => "object",
         "properties" => %{},
@@ -179,7 +173,7 @@ defmodule AgentEx.Plugins.GitWorktree do
     )
   end
 
-  defp worktree_status_tool(_coordinator) do
+  defp worktree_status_tool do
     Tool.new(
       name: "worktree_status",
       description:
@@ -207,7 +201,7 @@ defmodule AgentEx.Plugins.GitWorktree do
     )
   end
 
-  defp merge_worktree_tool(_coordinator) do
+  defp merge_worktree_tool do
     Tool.new(
       name: "merge_worktree",
       description:
@@ -239,7 +233,7 @@ defmodule AgentEx.Plugins.GitWorktree do
     )
   end
 
-  defp delete_worktree_tool(_coordinator) do
+  defp delete_worktree_tool do
     Tool.new(
       name: "delete_worktree",
       description:
@@ -310,5 +304,7 @@ defmodule AgentEx.Plugins.GitWorktree do
   defp format_error({:invalid_name, msg}), do: "Invalid worktree name: #{msg}"
   defp format_error({:invalid_ref, msg}), do: "Invalid branch ref: #{msg}"
   defp format_error({:path_traversal, msg}), do: "Path traversal rejected: #{msg}"
+  defp format_error({:merge_setup_failed, output}), do: "Merge setup failed: #{output}"
+  defp format_error({:branch_create_failed, output}), do: "Branch creation failed: #{output}"
   defp format_error(other), do: inspect(other)
 end

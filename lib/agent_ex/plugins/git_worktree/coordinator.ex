@@ -121,36 +121,33 @@ defmodule AgentEx.Plugins.GitWorktree.Coordinator do
   @impl true
   def handle_call({:create, name, opts}, _from, state) do
     base = Keyword.get(opts, :base_branch, state.base_branch)
+    agent_id = Keyword.get(opts, :agent_id, name)
+    branch = "worktree/#{name}"
+    path = Path.join(state.worktrees_dir, name)
 
-    with :ok <- validate_name(name),
-         :ok <- validate_ref(base),
-         :ok <- check_not_exists(state, name) do
-      agent_id = Keyword.get(opts, :agent_id, name)
-      branch = "worktree/#{name}"
-      path = Path.join(state.worktrees_dir, name)
-
-      with :ok <- safe_path(state.worktrees_dir, path) do
-        case git_worktree_add(state.repo_root, path, branch, base) do
-          :ok ->
-            info = %WorktreeInfo{
-              name: name,
-              path: path,
-              branch: branch,
-              agent_id: agent_id,
-              created_at: DateTime.utc_now()
-            }
-
-            Logger.info("GitWorktree: created '#{name}' at #{path} on branch #{branch}")
-            {:reply, {:ok, info}, %{state | worktrees: Map.put(state.worktrees, name, info)}}
-
-          {:error, reason} ->
-            {:reply, {:error, reason}, state}
-        end
-      else
-        {:error, reason} -> {:reply, {:error, reason}, state}
+    result =
+      with :ok <- validate_name(name),
+           :ok <- validate_ref(base),
+           :ok <- check_not_exists(state, name),
+           :ok <- safe_path(state.worktrees_dir, path),
+           :ok <- git_worktree_add(state.repo_root, path, branch, base) do
+        {:ok,
+         %WorktreeInfo{
+           name: name,
+           path: path,
+           branch: branch,
+           agent_id: agent_id,
+           created_at: DateTime.utc_now()
+         }}
       end
-    else
-      {:error, reason} -> {:reply, {:error, reason}, state}
+
+    case result do
+      {:ok, info} ->
+        Logger.info("GitWorktree: created '#{name}' at #{path} on branch #{branch}")
+        {:reply, {:ok, info}, %{state | worktrees: Map.put(state.worktrees, name, info)}}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
     end
   end
 
@@ -159,25 +156,17 @@ defmodule AgentEx.Plugins.GitWorktree.Coordinator do
   end
 
   def handle_call({:status, name}, _from, state) do
-    case Map.fetch(state.worktrees, name) do
-      {:ok, info} ->
-        {:reply, git_worktree_status(info.path, info.branch), state}
-
-      :error ->
-        {:reply, {:error, {:not_found, name}}, state}
+    case fetch_worktree(state, name) do
+      {:ok, info} -> {:reply, git_worktree_status(info.path, info.branch), state}
+      {:error, reason} -> {:reply, {:error, reason}, state}
     end
   end
 
   def handle_call({:merge, name, target_branch}, _from, state) do
-    with :ok <- validate_ref(target_branch) do
-      case Map.fetch(state.worktrees, name) do
-        {:ok, info} ->
-          result = git_merge_branch(state, info.branch, target_branch)
-          {:reply, result, state}
-
-        :error ->
-          {:reply, {:error, {:not_found, name}}, state}
-      end
+    with :ok <- validate_ref(target_branch),
+         {:ok, info} <- fetch_worktree(state, name) do
+      result = git_merge_branch(state, info.branch, target_branch)
+      {:reply, result, state}
     else
       {:error, reason} -> {:reply, {:error, reason}, state}
     end
@@ -187,63 +176,54 @@ defmodule AgentEx.Plugins.GitWorktree.Coordinator do
     force = Keyword.get(opts, :force, false)
     delete_branch = Keyword.get(opts, :delete_branch, true)
 
-    case Map.fetch(state.worktrees, name) do
-      {:ok, info} ->
-        case git_worktree_remove(state.repo_root, info.path, force) do
-          :ok ->
-            if delete_branch do
-              git_delete_branch(state.repo_root, info.branch)
-            end
-
-            Logger.info("GitWorktree: deleted '#{name}'")
-            {:reply, :ok, %{state | worktrees: Map.delete(state.worktrees, name)}}
-
-          {:error, reason} ->
-            {:reply, {:error, reason}, state}
-        end
-
-      :error ->
-        {:reply, {:error, {:not_found, name}}, state}
-    end
-  end
-
-  def handle_call({:ensure_branch, branch, base}, _from, state) do
-    with :ok <- validate_ref(branch),
-         :ok <- validate_ref(base || "HEAD") do
-      case git(state.repo_root, ["rev-parse", "--verify", "--", branch]) do
-        {:ok, _} ->
-          :ok
-
-        {:error, _} ->
-          git(state.repo_root, ["branch", "--", branch, base || "HEAD"])
-      end
-
-      {:reply, :ok, state}
+    with {:ok, info} <- fetch_worktree(state, name),
+         :ok <- git_worktree_remove(state.repo_root, info.path, force) do
+      if delete_branch, do: git_delete_branch(state.repo_root, info.branch)
+      Logger.info("GitWorktree: deleted '#{name}'")
+      {:reply, :ok, %{state | worktrees: Map.delete(state.worktrees, name)}}
     else
       {:error, reason} -> {:reply, {:error, reason}, state}
     end
   end
 
+  def handle_call({:ensure_branch, branch, base}, _from, state) do
+    result =
+      with :ok <- validate_ref(branch),
+           :ok <- validate_ref(base || "HEAD"),
+           {:error, _} <- git(state.repo_root, ["rev-parse", "--verify", "refs/heads/" <> branch]) do
+        case git(state.repo_root, ["branch", "--", branch, base || "HEAD"]) do
+          {:ok, _} -> :ok
+          {:error, output} -> {:error, {:branch_create_failed, output}}
+        end
+      else
+        {:ok, _} -> :ok
+        {:error, reason} -> {:error, reason}
+      end
+
+    {:reply, result, state}
+  end
+
   @impl true
   def terminate(_reason, state) do
-    if state.auto_cleanup do
-      Logger.info("GitWorktree.Coordinator: cleaning up #{map_size(state.worktrees)} worktrees")
-
-      Enum.each(state.worktrees, fn {name, info} ->
-        case git_worktree_remove(state.repo_root, info.path, true) do
-          :ok ->
-            git_delete_branch(state.repo_root, info.branch)
-            Logger.debug("GitWorktree: cleaned up '#{name}'")
-
-          {:error, reason} ->
-            Logger.warning("GitWorktree: failed to clean up '#{name}': #{inspect(reason)}")
-        end
-      end)
-
-      git_worktree_prune(state.repo_root)
-    end
-
+    if state.auto_cleanup, do: cleanup_all_worktrees(state)
     :ok
+  end
+
+  defp cleanup_all_worktrees(state) do
+    Logger.info("GitWorktree.Coordinator: cleaning up #{map_size(state.worktrees)} worktrees")
+
+    Enum.each(state.worktrees, fn {name, info} ->
+      case git_worktree_remove(state.repo_root, info.path, true) do
+        :ok ->
+          git_delete_branch(state.repo_root, info.branch)
+          Logger.debug("GitWorktree: cleaned up '#{name}'")
+
+        {:error, reason} ->
+          Logger.warning("GitWorktree: failed to clean up '#{name}': #{inspect(reason)}")
+      end
+    end)
+
+    git_worktree_prune(state.repo_root)
   end
 
   # -- Git operations --
@@ -270,7 +250,8 @@ defmodule AgentEx.Plugins.GitWorktree.Coordinator do
 
   defp git_worktree_status(worktree_path, branch) do
     with {:ok, status_output} <- git(worktree_path, ["status", "--porcelain"]),
-         {:ok, log_output} <- git(worktree_path, ["log", "--oneline", "HEAD", "--not", "--remotes"]) do
+         {:ok, log_output} <-
+           git(worktree_path, ["log", "--oneline", "HEAD", "--not", "--remotes"]) do
       uncommitted =
         status_output
         |> String.split("\n", trim: true)
@@ -292,14 +273,17 @@ defmodule AgentEx.Plugins.GitWorktree.Coordinator do
   defp git_merge_branch(state, source_branch, target_branch) do
     merge_wt = Path.join(state.worktrees_dir, ".merge-#{System.unique_integer([:positive])}")
 
-    with {:ok, _} <- git(state.repo_root, ["worktree", "add", "--detach", "--", merge_wt, target_branch]) do
-      # Switch from detached HEAD to the target branch. Using -B to force
-      # the local ref to match. Cannot use `--` here: git checkout treats
-      # args after `--` as file paths, not branch names.
-      git(merge_wt, ["switch", target_branch])
-
-      result =
-        case git(merge_wt, ["merge", "--no-ff", source_branch, "-m", "merge: #{source_branch} into #{target_branch}"]) do
+    result =
+      with {:ok, _} <-
+             git(state.repo_root, ["worktree", "add", "--detach", "--", merge_wt, target_branch]),
+           {:ok, _} <- git(merge_wt, ["switch", target_branch]) do
+        case git(merge_wt, [
+               "merge",
+               "--no-ff",
+               source_branch,
+               "-m",
+               "merge: #{source_branch} into #{target_branch}"
+             ]) do
           {:ok, _output} ->
             :ok
 
@@ -314,10 +298,12 @@ defmodule AgentEx.Plugins.GitWorktree.Coordinator do
 
             {:error, {:conflict, conflict_files}}
         end
+      else
+        {:error, output} -> {:error, {:merge_setup_failed, output}}
+      end
 
-      git(state.repo_root, ["worktree", "remove", "--force", merge_wt])
-      result
-    end
+    git(state.repo_root, ["worktree", "remove", "--force", merge_wt])
+    result
   end
 
   defp git_delete_branch(repo_root, branch) do
@@ -429,21 +415,24 @@ defmodule AgentEx.Plugins.GitWorktree.Coordinator do
   end
 
   defp check_not_exists(state, name) do
-    if Map.has_key?(state.worktrees, name) do
-      {:error, {:already_exists, name}}
-    else
-      :ok
+    if Map.has_key?(state.worktrees, name),
+      do: {:error, {:already_exists, name}},
+      else: :ok
+  end
+
+  defp fetch_worktree(state, name) do
+    case Map.fetch(state.worktrees, name) do
+      {:ok, info} -> {:ok, info}
+      :error -> {:error, {:not_found, name}}
     end
   end
 
   defp git(cwd, args) do
-    try do
-      case System.cmd("git", args, cd: cwd, stderr_to_stdout: true) do
-        {output, 0} -> {:ok, output}
-        {output, _code} -> {:error, output}
-      end
-    rescue
-      e -> {:error, Exception.message(e)}
+    case System.cmd("git", args, cd: cwd, stderr_to_stdout: true) do
+      {output, 0} -> {:ok, output}
+      {output, _code} -> {:error, output}
     end
+  rescue
+    e -> {:error, Exception.message(e)}
   end
 end
