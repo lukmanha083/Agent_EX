@@ -34,11 +34,16 @@ defmodule AgentExWeb.Features.ProjectManagementTest do
 
   describe "project switching and isolation" do
     test "switching projects isolates conversations", %{session: session, user: user} do
+      root_a = "/tmp/agent_ex_test/project_a_#{System.unique_integer([:positive])}"
+      root_b = "/tmp/agent_ex_test/project_b_#{System.unique_integer([:positive])}"
+      File.mkdir_p!(root_a)
+      File.mkdir_p!(root_b)
+
       {:ok, project_a} =
         Projects.create_project(%{
           user_id: user.id,
           name: "Project A",
-          root_path: "/tmp/agent_ex_test/project_a_#{System.unique_integer([:positive])}",
+          root_path: root_a,
           provider: "anthropic",
           model: "claude-sonnet-4-6"
         })
@@ -47,7 +52,7 @@ defmodule AgentExWeb.Features.ProjectManagementTest do
         Projects.create_project(%{
           user_id: user.id,
           name: "Project B",
-          root_path: "/tmp/agent_ex_test/project_b_#{System.unique_integer([:positive])}",
+          root_path: root_b,
           provider: "anthropic",
           model: "claude-sonnet-4-6"
         })
@@ -93,11 +98,14 @@ defmodule AgentExWeb.Features.ProjectManagementTest do
 
   describe "project deletion" do
     test "delete project shows success flash", %{session: session, user: user} do
+      root = "/tmp/agent_ex_test/temp_project_#{System.unique_integer([:positive])}"
+      File.mkdir_p!(root)
+
       {:ok, project} =
         Projects.create_project(%{
           user_id: user.id,
           name: "Temp Project",
-          root_path: "/tmp/agent_ex_test/temp_project_#{System.unique_integer([:positive])}",
+          root_path: root,
           provider: "anthropic",
           model: "claude-sonnet-4-6"
         })

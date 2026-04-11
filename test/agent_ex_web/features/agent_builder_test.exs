@@ -9,12 +9,15 @@ defmodule AgentExWeb.Features.AgentBuilderTest do
 
   setup %{session: session} do
     user = user_fixture()
+    root = "/tmp/agent_ex_test/agent_builder_#{System.unique_integer([:positive])}"
+    File.mkdir_p!(root)
+    on_exit(fn -> File.rm_rf(root) end)
 
     {:ok, project} =
       Projects.create_project(%{
         user_id: user.id,
         name: "Test Project",
-        root_path: "/tmp/test",
+        root_path: root,
         provider: "anthropic",
         model: "claude-sonnet-4-6"
       })
