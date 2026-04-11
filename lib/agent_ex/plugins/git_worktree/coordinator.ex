@@ -25,27 +25,18 @@ defmodule AgentEx.Plugins.GitWorktree.Coordinator do
   defmodule WorktreeInfo do
     @moduledoc "Metadata for an active worktree."
     @enforce_keys [:name, :path, :branch]
-    defstruct [:name, :path, :branch, :agent_id, created_at: nil, locked: false]
+    defstruct [:name, :path, :branch, :agent_id, created_at: nil]
 
     @type t :: %__MODULE__{
             name: String.t(),
             path: String.t(),
             branch: String.t(),
             agent_id: String.t() | nil,
-            created_at: DateTime.t() | nil,
-            locked: boolean()
+            created_at: DateTime.t() | nil
           }
   end
 
   defstruct [:repo_root, :worktrees_dir, :base_branch, worktrees: %{}, auto_cleanup: true]
-
-  @type t :: %__MODULE__{
-          repo_root: String.t(),
-          worktrees_dir: String.t(),
-          base_branch: String.t() | nil,
-          worktrees: %{String.t() => WorktreeInfo.t()},
-          auto_cleanup: boolean()
-        }
 
   # -- Public API --
 
@@ -75,7 +66,9 @@ defmodule AgentEx.Plugins.GitWorktree.Coordinator do
 
   @doc """
   Merge a worktree's branch into a target branch. Serialized to prevent conflicts.
-  Returns `:ok` or `{:error, {:conflict, files}}`.
+
+  Uses an ephemeral worktree for the merge so the user's main working tree
+  is never disturbed. Returns `:ok` or `{:error, {:conflict, files}}`.
   """
   @spec merge(GenServer.server(), String.t(), String.t()) :: :ok | {:error, term()}
   def merge(server, name, target_branch) do
@@ -86,6 +79,12 @@ defmodule AgentEx.Plugins.GitWorktree.Coordinator do
   @spec delete(GenServer.server(), String.t(), keyword()) :: :ok | {:error, term()}
   def delete(server, name, opts \\ []) do
     GenServer.call(server, {:delete, name, opts}, 15_000)
+  end
+
+  @doc "Ensure a branch exists, creating it from `base` if missing."
+  @spec ensure_branch(GenServer.server(), String.t(), String.t() | nil) :: :ok
+  def ensure_branch(server, branch, base \\ nil) do
+    GenServer.call(server, {:ensure_branch, branch, base}, 15_000)
   end
 
   # -- GenServer callbacks --
@@ -162,7 +161,7 @@ defmodule AgentEx.Plugins.GitWorktree.Coordinator do
   def handle_call({:merge, name, target_branch}, _from, state) do
     case Map.fetch(state.worktrees, name) do
       {:ok, info} ->
-        result = git_merge_branch(state.repo_root, info.branch, target_branch)
+        result = git_merge_branch(state, info.branch, target_branch)
         {:reply, result, state}
 
       :error ->
@@ -192,6 +191,18 @@ defmodule AgentEx.Plugins.GitWorktree.Coordinator do
       :error ->
         {:reply, {:error, {:not_found, name}}, state}
     end
+  end
+
+  def handle_call({:ensure_branch, branch, base}, _from, state) do
+    case git(state.repo_root, ["rev-parse", "--verify", branch]) do
+      {:ok, _} ->
+        :ok
+
+      {:error, _} ->
+        git(state.repo_root, ["branch", branch, base || "HEAD"])
+    end
+
+    {:reply, :ok, state}
   end
 
   @impl true
@@ -240,7 +251,7 @@ defmodule AgentEx.Plugins.GitWorktree.Coordinator do
 
   defp git_worktree_status(worktree_path, branch) do
     with {:ok, status_output} <- git(worktree_path, ["status", "--porcelain"]),
-         {:ok, log_output} <- git(worktree_path, ["log", "--oneline", "HEAD", "--not", "--remotes", "--no-walk"]) do
+         {:ok, log_output} <- git(worktree_path, ["log", "--oneline", "HEAD", "--not", "--remotes"]) do
       uncommitted =
         status_output
         |> String.split("\n", trim: true)
@@ -258,26 +269,33 @@ defmodule AgentEx.Plugins.GitWorktree.Coordinator do
     end
   end
 
-  defp git_merge_branch(repo_root, source_branch, target_branch) do
-    # Merge is done from the main repo root to avoid worktree branch conflicts.
-    # We use --no-ff to preserve branch topology.
-    with {:ok, _} <- git(repo_root, ["checkout", target_branch]) do
-      case git(repo_root, ["merge", "--no-ff", source_branch, "-m", "merge: #{source_branch} into #{target_branch}"]) do
-        {:ok, _output} ->
-          :ok
+  # Merges via an ephemeral worktree so the user's main working tree is never disturbed.
+  defp git_merge_branch(state, source_branch, target_branch) do
+    merge_wt = Path.join(state.worktrees_dir, ".merge-#{System.unique_integer([:positive])}")
 
-        {:error, output} ->
-          # Abort the failed merge and report conflicts
-          git(repo_root, ["merge", "--abort"])
+    with {:ok, _} <- git(state.repo_root, ["worktree", "add", "--detach", merge_wt, target_branch]) do
+      # Detached HEAD at target_branch — now update it to a proper ref
+      git(merge_wt, ["checkout", target_branch])
 
-          conflict_files =
-            output
-            |> String.split("\n", trim: true)
-            |> Enum.filter(&String.contains?(&1, "CONFLICT"))
-            |> Enum.map(&String.trim/1)
+      result =
+        case git(merge_wt, ["merge", "--no-ff", source_branch, "-m", "merge: #{source_branch} into #{target_branch}"]) do
+          {:ok, _output} ->
+            :ok
 
-          {:error, {:conflict, conflict_files}}
-      end
+          {:error, output} ->
+            git(merge_wt, ["merge", "--abort"])
+
+            conflict_files =
+              output
+              |> String.split("\n", trim: true)
+              |> Enum.filter(&String.contains?(&1, "CONFLICT"))
+              |> Enum.map(&String.trim/1)
+
+            {:error, {:conflict, conflict_files}}
+        end
+
+      git(state.repo_root, ["worktree", "remove", "--force", merge_wt])
+      result
     end
   end
 
@@ -303,32 +321,31 @@ defmodule AgentEx.Plugins.GitWorktree.Coordinator do
     end
   end
 
-  # Ensure the worktrees directory is in .gitignore so `git add .` never
-  # picks up the embedded worktree repos inside the sandbox.
   defp ensure_gitignored(repo_root, worktrees_dir) do
     relative = Path.relative_to(worktrees_dir, repo_root)
 
-    # Only relevant when worktrees dir is inside the repo
     if relative != worktrees_dir do
       gitignore_path = Path.join(repo_root, ".gitignore")
       entry = "/#{relative}"
 
-      existing =
-        case File.read(gitignore_path) do
-          {:ok, content} -> content
-          {:error, _} -> ""
+      already_present =
+        case File.open(gitignore_path, [:read, :utf8]) do
+          {:ok, io} ->
+            result = IO.stream(io, :line) |> Enum.any?(&(String.trim(&1) == entry))
+            File.close(io)
+            result
+
+          {:error, _} ->
+            false
         end
 
-      unless String.contains?(existing, entry) do
-        # Append with a newline guard
-        separator = if existing != "" and not String.ends_with?(existing, "\n"), do: "\n", else: ""
-        File.write!(gitignore_path, existing <> separator <> entry <> "\n")
+      unless already_present do
+        File.write!(gitignore_path, "\n#{entry}\n", [:append])
       end
     end
   end
 
-  @doc false
-  def git(cwd, args) do
+  defp git(cwd, args) do
     try do
       case System.cmd("git", args, cd: cwd, stderr_to_stdout: true) do
         {output, 0} -> {:ok, output}

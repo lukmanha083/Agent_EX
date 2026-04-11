@@ -38,8 +38,8 @@ defmodule AgentEx.Plugins.GitWorktreeTest do
 
     test "detects base branch", %{repo: repo} do
       {:ok, pid} = Coordinator.start_link(repo_root: repo)
-      # Should default to "main" since that's the initial branch
-      assert [] = Coordinator.list(pid)
+      state = :sys.get_state(pid)
+      assert state.base_branch == "main"
       GenServer.stop(pid)
     end
   end
@@ -180,15 +180,15 @@ defmodule AgentEx.Plugins.GitWorktreeTest do
 
       {:ok, info} = Coordinator.create(pid, "agent-1", base_branch: "rolling")
 
-      # Create conflicting change on rolling branch
-      System.cmd("git", ["checkout", "rolling"], cd: repo)
-      File.write!(Path.join(repo, "conflict.txt"), "rolling version")
-      System.cmd("git", ["add", "."], cd: repo)
-      System.cmd("git", ["commit", "-m", "rolling change"], cd: repo)
+      # Create conflicting change on rolling branch via a temp worktree
+      rolling_wt = Path.join(System.tmp_dir!(), "rolling_wt_#{System.unique_integer([:positive])}")
+      System.cmd("git", ["worktree", "add", rolling_wt, "rolling"], cd: repo)
+      File.write!(Path.join(rolling_wt, "conflict.txt"), "rolling version")
+      System.cmd("git", ["add", "."], cd: rolling_wt)
+      System.cmd("git", ["commit", "-m", "rolling change"], cd: rolling_wt)
+      System.cmd("git", ["worktree", "remove", "--force", rolling_wt], cd: repo)
 
-      # Create conflicting change in worktree
-      # Need to checkout back to main first so merge can checkout rolling
-      System.cmd("git", ["checkout", "main"], cd: repo)
+      # Create conflicting change in agent worktree
       File.write!(Path.join(info.path, "conflict.txt"), "agent version")
       System.cmd("git", ["add", "."], cd: info.path)
       System.cmd("git", ["commit", "-m", "agent change"], cd: info.path)
@@ -259,6 +259,29 @@ defmodule AgentEx.Plugins.GitWorktreeTest do
 
       # Manual cleanup
       System.cmd("git", ["worktree", "remove", "--force", info.path], cd: repo)
+      System.cmd("git", ["worktree", "prune"], cd: repo)
+    end
+  end
+
+  describe "Coordinator.ensure_branch/3" do
+    test "creates branch if missing", %{repo: repo} do
+      {:ok, pid} = Coordinator.start_link(repo_root: repo)
+
+      assert :ok = Coordinator.ensure_branch(pid, "rolling")
+
+      {output, 0} = System.cmd("git", ["branch", "--list", "rolling"], cd: repo)
+      assert String.contains?(output, "rolling")
+
+      GenServer.stop(pid)
+    end
+
+    test "no-op if branch exists", %{repo: repo} do
+      System.cmd("git", ["branch", "rolling"], cd: repo)
+      {:ok, pid} = Coordinator.start_link(repo_root: repo)
+
+      assert :ok = Coordinator.ensure_branch(pid, "rolling")
+
+      GenServer.stop(pid)
     end
   end
 

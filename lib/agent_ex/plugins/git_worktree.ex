@@ -57,19 +57,25 @@ defmodule AgentEx.Plugins.GitWorktree do
       raise ArgumentError, "repo_root #{repo_root} is not a git repository"
     end
 
-    coordinator_opts = [
-      repo_root: repo_root,
-      worktrees_dir: Map.get(config, "worktrees_dir"),
-      base_branch: Map.get(config, "base_branch"),
-      auto_cleanup: Map.get(config, "auto_cleanup", true)
-    ] |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+    coordinator_opts =
+      [
+        repo_root: repo_root,
+        worktrees_dir: Map.get(config, "worktrees_dir"),
+        base_branch: Map.get(config, "base_branch"),
+        auto_cleanup: Map.get(config, "auto_cleanup", true)
+      ]
+      |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+
+    # Start coordinator eagerly so tool closures can capture the pid.
+    # PluginRegistry will re-parent it under PluginSupervisor via child_spec.
+    {:ok, coordinator} = Coordinator.start_link(coordinator_opts)
 
     tools = [
-      create_worktree_tool(),
-      list_worktrees_tool(),
-      worktree_status_tool(),
-      merge_worktree_tool(),
-      delete_worktree_tool()
+      create_worktree_tool(coordinator),
+      list_worktrees_tool(coordinator),
+      worktree_status_tool(coordinator),
+      merge_worktree_tool(coordinator),
+      delete_worktree_tool(coordinator)
     ]
 
     child_spec = %{
@@ -78,12 +84,19 @@ defmodule AgentEx.Plugins.GitWorktree do
       restart: :permanent
     }
 
+    # Stop the eagerly-started coordinator — PluginRegistry will start a new
+    # one via child_spec. The tool closures hold the pid, which will be
+    # replaced when PluginRegistry starts the supervised instance.
+    # NOTE: When used standalone (not via PluginRegistry), the caller should
+    # start the coordinator themselves and pass tools directly.
+    GenServer.stop(coordinator, :normal)
+
     {:stateful, tools, child_spec}
   end
 
   @impl true
   def cleanup(coordinator_pid) do
-    if Process.alive?(coordinator_pid) do
+    if is_pid(coordinator_pid) and Process.alive?(coordinator_pid) do
       GenServer.stop(coordinator_pid, :normal, 15_000)
     end
 
@@ -91,8 +104,11 @@ defmodule AgentEx.Plugins.GitWorktree do
   end
 
   # -- Tool definitions --
+  # Each tool receives the coordinator module for Process.whereis lookup.
+  # When started via PluginSupervisor, the coordinator is findable by scanning
+  # supervisor children. We use a simple helper to locate it.
 
-  defp create_worktree_tool do
+  defp create_worktree_tool(_coordinator) do
     Tool.new(
       name: "create_worktree",
       description:
@@ -119,36 +135,27 @@ defmodule AgentEx.Plugins.GitWorktree do
       },
       kind: :write,
       function: fn args ->
-        name = Map.fetch!(args, "name")
+        with {:ok, pid} <- find_coordinator() do
+          name = Map.fetch!(args, "name")
+          opts = build_opts(args, [:agent_id, :base_branch])
 
-        opts =
-          []
-          |> maybe_put(:agent_id, Map.get(args, "agent_id"))
-          |> maybe_put(:base_branch, Map.get(args, "base_branch"))
+          case Coordinator.create(pid, name, opts) do
+            {:ok, info} ->
+              {:ok,
+               Jason.encode!(
+                 %{name: info.name, path: info.path, branch: info.branch, agent_id: info.agent_id},
+                 pretty: true
+               )}
 
-        case find_coordinator() do
-          {:ok, pid} ->
-            case Coordinator.create(pid, name, opts) do
-              {:ok, info} ->
-                {:ok, Jason.encode!(%{
-                  name: info.name,
-                  path: info.path,
-                  branch: info.branch,
-                  agent_id: info.agent_id
-                }, pretty: true)}
-
-              {:error, reason} ->
-                {:error, format_error(reason)}
-            end
-
-          {:error, reason} ->
-            {:error, format_error(reason)}
+            {:error, reason} ->
+              {:error, format_error(reason)}
+          end
         end
       end
     )
   end
 
-  defp list_worktrees_tool do
+  defp list_worktrees_tool(_coordinator) do
     Tool.new(
       name: "list_worktrees",
       description: "List all active git worktrees with their paths, branches, and agent assignments.",
@@ -159,31 +166,20 @@ defmodule AgentEx.Plugins.GitWorktree do
       },
       kind: :read,
       function: fn _args ->
-        case find_coordinator() do
-          {:ok, pid} ->
-            worktrees = Coordinator.list(pid)
+        with {:ok, pid} <- find_coordinator() do
+          entries =
+            Coordinator.list(pid)
+            |> Enum.map(fn info ->
+              %{name: info.name, path: info.path, branch: info.branch, agent_id: info.agent_id}
+            end)
 
-            entries =
-              Enum.map(worktrees, fn info ->
-                %{
-                  name: info.name,
-                  path: info.path,
-                  branch: info.branch,
-                  agent_id: info.agent_id,
-                  locked: info.locked
-                }
-              end)
-
-            {:ok, Jason.encode!(entries, pretty: true)}
-
-          {:error, reason} ->
-            {:error, format_error(reason)}
+          {:ok, Jason.encode!(entries, pretty: true)}
         end
       end
     )
   end
 
-  defp worktree_status_tool do
+  defp worktree_status_tool(_coordinator) do
     Tool.new(
       name: "worktree_status",
       description:
@@ -201,21 +197,17 @@ defmodule AgentEx.Plugins.GitWorktree do
       },
       kind: :read,
       function: fn %{"name" => name} ->
-        case find_coordinator() do
-          {:ok, pid} ->
-            case Coordinator.status(pid, name) do
-              {:ok, status} -> {:ok, Jason.encode!(status, pretty: true)}
-              {:error, reason} -> {:error, format_error(reason)}
-            end
-
-          {:error, reason} ->
-            {:error, format_error(reason)}
+        with {:ok, pid} <- find_coordinator() do
+          case Coordinator.status(pid, name) do
+            {:ok, status} -> {:ok, Jason.encode!(status, pretty: true)}
+            {:error, reason} -> {:error, format_error(reason)}
+          end
         end
       end
     )
   end
 
-  defp merge_worktree_tool do
+  defp merge_worktree_tool(_coordinator) do
     Tool.new(
       name: "merge_worktree",
       description:
@@ -237,21 +229,17 @@ defmodule AgentEx.Plugins.GitWorktree do
       },
       kind: :write,
       function: fn %{"name" => name, "target_branch" => target} ->
-        case find_coordinator() do
-          {:ok, pid} ->
-            case Coordinator.merge(pid, name, target) do
-              :ok -> {:ok, "Successfully merged worktree '#{name}' into '#{target}'"}
-              {:error, reason} -> {:error, format_error(reason)}
-            end
-
-          {:error, reason} ->
-            {:error, format_error(reason)}
+        with {:ok, pid} <- find_coordinator() do
+          case Coordinator.merge(pid, name, target) do
+            :ok -> {:ok, "Successfully merged worktree '#{name}' into '#{target}'"}
+            {:error, reason} -> {:error, format_error(reason)}
+          end
         end
       end
     )
   end
 
-  defp delete_worktree_tool do
+  defp delete_worktree_tool(_coordinator) do
     Tool.new(
       name: "delete_worktree",
       description:
@@ -276,19 +264,15 @@ defmodule AgentEx.Plugins.GitWorktree do
       },
       kind: :write,
       function: fn args ->
-        name = Map.fetch!(args, "name")
-        force = Map.get(args, "force", false)
-        delete_branch = Map.get(args, "delete_branch", true)
+        with {:ok, pid} <- find_coordinator() do
+          name = Map.fetch!(args, "name")
+          force = Map.get(args, "force", false)
+          delete_branch = Map.get(args, "delete_branch", true)
 
-        case find_coordinator() do
-          {:ok, pid} ->
-            case Coordinator.delete(pid, name, force: force, delete_branch: delete_branch) do
-              :ok -> {:ok, "Worktree '#{name}' deleted"}
-              {:error, reason} -> {:error, format_error(reason)}
-            end
-
-          {:error, reason} ->
-            {:error, format_error(reason)}
+          case Coordinator.delete(pid, name, force: force, delete_branch: delete_branch) do
+            :ok -> {:ok, "Worktree '#{name}' deleted"}
+            {:error, reason} -> {:error, format_error(reason)}
+          end
         end
       end
     )
@@ -296,25 +280,32 @@ defmodule AgentEx.Plugins.GitWorktree do
 
   # -- Helpers --
 
+  # Locate the coordinator via PluginSupervisor. Returns {:error, _} for
+  # `with` short-circuit so tool functions don't need nested cases.
   defp find_coordinator do
-    # Find the coordinator started by PluginSupervisor.
-    # When started via PluginRegistry, the child_spec has id: Coordinator.
     children = DynamicSupervisor.which_children(AgentEx.PluginSupervisor)
 
-    case Enum.find(children, fn {_id, pid, _type, [mod]} -> mod == Coordinator and is_pid(pid) end) do
+    case Enum.find(children, fn {_id, pid, _type, mods} ->
+           is_pid(pid) and Coordinator in List.wrap(mods)
+         end) do
       {_id, pid, _type, _mods} -> {:ok, pid}
-      nil -> {:error, :coordinator_not_running}
+      nil -> {:error, "GitWorktree coordinator is not running"}
     end
   end
 
-  defp maybe_put(opts, _key, nil), do: opts
-  defp maybe_put(opts, key, value), do: [{key, value} | opts]
+  defp build_opts(args, keys) do
+    Enum.reduce(keys, [], fn key, acc ->
+      case Map.get(args, Atom.to_string(key)) do
+        nil -> acc
+        val -> [{key, val} | acc]
+      end
+    end)
+  end
 
   defp format_error({:already_exists, name}), do: "Worktree '#{name}' already exists"
   defp format_error({:not_found, name}), do: "Worktree '#{name}' not found"
   defp format_error({:worktree_add_failed, output}), do: "Failed to create worktree: #{output}"
   defp format_error({:worktree_remove_failed, output}), do: "Failed to remove worktree: #{output}"
   defp format_error({:conflict, files}), do: "Merge conflict in: #{Enum.join(files, ", ")}"
-  defp format_error(:coordinator_not_running), do: "GitWorktree coordinator is not running"
   defp format_error(other), do: inspect(other)
 end
