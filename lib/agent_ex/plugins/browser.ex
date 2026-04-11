@@ -25,7 +25,11 @@ defmodule AgentEx.Plugins.Browser do
       version: "1.0.0",
       description: "Headless browser automation (navigate, click, type, screenshot)",
       config_schema: [
-        enable_js: [type: :boolean, default: false, doc: "Enable execute_js tool (disabled by default for security)"]
+        enable_js: [
+          type: :boolean,
+          default: false,
+          doc: "Enable execute_js tool (disabled by default for security)"
+        ]
       ]
     }
   end
@@ -320,7 +324,7 @@ defmodule AgentEx.Plugins.Browser do
   end
 
   defp start_new_session do
-    case SessionManager.start_link() do
+    case SessionManager.start_link(owner: self()) do
       {:ok, pid} ->
         Process.put(:browser_session, pid)
         {:ok, pid}

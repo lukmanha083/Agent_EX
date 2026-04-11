@@ -316,8 +316,7 @@ defmodule AgentEx.Defaults.Agents do
         "browser_screenshot",
         "browser_extract",
         "browser_select",
-        "browser_wait",
-        "browser_execute_js"
+        "browser_wait"
       ],
       disabled_builtins: ["text_editor", "code_execution"]
     }

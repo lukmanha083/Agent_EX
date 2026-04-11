@@ -25,7 +25,7 @@ defmodule AgentEx.Browser.SessionManager do
   end
 
   @doc "Start a new browser session. Returns {:ok, pid} or {:error, reason}."
-  def start_session(manager \\ __MODULE__) do
+  def start_session(manager) do
     GenServer.call(manager, :start_session, @default_timeout)
   end
 
@@ -79,11 +79,16 @@ defmodule AgentEx.Browser.SessionManager do
   @impl true
   def init(opts) do
     viewport = Keyword.get(opts, :viewport, @default_viewport)
+    owner = Keyword.get(opts, :owner)
+
+    if owner, do: Process.monitor(owner)
 
     case start_wallaby_session(viewport) do
       {:ok, session} ->
         Logger.info("BrowserSession: started (#{viewport.width}x#{viewport.height})")
-        {:ok, %__MODULE__{session: session, started_at: System.monotonic_time(:second)}}
+
+        {:ok,
+         %__MODULE__{session: session, owner: owner, started_at: System.monotonic_time(:second)}}
 
       {:error, reason} ->
         {:stop, reason}
@@ -182,11 +187,30 @@ defmodule AgentEx.Browser.SessionManager do
   def handle_call({:execute_js, script}, _from, state) do
     result =
       safe_browser_action(state.session, fn session ->
-        js_result = Wallaby.Browser.execute_script(session, script)
-        {session, {:ok, js_result}}
+        ref = make_ref()
+        caller = self()
+
+        Wallaby.Browser.execute_script(session, script, [], fn value ->
+          send(caller, {ref, value})
+        end)
+
+        js_value =
+          receive do
+            {^ref, value} -> value
+          after
+            0 -> nil
+          end
+
+        {session, {:ok, js_value}}
       end)
 
     handle_action_result(result, state)
+  end
+
+  @impl true
+  def handle_info({:DOWN, _ref, :process, _pid, _reason}, state) do
+    Logger.info("BrowserSession: owner process died, shutting down")
+    {:stop, :normal, state}
   end
 
   @impl true
@@ -217,11 +241,16 @@ defmodule AgentEx.Browser.SessionManager do
 
   defp build_capabilities(args) do
     Wallaby.Chrome.default_capabilities()
-    |> put_in([:chromeOptions, "args"], args)
+    |> put_in([:chromeOptions, :args], args)
   end
 
-  defp safe_browser_action(session, fun, _timeout \\ 30_000) do
-    fun.(session)
+  defp safe_browser_action(session, fun, timeout \\ 30_000) do
+    task = Task.async(fn -> fun.(session) end)
+
+    case Task.yield(task, timeout) || Task.shutdown(task, :brutal_kill) do
+      {:ok, result} -> result
+      nil -> {session, {:error, :timeout}}
+    end
   rescue
     e ->
       Logger.warning("BrowserSession: action failed: #{Exception.message(e)}")
