@@ -49,11 +49,14 @@ defmodule AgentEx.Application do
 
     case Supervisor.start_link(children, opts) do
       {:ok, pid} ->
-        # Register system defaults after Repo is ready (non-blocking)
-        Task.Supervisor.start_child(AgentEx.TaskSupervisor, fn ->
-          AgentEx.Defaults.register_system_agents()
-          AgentEx.Defaults.register_system_mcp_servers()
-        end)
+        # Register system defaults after Repo is ready (non-blocking).
+        # Skip in test — sandbox mode prevents DB access from spawned tasks.
+        unless Application.get_env(:agent_ex, :skip_system_defaults) do
+          Task.Supervisor.start_child(AgentEx.TaskSupervisor, fn ->
+            AgentEx.Defaults.register_system_agents()
+            AgentEx.Defaults.register_system_mcp_servers()
+          end)
+        end
 
         {:ok, pid}
 
