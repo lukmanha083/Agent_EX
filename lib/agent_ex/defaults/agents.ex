@@ -95,6 +95,12 @@ defmodule AgentEx.Defaults.Agents do
       5. shell_run_command → uv run mypy --strict <file>
       6. shell_run_command → uv run ruff check .
 
+      ## Getting guidance
+      Use ask_advisor when facing architecture decisions or unsure about approach:
+        → ask_advisor("Should I use asyncio or threading for this HTTP crawler?")
+        → ask_advisor("The project has both SQLAlchemy and raw SQL — which should I use?")
+      Don't ask trivial questions — use it for decisions that affect the whole design.
+
       ## Self-review checklist (do this before reporting done)
       - Input validation gaps? SQL/command injection risks?
       - Error handling complete? Resource leaks?
@@ -119,7 +125,8 @@ defmodule AgentEx.Defaults.Agents do
         "todo_add",
         "todo_list",
         "todo_update",
-        "todo_delete"
+        "todo_delete",
+        "ask_advisor"
       ],
       disabled_builtins: ["text_editor", "code_execution"]
     },

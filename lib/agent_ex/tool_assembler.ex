@@ -10,7 +10,7 @@ defmodule AgentEx.ToolAssembler do
   4. Agent delegate tools (from AgentBridge)
   """
 
-  alias AgentEx.{AgentBridge, AgentConfig, AgentStore, ProviderTools, Tool, ToolPlugin}
+  alias AgentEx.{AgentBridge, AgentConfig, AgentStore, Message, ModelClient, ProviderTools, Tool, ToolPlugin}
   alias AgentEx.EventLoop.Event
   alias AgentEx.MCP.Servers, as: McpServers
   alias AgentEx.Plugins.{AskUser, Todo}
@@ -52,7 +52,7 @@ defmodule AgentEx.ToolAssembler do
 
     # Full tool pool — specialist agents get assigned from this via tool_ids
     run_id = Keyword.get(opts, :run_id)
-    available = available_tools(user_id, project_id, root_path, run_id)
+    available = available_tools(user_id, project_id, root_path, run_id, model_client)
 
     # Orchestrator gets a minimal set of read-only tools for observation.
     # Most work should be delegated to specialist agents.
@@ -105,11 +105,12 @@ defmodule AgentEx.ToolAssembler do
   These are the tools that specialist agents can be given via `tool_ids`.
   The orchestrator never sees these directly.
   """
-  def available_tools(user_id, project_id, root_path \\ nil, run_id \\ nil) do
+  def available_tools(user_id, project_id, root_path \\ nil, run_id \\ nil, model_client \\ nil) do
     plugin_tools = init_builtin_plugins(root_path)
     http_tools = AgentBridge.http_api_tools(user_id, project_id)
     todo = if run_id, do: todo_tools(run_id), else: []
-    plugin_tools ++ http_tools ++ todo
+    advisor = if model_client, do: [advisor_tool(model_client)], else: []
+    plugin_tools ++ http_tools ++ todo ++ advisor
   end
 
   # The orchestrator's only write tool — save/read planning notes to .md files
@@ -320,6 +321,44 @@ defmodule AgentEx.ToolAssembler do
           end
         end
     }
+  end
+
+  @advisor_system """
+  You are a senior technical advisor. A specialist agent is asking for your guidance.
+  Give concise, actionable advice. Focus on architecture decisions, best practices,
+  and project-specific context. Be direct — the agent will act on your advice immediately.
+  """
+
+  defp advisor_tool(%ModelClient{} = client) do
+    Tool.new(
+      name: "ask_advisor",
+      description:
+        "Ask the orchestrator for technical guidance when unsure about approach, " <>
+          "architecture, or implementation decisions. Use this before making big " <>
+          "decisions — not for trivial questions.",
+      parameters: %{
+        "type" => "object",
+        "properties" => %{
+          "question" => %{
+            "type" => "string",
+            "description" => "Your technical question or decision you need guidance on"
+          }
+        },
+        "required" => ["question"]
+      },
+      kind: :read,
+      function: fn %{"question" => question} ->
+        messages = [
+          Message.system(@advisor_system),
+          Message.user(question)
+        ]
+
+        case ModelClient.create(client, messages, max_tokens: 1024) do
+          {:ok, response} -> {:ok, response.content}
+          {:error, reason} -> {:error, "Advisor unavailable: #{inspect(reason)}"}
+        end
+      end
+    )
   end
 
   defp broadcast(run_id, type, data) do
