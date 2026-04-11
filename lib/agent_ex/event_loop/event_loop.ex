@@ -90,39 +90,48 @@ defmodule AgentEx.EventLoop do
 
     task =
       Task.Supervisor.async_nolink(AgentEx.TaskSupervisor, fn ->
-        t_start = System.monotonic_time(:millisecond)
-        result = ToolCallerLoop.run(tool_agent, model_client, messages, tools, loop_opts)
-        total_ms = System.monotonic_time(:millisecond) - t_start
+        try do
+          t_start = System.monotonic_time(:millisecond)
+          result = ToolCallerLoop.run(tool_agent, model_client, messages, tools, loop_opts)
+          total_ms = System.monotonic_time(:millisecond) - t_start
 
-        # Always attempt promotion/reflection — even on error
-        maybe_promote_on_completion(memory_opts, model_client, result)
+          # Always attempt promotion/reflection — even on error
+          maybe_promote_on_completion(memory_opts, model_client, result)
 
-        case result do
-          {:ok, generated} ->
-            usage = accumulate_usage(generated)
+          case result do
+            {:ok, generated} ->
+              usage = accumulate_usage(generated)
 
-            Logger.info(
-              "EventLoop [#{run_id}]: completed in #{total_ms}ms " <>
-                "(#{usage.input_tokens}+#{usage.output_tokens} tokens)"
-            )
+              Logger.info(
+                "EventLoop [#{run_id}]: completed in #{total_ms}ms " <>
+                  "(#{usage.input_tokens}+#{usage.output_tokens} tokens)"
+              )
 
-            broadcast(run_id, :pipeline_complete, %{
-              message_count: length(generated),
-              final_content: final_content(generated),
-              total_usage: usage,
-              duration_ms: total_ms
-            })
+              broadcast(run_id, :pipeline_complete, %{
+                message_count: length(generated),
+                final_content: final_content(generated),
+                total_usage: usage,
+                duration_ms: total_ms
+              })
 
-            RunRegistry.complete_run(run_id)
-            ToolAssembler.cleanup_todo(run_id)
-            result
+              RunRegistry.complete_run(run_id)
+              result
 
-          {:error, reason} ->
-            Logger.warning("EventLoop [#{run_id}]: failed in #{total_ms}ms — #{inspect(reason)}")
-            broadcast(run_id, :pipeline_error, %{reason: inspect(reason), duration_ms: total_ms})
-            RunRegistry.error_run(run_id)
-            ToolAssembler.cleanup_todo(run_id)
-            result
+            {:error, reason} ->
+              Logger.warning(
+                "EventLoop [#{run_id}]: failed in #{total_ms}ms — #{inspect(reason)}"
+              )
+
+              broadcast(run_id, :pipeline_error, %{
+                reason: inspect(reason),
+                duration_ms: total_ms
+              })
+
+              RunRegistry.error_run(run_id)
+              result
+          end
+        after
+          ToolAssembler.cleanup_todo(run_id)
         end
       end)
 

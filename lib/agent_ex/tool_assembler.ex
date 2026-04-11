@@ -10,8 +10,18 @@ defmodule AgentEx.ToolAssembler do
   4. Agent delegate tools (from AgentBridge)
   """
 
-  alias AgentEx.{AgentBridge, AgentConfig, AgentStore, Message, ModelClient, ProviderTools, Tool, ToolPlugin}
-  alias AgentEx.EventLoop.Event
+  alias AgentEx.{
+    AgentBridge,
+    AgentConfig,
+    AgentStore,
+    Message,
+    ModelClient,
+    ProviderTools,
+    Tool,
+    ToolPlugin
+  }
+
+  alias AgentEx.EventLoop.{Event, RunRegistry}
   alias AgentEx.MCP.Servers, as: McpServers
   alias AgentEx.Plugins.{AskUser, Todo}
 
@@ -263,12 +273,9 @@ defmodule AgentEx.ToolAssembler do
     case AskUser.init(%{
            "handler" => fn question ->
              caller = self()
-
-             Phoenix.PubSub.broadcast(
-               AgentEx.PubSub,
-               "run:#{run_id}",
-               Event.new(:question_asked, run_id, %{question: question, reply_to: caller})
-             )
+             event = Event.new(:question_asked, run_id, %{question: question, reply_to: caller})
+             RunRegistry.add_event(run_id, event)
+             Phoenix.PubSub.broadcast(AgentEx.PubSub, "run:#{run_id}", event)
 
              receive do
                {:user_answer, answer} -> {:ok, answer}
@@ -310,8 +317,10 @@ defmodule AgentEx.ToolAssembler do
   @todo_cleanup_table :agent_ex_todo_cleanup
 
   defp register_todo_cleanup(run_id, pid) do
-    if :ets.info(@todo_cleanup_table) == :undefined do
+    try do
       :ets.new(@todo_cleanup_table, [:named_table, :public, :set])
+    rescue
+      ArgumentError -> :ok
     end
 
     :ets.insert(@todo_cleanup_table, {run_id, pid})
@@ -401,6 +410,7 @@ defmodule AgentEx.ToolAssembler do
 
   defp broadcast(run_id, type, data) do
     event = Event.new(type, run_id, data)
+    RunRegistry.add_event(run_id, event)
     Phoenix.PubSub.broadcast(AgentEx.PubSub, "run:#{run_id}", event)
   end
 
