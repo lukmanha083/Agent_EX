@@ -16,7 +16,7 @@ defmodule AgentExWeb.McpServersLive do
        |> put_flash(:error, "No project available.")
        |> redirect(to: ~p"/projects")}
     else
-      servers = Servers.list(project.id)
+      servers = Servers.list_all(project.id)
 
       {:ok,
        assign(socket,
@@ -45,17 +45,6 @@ defmodule AgentExWeb.McpServersLive do
       </div>
 
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        <button
-          type="button"
-          phx-click="new_server"
-          class="flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-gray-700 p-6 text-gray-400 hover:border-indigo-500 hover:text-indigo-400 transition-colors min-h-[140px]"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-8 h-8">
-            <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
-          </svg>
-          <span class="text-sm font-medium">Add Server</span>
-        </button>
-
         <div
           :for={server <- @servers}
           class="group relative flex flex-col rounded-lg border border-gray-800 bg-gray-900 p-4 hover:border-gray-700 transition-colors min-h-[140px]"
@@ -73,7 +62,7 @@ defmodule AgentExWeb.McpServersLive do
                 <p class="text-[10px] text-gray-500 truncate max-w-[180px]">{server.url}</p>
               </div>
             </div>
-            <div class="flex gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+            <div :if={!server.system} class="flex gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
               <button
                 type="button"
                 phx-click="edit_server"
@@ -120,6 +109,7 @@ defmodule AgentExWeb.McpServersLive do
               />
             </button>
             <span class="text-[10px] text-gray-500">{if server.enabled, do: "enabled", else: "disabled"}</span>
+            <.badge :if={server.system} variant="outline" class="text-[10px] text-cyan-400 border-cyan-500/30">system</.badge>
             <.badge variant="outline" class="ml-auto text-[10px]">{server.provider}</.badge>
           </div>
         </div>
@@ -166,7 +156,7 @@ defmodule AgentExWeb.McpServersLive do
   end
 
   def handle_event("edit_server", %{"id" => id}, socket) do
-    case Servers.get(socket.assigns.project.id, id) do
+    case Servers.get(id) do
       nil ->
         {:noreply, put_flash(socket, :error, "Server not found")}
 
@@ -202,7 +192,7 @@ defmodule AgentExWeb.McpServersLive do
   def handle_event("delete_server", %{"id" => id}, socket) do
     project_id = socket.assigns.project.id
 
-    case Servers.get(project_id, id) do
+    case Servers.get(id) do
       nil ->
         {:noreply, socket}
 
@@ -211,7 +201,7 @@ defmodule AgentExWeb.McpServersLive do
           {:ok, _} ->
             {:noreply,
              socket
-             |> assign(servers: Servers.list(project_id))
+             |> assign(servers: Servers.list_all(project_id))
              |> put_flash(:info, "Server deleted")}
 
           {:error, _} ->
@@ -223,9 +213,9 @@ defmodule AgentExWeb.McpServersLive do
   def handle_event("toggle_server", %{"id" => id}, socket) do
     project_id = socket.assigns.project.id
 
-    case Servers.toggle(project_id, id) do
+    case Servers.toggle(id) do
       {:ok, _} ->
-        {:noreply, assign(socket, servers: Servers.list(project_id))}
+        {:noreply, assign(socket, servers: Servers.list_all(project_id))}
 
       {:error, _} ->
         {:noreply, put_flash(socket, :error, "Failed to toggle")}
@@ -249,7 +239,7 @@ defmodule AgentExWeb.McpServersLive do
 
     {:noreply,
      socket
-     |> assign(servers: Servers.list(project_id), show_editor: false, editing: nil)
+     |> assign(servers: Servers.list_all(project_id), show_editor: false, editing: nil)
      |> put_flash(:info, msg)}
   end
 

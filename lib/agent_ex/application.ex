@@ -49,9 +49,10 @@ defmodule AgentEx.Application do
 
     case Supervisor.start_link(children, opts) do
       {:ok, pid} ->
-        # Register system agents after Repo is ready (non-blocking)
+        # Register system defaults after Repo is ready (non-blocking)
         Task.Supervisor.start_child(AgentEx.TaskSupervisor, fn ->
           AgentEx.Defaults.register_system_agents()
+          AgentEx.Defaults.register_system_mcp_servers()
         end)
 
         {:ok, pid}
