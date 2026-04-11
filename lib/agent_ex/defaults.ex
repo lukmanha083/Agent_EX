@@ -56,9 +56,7 @@ defmodule AgentEx.Defaults do
   Returns `:ok`.
   """
   def seed_project(user_id, project_id, _opts \\ []) do
-    # System agents are shared globally — no per-project agent seeding needed.
     seed_tools(user_id, project_id)
-    seed_mcp_servers(project_id)
     :ok
   end
 
@@ -95,26 +93,20 @@ defmodule AgentEx.Defaults do
     }
   ]
 
-  defp seed_mcp_servers(project_id) do
+  @doc "Register default MCP servers as system-level (shared globally). Called at app boot."
+  def register_system_mcp_servers do
     Enum.each(@mcp_server_templates, fn template ->
-      attrs =
-        template
-        |> Map.put(:project_id, project_id)
-        |> Map.put(:enabled, true)
-
-      case McpServers.create(attrs) do
+      case McpServers.save_system(template) do
         {:ok, _} ->
-          Logger.info("Defaults: seeded MCP server '#{template.name}' for project #{project_id}")
-
-        {:error, %Ecto.Changeset{}} ->
-          # Unique constraint (already exists) — skip
-          :ok
+          Logger.info("Defaults: registered system MCP server '#{template.name}'")
 
         {:error, reason} ->
           Logger.warning(
-            "Defaults: failed to seed MCP server '#{template.name}': #{inspect(reason)}"
+            "Defaults: failed to register MCP '#{template.name}': #{inspect(reason)}"
           )
       end
     end)
+
+    :ok
   end
 end

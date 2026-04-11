@@ -2,8 +2,8 @@ defmodule AgentEx.MCP.Servers do
   @moduledoc """
   CRUD context for MCP server configurations.
 
-  MCP servers are registered per-project and passed to the LLM API
-  for server-side tool execution (Anthropic `mcp_servers` parameter).
+  System servers (shared globally, registered at app boot) + user servers
+  (per-project) are merged for API config and UI display.
   """
 
   import Ecto.Query
@@ -11,27 +11,64 @@ defmodule AgentEx.MCP.Servers do
   alias AgentEx.MCP.ServerConfig
   alias AgentEx.Repo
 
-  @doc "List all MCP servers for a project."
-  def list(project_id) do
+  require Logger
+
+  # -- Listing --
+
+  @doc """
+  List all MCP servers for a project (user + system, deduplicated by name).
+
+  User servers are listed first, so a user server with the same name as a
+  system server will shadow (override) the system entry.
+  """
+  def list_all(project_id) do
+    user_servers = list_user(project_id)
+    system_servers = list_system()
+    Enum.uniq_by(user_servers ++ system_servers, & &1.name)
+  end
+
+  @doc "List user-created MCP servers for a project."
+  def list_user(project_id) do
     from(s in ServerConfig,
-      where: s.project_id == ^project_id,
+      where: s.project_id == ^project_id and s.system == false,
       order_by: [asc: s.name]
     )
     |> Repo.all()
   end
 
-  @doc "List only enabled MCP servers for a project."
-  def list_enabled(project_id) do
+  @doc "List system (global default) MCP servers."
+  def list_system do
     from(s in ServerConfig,
-      where: s.project_id == ^project_id and s.enabled == true,
+      where: s.system == true,
       order_by: [asc: s.name]
     )
     |> Repo.all()
   end
+
+  @doc "List only enabled MCP servers for API config (user + system)."
+  def list_enabled(project_id) do
+    user_servers =
+      from(s in ServerConfig,
+        where: s.project_id == ^project_id and s.system == false and s.enabled == true,
+        order_by: [asc: s.name]
+      )
+      |> Repo.all()
+
+    system_servers =
+      from(s in ServerConfig,
+        where: s.system == true and s.enabled == true,
+        order_by: [asc: s.name]
+      )
+      |> Repo.all()
+
+    Enum.uniq_by(user_servers ++ system_servers, & &1.name)
+  end
+
+  # -- CRUD --
 
   @doc "Get a single MCP server by ID."
-  def get(project_id, id) do
-    Repo.get_by(ServerConfig, id: id, project_id: project_id)
+  def get(id) do
+    Repo.get(ServerConfig, id)
   end
 
   @doc "Create a new MCP server config."
@@ -39,6 +76,21 @@ defmodule AgentEx.MCP.Servers do
     %ServerConfig{}
     |> ServerConfig.changeset(attrs)
     |> Repo.insert()
+  end
+
+  @doc "Save a system MCP server (upsert by name)."
+  def save_system(attrs) do
+    attrs =
+      attrs
+      |> Map.put(:system, true)
+      |> Map.put(:project_id, nil)
+
+    %ServerConfig{}
+    |> ServerConfig.changeset(attrs)
+    |> Repo.insert(
+      on_conflict: {:replace_all_except, [:id, :name, :inserted_at]},
+      conflict_target: {:unsafe_fragment, "(name) WHERE system = true"}
+    )
   end
 
   @doc "Update an existing MCP server config."
@@ -53,16 +105,24 @@ defmodule AgentEx.MCP.Servers do
     Repo.delete(server)
   end
 
-  @doc "Toggle enabled/disabled for a server."
-  def toggle(project_id, id) do
-    case get(project_id, id) do
+  @doc "Toggle enabled/disabled for a project-owned, non-system server."
+  def toggle(id, project_id) do
+    case get(id) do
       nil ->
+        {:error, :not_found}
+
+      %{system: true} ->
+        {:error, :system_protected}
+
+      %{project_id: pid} when pid != project_id ->
         {:error, :not_found}
 
       server ->
         update_server(server, %{enabled: not server.enabled})
     end
   end
+
+  # -- API Config --
 
   @doc """
   Build the mcp_servers config for the Anthropic API.

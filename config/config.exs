@@ -71,4 +71,7 @@ config :logger, :console,
 # SaladUI component library
 config :salad_ui, color_scheme: :default
 
+# Wallaby browser automation (used by Browser plugin for headless Chrome)
+config :wallaby, driver: Wallaby.Chrome
+
 import_config "#{config_env()}.exs"

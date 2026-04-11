@@ -49,9 +49,17 @@ defmodule AgentEx.Application do
 
     case Supervisor.start_link(children, opts) do
       {:ok, pid} ->
-        # Register system agents after Repo is ready (non-blocking)
+        # Register system defaults after Repo is ready (non-blocking).
+        # In test, the sandbox may reject the connection — catch and log.
         Task.Supervisor.start_child(AgentEx.TaskSupervisor, fn ->
-          AgentEx.Defaults.register_system_agents()
+          try do
+            AgentEx.Defaults.register_system_agents()
+            AgentEx.Defaults.register_system_mcp_servers()
+          rescue
+            e ->
+              require Logger
+              Logger.debug("Defaults: boot registration skipped: #{Exception.message(e)}")
+          end
         end)
 
         {:ok, pid}

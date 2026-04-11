@@ -2,9 +2,8 @@ defmodule AgentEx.MCP.ServerConfig do
   @moduledoc """
   Ecto schema for MCP server configurations.
 
-  Each project can have multiple MCP servers registered. When enabled,
-  these are passed to the Anthropic API as `mcp_servers` so Claude can
-  call them directly during inference (server-side execution).
+  System servers (system: true) are shared globally — registered at app boot.
+  User servers (system: false) are per-project and can be added/edited/deleted.
   """
 
   use Ecto.Schema
@@ -20,17 +19,27 @@ defmodule AgentEx.MCP.ServerConfig do
     field(:enabled, :boolean, default: true)
     field(:auth_token_key, :string)
     field(:tools_filter, {:array, :string}, default: [])
+    field(:system, :boolean, default: false)
 
     timestamps()
   end
 
-  @required_fields [:name, :url, :project_id]
-  @optional_fields [:description, :provider, :enabled, :auth_token_key, :tools_filter]
+  @required_fields [:name, :url]
+  @optional_fields [
+    :project_id,
+    :description,
+    :provider,
+    :enabled,
+    :auth_token_key,
+    :tools_filter,
+    :system
+  ]
 
   def changeset(server, attrs) do
     server
     |> cast(attrs, @required_fields ++ @optional_fields)
     |> validate_required(@required_fields)
+    |> validate_project_id()
     |> validate_format(:url, ~r/^https?:\/\//, message: "must start with http:// or https://")
     # Only Anthropic supports server-side MCP (mcp_servers API parameter)
     |> validate_inclusion(:provider, ["anthropic"])
@@ -38,7 +47,28 @@ defmodule AgentEx.MCP.ServerConfig do
       name: :mcp_servers_project_id_name_index,
       message: "already exists in this project"
     )
+    |> unique_constraint(:name,
+      name: :mcp_servers_system_name_index,
+      message: "system server with this name already exists"
+    )
     |> put_id()
+  end
+
+  # User servers require project_id; system servers must not have one
+  defp validate_project_id(changeset) do
+    system = get_field(changeset, :system)
+    project_id = get_field(changeset, :project_id)
+
+    cond do
+      system == true and not is_nil(project_id) ->
+        add_error(changeset, :project_id, "must be nil for system servers")
+
+      system != true and is_nil(project_id) ->
+        add_error(changeset, :project_id, "is required for user servers")
+
+      true ->
+        changeset
+    end
   end
 
   defp put_id(%{data: %{id: nil}} = changeset) do
