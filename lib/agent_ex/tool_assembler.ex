@@ -209,8 +209,10 @@ defmodule AgentEx.ToolAssembler do
         },
         kind: :write,
         function: fn args ->
-          task = AgentEx.TaskList.create_task(run_id, args)
-          {:ok, "Task ##{task.id} created: #{task.title}"}
+          case AgentEx.TaskManager.create_task(run_id, %{title: args["title"]}) do
+            {:ok, task} -> {:ok, "Task ##{task.id} created: #{task.title}"}
+            {:error, _} -> {:error, "Failed to create task"}
+          end
         end
       ),
       AgentEx.Tool.new(
@@ -240,30 +242,27 @@ defmodule AgentEx.ToolAssembler do
         description: "Show all tasks with their status.",
         parameters: %{"type" => "object", "properties" => %{}},
         kind: :read,
-        function: fn _args -> {:ok, AgentEx.TaskList.format_tasks(run_id)} end
+        function: fn _args -> {:ok, AgentEx.TaskManager.format_tasks(run_id)} end
       )
     ]
   end
 
-  @valid_statuses %{
-    "in_progress" => :in_progress,
-    "completed" => :completed,
-    "failed" => :failed
-  }
+  @valid_statuses ~w(in_progress completed failed)
 
-  defp execute_update_task(run_id, args) do
-    case Map.get(@valid_statuses, args["status"]) do
-      nil ->
-        {:error, "Invalid status: #{args["status"]}"}
+  defp execute_update_task(_run_id, args) do
+    status = args["status"]
 
-      status ->
-        updates = %{status: status}
-        updates = if args["result"], do: Map.put(updates, :result, args["result"]), else: updates
+    if status in @valid_statuses do
+      updates = %{status: status}
+      updates = if args["result"], do: Map.put(updates, :result, args["result"]), else: updates
 
-        case AgentEx.TaskList.update_task(run_id, args["task_id"], updates) do
-          {:ok, t} -> {:ok, "Task ##{t.id} updated: #{t.status} — #{t.title}"}
-          {:error, :not_found} -> {:error, "Task ##{args["task_id"]} not found"}
-        end
+      case AgentEx.TaskManager.update_task(args["task_id"], updates) do
+        {:ok, t} -> {:ok, "Task ##{t.id} updated: #{t.status} — #{t.title}"}
+        {:error, :not_found} -> {:error, "Task ##{args["task_id"]} not found"}
+        {:error, _} -> {:error, "Failed to update task ##{args["task_id"]}"}
+      end
+    else
+      {:error, "Invalid status: #{status}"}
     end
   end
 

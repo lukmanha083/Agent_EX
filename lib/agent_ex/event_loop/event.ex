@@ -20,6 +20,9 @@ defmodule AgentEx.EventLoop.Event do
           # Interaction events
           | :question_asked
           | :todo_updated
+          # Task management events
+          | :task_created
+          | :task_updated
           # Agent tree events (orchestration)
           | :agent_spawn
           | :agent_tool_call

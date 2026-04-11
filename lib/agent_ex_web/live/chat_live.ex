@@ -59,7 +59,8 @@ defmodule AgentExWeb.ChatLive do
          agent_tree_budget: nil,
          pending_question: nil,
          question_reply_to: nil,
-         todo_items: ""
+         todo_items: "",
+         task_list: ""
        )}
     end
   end
@@ -101,7 +102,8 @@ defmodule AgentExWeb.ChatLive do
        agent_tree_budget: nil,
        pending_question: nil,
        question_reply_to: nil,
-       todo_items: ""
+       todo_items: "",
+       task_list: ""
      )}
   end
 
@@ -210,7 +212,8 @@ defmodule AgentExWeb.ChatLive do
        agent_tree_budget: nil,
        pending_question: nil,
        question_reply_to: nil,
-       todo_items: ""
+       todo_items: "",
+       task_list: ""
      )}
   end
 
@@ -320,6 +323,16 @@ defmodule AgentExWeb.ChatLive do
     # items is the full formatted checklist from the Todo server
     items = event.data[:items] || ""
     {:noreply, assign(socket, todo_items: items)}
+  end
+
+  defp handle_run_event(%Event{type: :task_created} = event, socket) do
+    task_list = AgentEx.TaskManager.format_tasks(event.run_id)
+    {:noreply, assign(socket, task_list: task_list)}
+  end
+
+  defp handle_run_event(%Event{type: :task_updated} = event, socket) do
+    task_list = AgentEx.TaskManager.format_tasks(event.run_id)
+    {:noreply, assign(socket, task_list: task_list)}
   end
 
   defp handle_run_event(%Event{type: :think_start}, socket) do
@@ -708,7 +721,7 @@ defmodule AgentExWeb.ChatLive do
   defp cancel_active_run(socket) do
     if socket.assigns.run_id do
       EventLoop.cancel(socket.assigns.run_id)
-      AgentEx.TaskList.clear(socket.assigns.run_id)
+      AgentEx.TaskManager.clear_cache(socket.assigns.run_id)
       Phoenix.PubSub.unsubscribe(AgentEx.PubSub, "run:#{socket.assigns.run_id}")
       assign(socket, run_id: nil, thinking: false)
     else
@@ -718,7 +731,7 @@ defmodule AgentExWeb.ChatLive do
 
   defp cleanup_run(socket) do
     if socket.assigns.run_id do
-      AgentEx.TaskList.clear(socket.assigns.run_id)
+      AgentEx.TaskManager.clear_cache(socket.assigns.run_id)
       Phoenix.PubSub.unsubscribe(AgentEx.PubSub, "run:#{socket.assigns.run_id}")
     end
   end

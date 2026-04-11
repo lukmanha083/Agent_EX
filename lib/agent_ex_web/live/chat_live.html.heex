@@ -82,6 +82,29 @@
       <!-- Pipeline stages (non-orchestration) -->
       <.pipeline_stages :if={@agent_tree == %{}} stages={@stages} />
 
+      <!-- Task list (orchestrator planning) -->
+      <div :if={@task_list != ""} class="px-4 py-2">
+        <div class="rounded-lg border border-blue-500/20 bg-blue-500/5 p-3">
+          <div class="flex items-center gap-2 mb-2">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4 text-blue-400">
+              <path fill-rule="evenodd" d="M3.5 2A1.5 1.5 0 0 0 2 3.5v13A1.5 1.5 0 0 0 3.5 18h13a1.5 1.5 0 0 0 1.5-1.5V7.621a1.5 1.5 0 0 0-.44-1.06l-4.12-4.122A1.5 1.5 0 0 0 12.378 2H3.5Zm2.25 5a.75.75 0 0 0 0 1.5h8.5a.75.75 0 0 0 0-1.5h-8.5Zm0 3a.75.75 0 0 0 0 1.5h8.5a.75.75 0 0 0 0-1.5h-8.5Zm0 3a.75.75 0 0 0 0 1.5h4.5a.75.75 0 0 0 0-1.5h-4.5Z" clip-rule="evenodd" />
+            </svg>
+            <span class="text-xs font-medium text-blue-400">Task Plan</span>
+          </div>
+          <div class="space-y-0.5">
+            <p :for={line <- String.split(@task_list, "\n", trim: true)} class={[
+              "text-xs font-mono",
+              cond do
+                String.contains?(line, "[x]") -> "text-emerald-400"
+                String.contains?(line, "[~]") -> "text-amber-400"
+                String.contains?(line, "[!]") -> "text-red-400"
+                true -> "text-gray-400"
+              end
+            ]}><%= line %></p>
+          </div>
+        </div>
+      </div>
+
       <!-- Todo checklist (live updates from specialist agent) -->
       <div :if={@todo_items != ""} class="px-4 py-2">
         <div class="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3">
