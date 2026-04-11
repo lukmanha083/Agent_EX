@@ -9,14 +9,7 @@ defmodule AgentExWeb.Features.ProviderChatTest do
     user = user_fixture()
     project = project_fixture(user)
     session = feature_log_in_user(session, user)
-
-    # Switch to the test project
-    execute_script(session, """
-      const form = document.getElementById('desktop-project-form') || document.getElementById('mobile-project-form');
-      if (form) { form.action = '/projects/switch/#{project.id}'; form.submit(); }
-    """)
-
-    :timer.sleep(1000)
+    session = feature_switch_project(session, project)
 
     {:ok, session: session, user: user, project: project}
   end

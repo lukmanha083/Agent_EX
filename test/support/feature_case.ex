@@ -39,4 +39,20 @@ defmodule AgentExWeb.FeatureCase do
     |> click(css("#login_form_password button"))
     |> assert_has(css("main"))
   end
+
+  @doc "Switches the browser session to the given project and waits for navigation."
+  def feature_switch_project(session, project) do
+    import Wallaby.Browser
+    import Wallaby.Query
+
+    execute_script(session, """
+      const form = document.getElementById('desktop-project-form') || document.getElementById('mobile-project-form');
+      if (form) { form.action = '/projects/switch/#{project.id}'; form.submit(); }
+    """)
+
+    # Wait for the POST → redirect → page load instead of a fixed sleep.
+    # The switch redirects to the referer or /chat; either way, `main` loads.
+    assert_has(session, css("main"))
+    session
+  end
 end

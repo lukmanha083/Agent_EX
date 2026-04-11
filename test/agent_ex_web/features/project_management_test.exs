@@ -67,12 +67,7 @@ defmodule AgentExWeb.Features.ProjectManagementTest do
         })
 
       # Switch to Project A first
-      execute_script(session, """
-        const form = document.getElementById('desktop-project-form') || document.getElementById('mobile-project-form');
-        if (form) { form.action = '/projects/switch/#{project_a.id}'; form.submit(); }
-      """)
-
-      :timer.sleep(1000)
+      session = feature_switch_project(session, project_a)
 
       # Visit chat on Project A — should NOT see Project B's conversation
       session =
@@ -82,14 +77,8 @@ defmodule AgentExWeb.Features.ProjectManagementTest do
 
       refute page_source(session) =~ "B-only conversation"
 
-      # Switch to Project B via form submission
-      execute_script(session, """
-        const form = document.getElementById('desktop-project-form');
-        form.action = '/projects/switch/#{project_b.id}';
-        form.submit();
-      """)
-
-      :timer.sleep(1000)
+      # Switch to Project B
+      session = feature_switch_project(session, project_b)
 
       session = visit(session, "/chat")
       assert page_source(session) =~ "B-only conversation"
