@@ -272,7 +272,14 @@ defmodule AgentEx.ModelClient do
   defp maybe_add_thinking(body, true, %{provider: :anthropic}) do
     body
     |> Map.put("thinking", %{"type" => "adaptive"})
-    |> Map.put_new("max_tokens", 8192)
+    |> then(fn b ->
+      case Map.get(b, "max_tokens") do
+        # encode_request hardcodes 4096 for Anthropic; upgrade to 8192
+        # for thinking (tokens are shared), but preserve explicit caller values
+        v when v in [nil, 4096] -> Map.put(b, "max_tokens", 8192)
+        _ -> b
+      end
+    end)
   end
 
   # OpenRouter: unified reasoning parameter — works across all models

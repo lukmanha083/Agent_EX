@@ -258,9 +258,9 @@ defmodule AgentEx.Pipe do
         end
 
         # Promote: session summary → Tier 3, skill extraction → Tier 4 (async)
-        # Resolve memory so agent_id is populated (through/4 resolves internally
-        # but doesn't propagate back to delegate_opts)
-        resolved_memory = resolve_memory_opts(delegate_opts[:memory], name)
+        # Use agent.name (same key through/4 uses) so promotion queries
+        # the correct storage — name param can differ from agent.name
+        resolved_memory = resolve_memory_opts(delegate_opts[:memory], agent.name)
         maybe_promote_delegate(resolved_memory, model_client)
 
         {:ok, result}
