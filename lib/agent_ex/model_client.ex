@@ -272,7 +272,7 @@ defmodule AgentEx.ModelClient do
   defp maybe_add_thinking(body, true, %{provider: :anthropic}) do
     body
     |> Map.put("thinking", %{"type" => "adaptive"})
-    |> Map.update("max_tokens", 8192, fn current -> max(current, 8192) end)
+    |> Map.put_new("max_tokens", 8192)
   end
 
   # OpenRouter: unified reasoning parameter — works across all models
@@ -280,7 +280,7 @@ defmodule AgentEx.ModelClient do
   defp maybe_add_thinking(body, true, %{provider: :openrouter}) do
     body
     |> Map.put("reasoning", %{"effort" => "low"})
-    |> Map.update("max_tokens", 8192, fn current -> max(current, 8192) end)
+    |> Map.put_new("max_tokens", 8192)
   end
 
   # OpenAI (direct API): reasoning_effort for o-series models

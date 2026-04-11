@@ -37,8 +37,8 @@ defmodule AgentExWeb.Features.ToolsMcpTest do
       session
       |> resize_window(1280, 900)
       |> visit("/tools")
-      # Click MCP Servers tab (SaladUI renders as button with text)
-      |> click(button("MCP Servers"))
+      # Click MCP (Client) tab (SaladUI renders as button with text)
+      |> click(button("MCP (Client)"))
       # Open the MCP connect dialog
       |> click(button("Connect"))
       |> assert_has(css("[data-testid='mcp-dialog']"))
@@ -62,7 +62,7 @@ defmodule AgentExWeb.Features.ToolsMcpTest do
       session
       |> resize_window(1280, 900)
       |> visit("/tools")
-      |> click(button("MCP Servers"))
+      |> click(button("MCP (Client)"))
       |> click(button("Connect"))
       |> assert_has(css("[data-testid='mcp-dialog']"))
       |> fill_in(css("[data-testid='mcp-dialog'] input[name='name']"), with: "sqlite-server")
