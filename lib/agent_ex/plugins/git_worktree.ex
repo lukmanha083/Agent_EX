@@ -307,5 +307,8 @@ defmodule AgentEx.Plugins.GitWorktree do
   defp format_error({:worktree_add_failed, output}), do: "Failed to create worktree: #{output}"
   defp format_error({:worktree_remove_failed, output}), do: "Failed to remove worktree: #{output}"
   defp format_error({:conflict, files}), do: "Merge conflict in: #{Enum.join(files, ", ")}"
+  defp format_error({:invalid_name, msg}), do: "Invalid worktree name: #{msg}"
+  defp format_error({:invalid_ref, msg}), do: "Invalid branch ref: #{msg}"
+  defp format_error({:path_traversal, msg}), do: "Path traversal rejected: #{msg}"
   defp format_error(other), do: inspect(other)
 end

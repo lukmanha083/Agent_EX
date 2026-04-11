@@ -322,6 +322,91 @@ defmodule AgentEx.Plugins.GitWorktreeTest do
     end
   end
 
+  # -- Security tests --
+
+  describe "path traversal protection" do
+    test "rejects name with path traversal", %{repo: repo} do
+      {:ok, pid} = Coordinator.start_link(repo_root: repo)
+
+      assert {:error, {:invalid_name, _}} = Coordinator.create(pid, "../../.ssh")
+      assert {:error, {:invalid_name, _}} = Coordinator.create(pid, "../escape")
+      assert {:error, {:invalid_name, _}} = Coordinator.create(pid, "a/b")
+      assert {:error, {:invalid_name, _}} = Coordinator.create(pid, "a\\b")
+
+      GenServer.stop(pid)
+    end
+
+    test "rejects dot names", %{repo: repo} do
+      {:ok, pid} = Coordinator.start_link(repo_root: repo)
+
+      assert {:error, {:invalid_name, _}} = Coordinator.create(pid, ".")
+      assert {:error, {:invalid_name, _}} = Coordinator.create(pid, "..")
+      assert {:error, {:invalid_name, _}} = Coordinator.create(pid, ".hidden")
+
+      GenServer.stop(pid)
+    end
+
+    test "rejects empty name", %{repo: repo} do
+      {:ok, pid} = Coordinator.start_link(repo_root: repo)
+
+      assert {:error, {:invalid_name, _}} = Coordinator.create(pid, "")
+
+      GenServer.stop(pid)
+    end
+  end
+
+  describe "git flag injection protection" do
+    test "rejects name starting with dash", %{repo: repo} do
+      {:ok, pid} = Coordinator.start_link(repo_root: repo)
+
+      assert {:error, {:invalid_name, _}} = Coordinator.create(pid, "--exec=cmd")
+      assert {:error, {:invalid_name, _}} = Coordinator.create(pid, "-flag")
+
+      GenServer.stop(pid)
+    end
+
+    test "rejects target_branch starting with dash", %{repo: repo} do
+      {:ok, pid} = Coordinator.start_link(repo_root: repo)
+      {:ok, _} = Coordinator.create(pid, "agent-1")
+
+      assert {:error, {:invalid_ref, _}} = Coordinator.merge(pid, "agent-1", "--upload-pack=cmd")
+      assert {:error, {:invalid_ref, _}} = Coordinator.merge(pid, "agent-1", "-flag")
+
+      GenServer.stop(pid)
+    end
+
+    test "rejects base_branch starting with dash", %{repo: repo} do
+      {:ok, pid} = Coordinator.start_link(repo_root: repo)
+
+      assert {:error, {:invalid_ref, _}} =
+               Coordinator.create(pid, "agent-1", base_branch: "--upload-pack=cmd")
+
+      GenServer.stop(pid)
+    end
+
+    test "rejects refs with dangerous characters", %{repo: repo} do
+      {:ok, pid} = Coordinator.start_link(repo_root: repo)
+
+      assert {:error, {:invalid_ref, _}} =
+               Coordinator.merge(pid, "agent-1", "branch..lock")
+
+      assert {:error, {:invalid_ref, _}} =
+               Coordinator.create(pid, "agent-1", base_branch: "ref~1")
+
+      GenServer.stop(pid)
+    end
+
+    test "accepts valid names and refs", %{repo: repo} do
+      {:ok, pid} = Coordinator.start_link(repo_root: repo)
+
+      assert {:ok, _} = Coordinator.create(pid, "agent-1")
+      assert {:ok, _} = Coordinator.create(pid, "task_abc.123")
+      assert {:ok, _} = Coordinator.create(pid, "My-Agent-2")
+
+      GenServer.stop(pid)
+    end
+  end
+
   # -- Plugin interface tests --
 
   describe "manifest/0" do

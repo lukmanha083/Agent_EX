@@ -36,6 +36,9 @@ defmodule AgentEx.Plugins.GitWorktree.Coordinator do
           }
   end
 
+  # Safe git ref pattern: alphanumeric, dots, hyphens, underscores, slashes — no leading dash
+  @safe_ref_pattern ~r/\A[a-zA-Z0-9][a-zA-Z0-9._\-\/]*\z/
+
   defstruct [:repo_root, :worktrees_dir, :base_branch, worktrees: %{}, auto_cleanup: true]
 
   # -- Public API --
@@ -117,30 +120,37 @@ defmodule AgentEx.Plugins.GitWorktree.Coordinator do
 
   @impl true
   def handle_call({:create, name, opts}, _from, state) do
-    if Map.has_key?(state.worktrees, name) do
-      {:reply, {:error, {:already_exists, name}}, state}
-    else
+    base = Keyword.get(opts, :base_branch, state.base_branch)
+
+    with :ok <- validate_name(name),
+         :ok <- validate_ref(base),
+         :ok <- check_not_exists(state, name) do
       agent_id = Keyword.get(opts, :agent_id, name)
-      base = Keyword.get(opts, :base_branch, state.base_branch)
       branch = "worktree/#{name}"
       path = Path.join(state.worktrees_dir, name)
 
-      case git_worktree_add(state.repo_root, path, branch, base) do
-        :ok ->
-          info = %WorktreeInfo{
-            name: name,
-            path: path,
-            branch: branch,
-            agent_id: agent_id,
-            created_at: DateTime.utc_now()
-          }
+      with :ok <- safe_path(state.worktrees_dir, path) do
+        case git_worktree_add(state.repo_root, path, branch, base) do
+          :ok ->
+            info = %WorktreeInfo{
+              name: name,
+              path: path,
+              branch: branch,
+              agent_id: agent_id,
+              created_at: DateTime.utc_now()
+            }
 
-          Logger.info("GitWorktree: created '#{name}' at #{path} on branch #{branch}")
-          {:reply, {:ok, info}, %{state | worktrees: Map.put(state.worktrees, name, info)}}
+            Logger.info("GitWorktree: created '#{name}' at #{path} on branch #{branch}")
+            {:reply, {:ok, info}, %{state | worktrees: Map.put(state.worktrees, name, info)}}
 
-        {:error, reason} ->
-          {:reply, {:error, reason}, state}
+          {:error, reason} ->
+            {:reply, {:error, reason}, state}
+        end
+      else
+        {:error, reason} -> {:reply, {:error, reason}, state}
       end
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
     end
   end
 
@@ -159,13 +169,17 @@ defmodule AgentEx.Plugins.GitWorktree.Coordinator do
   end
 
   def handle_call({:merge, name, target_branch}, _from, state) do
-    case Map.fetch(state.worktrees, name) do
-      {:ok, info} ->
-        result = git_merge_branch(state, info.branch, target_branch)
-        {:reply, result, state}
+    with :ok <- validate_ref(target_branch) do
+      case Map.fetch(state.worktrees, name) do
+        {:ok, info} ->
+          result = git_merge_branch(state, info.branch, target_branch)
+          {:reply, result, state}
 
-      :error ->
-        {:reply, {:error, {:not_found, name}}, state}
+        :error ->
+          {:reply, {:error, {:not_found, name}}, state}
+      end
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
     end
   end
 
@@ -194,15 +208,20 @@ defmodule AgentEx.Plugins.GitWorktree.Coordinator do
   end
 
   def handle_call({:ensure_branch, branch, base}, _from, state) do
-    case git(state.repo_root, ["rev-parse", "--verify", branch]) do
-      {:ok, _} ->
-        :ok
+    with :ok <- validate_ref(branch),
+         :ok <- validate_ref(base || "HEAD") do
+      case git(state.repo_root, ["rev-parse", "--verify", "--", branch]) do
+        {:ok, _} ->
+          :ok
 
-      {:error, _} ->
-        git(state.repo_root, ["branch", branch, base || "HEAD"])
+        {:error, _} ->
+          git(state.repo_root, ["branch", "--", branch, base || "HEAD"])
+      end
+
+      {:reply, :ok, state}
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
     end
-
-    {:reply, :ok, state}
   end
 
   @impl true
@@ -230,7 +249,7 @@ defmodule AgentEx.Plugins.GitWorktree.Coordinator do
   # -- Git operations --
 
   defp git_worktree_add(repo_root, path, branch, base) do
-    case git(repo_root, ["worktree", "add", "-b", branch, path, base]) do
+    case git(repo_root, ["worktree", "add", "-b", branch, "--", path, base]) do
       {:ok, _output} -> :ok
       {:error, output} -> {:error, {:worktree_add_failed, output}}
     end
@@ -273,9 +292,11 @@ defmodule AgentEx.Plugins.GitWorktree.Coordinator do
   defp git_merge_branch(state, source_branch, target_branch) do
     merge_wt = Path.join(state.worktrees_dir, ".merge-#{System.unique_integer([:positive])}")
 
-    with {:ok, _} <- git(state.repo_root, ["worktree", "add", "--detach", merge_wt, target_branch]) do
-      # Detached HEAD at target_branch — now update it to a proper ref
-      git(merge_wt, ["checkout", target_branch])
+    with {:ok, _} <- git(state.repo_root, ["worktree", "add", "--detach", "--", merge_wt, target_branch]) do
+      # Switch from detached HEAD to the target branch. Using -B to force
+      # the local ref to match. Cannot use `--` here: git checkout treats
+      # args after `--` as file paths, not branch names.
+      git(merge_wt, ["switch", target_branch])
 
       result =
         case git(merge_wt, ["merge", "--no-ff", source_branch, "-m", "merge: #{source_branch} into #{target_branch}"]) do
@@ -342,6 +363,76 @@ defmodule AgentEx.Plugins.GitWorktree.Coordinator do
       unless already_present do
         File.write!(gitignore_path, "\n#{entry}\n", [:append])
       end
+    end
+  end
+
+  # -- Input validation --
+  # All LLM-supplied values are validated before reaching git commands.
+
+  defp validate_name(name) when is_binary(name) do
+    cond do
+      name == "" ->
+        {:error, {:invalid_name, "name cannot be empty"}}
+
+      String.contains?(name, ["/", "\\", "\0"]) ->
+        {:error, {:invalid_name, "name cannot contain path separators or null bytes"}}
+
+      name in [".", ".."] ->
+        {:error, {:invalid_name, "name cannot be '.' or '..'"}}
+
+      String.starts_with?(name, "-") ->
+        {:error, {:invalid_name, "name cannot start with '-'"}}
+
+      String.starts_with?(name, ".") ->
+        {:error, {:invalid_name, "name cannot start with '.'"}}
+
+      not Regex.match?(~r/\A[a-zA-Z0-9][a-zA-Z0-9._-]*\z/, name) ->
+        {:error, {:invalid_name, "name must be alphanumeric with dots, hyphens, underscores"}}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp validate_name(_), do: {:error, {:invalid_name, "name must be a string"}}
+
+  defp validate_ref(ref) when is_binary(ref) do
+    cond do
+      ref == "" ->
+        {:error, {:invalid_ref, "ref cannot be empty"}}
+
+      String.starts_with?(ref, "-") ->
+        {:error, {:invalid_ref, "ref '#{ref}' cannot start with '-'"}}
+
+      String.contains?(ref, ["..", "\0", "~", "^", ":", " ", "[", "@{"]) ->
+        {:error, {:invalid_ref, "ref '#{ref}' contains invalid characters"}}
+
+      not Regex.match?(@safe_ref_pattern, ref) ->
+        {:error, {:invalid_ref, "ref '#{ref}' does not match safe ref pattern"}}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp validate_ref(_), do: {:error, {:invalid_ref, "ref must be a string"}}
+
+  defp safe_path(worktrees_dir, path) do
+    expanded = Path.expand(path)
+    dir_prefix = String.trim_trailing(worktrees_dir, "/") <> "/"
+
+    if String.starts_with?(expanded, dir_prefix) do
+      :ok
+    else
+      {:error, {:path_traversal, "path escapes worktrees directory"}}
+    end
+  end
+
+  defp check_not_exists(state, name) do
+    if Map.has_key?(state.worktrees, name) do
+      {:error, {:already_exists, name}}
+    else
+      :ok
     end
   end
 
