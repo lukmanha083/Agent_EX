@@ -11,6 +11,7 @@ defmodule AgentEx.ToolAssembler do
   """
 
   alias AgentEx.{AgentBridge, AgentConfig, AgentStore, ProviderTools, ToolPlugin}
+  alias AgentEx.MCP.Servers, as: McpServers
 
   require Logger
 
@@ -83,6 +84,11 @@ defmodule AgentEx.ToolAssembler do
       )
 
     read_tools ++ provider_read ++ delegate_tools ++ memory_tool ++ task_tools ++ workflow_tools
+  end
+
+  @doc "Build MCP server configs for server-side execution (Anthropic API)."
+  def mcp_servers(project_id) do
+    McpServers.build_api_config(project_id)
   end
 
   @doc """

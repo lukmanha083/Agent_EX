@@ -51,6 +51,7 @@ defmodule AgentExWeb.ChatLive do
          conversation: nil,
          conversations: conversations,
          show_history: false,
+         mcp_servers: ToolAssembler.mcp_servers(project.id),
          agent_tree: %{},
          agent_tree_stats: %{completed: 0, total: 0},
          agent_logs: %{},
@@ -553,6 +554,7 @@ defmodule AgentExWeb.ChatLive do
           tool_timeout: 180_000,
           max_iterations: 10,
           reasoning_first: true,
+          mcp_servers: if(socket.assigns.mcp_servers != [], do: socket.assigns.mcp_servers),
           metadata: %{user_id: user.id}
         )
 

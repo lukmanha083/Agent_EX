@@ -6491,6 +6491,193 @@ Why BEAM/Elixir is uniquely suited for the bridge pattern:
 
 ---
 
+## Phase 8c — Browser Automation Plugin (Wallaby)
+
+### Core Insight
+
+**Agents need to interact with websites on behalf of users.** Tasks like
+"buy 2 tickets for Saturday's concert" or "fill out the visa application form"
+require navigating real websites, filling forms, clicking buttons, and
+reading dynamic content — not just fetching static HTML.
+
+### Architecture
+
+```text
+User (chat/WhatsApp/API)
+    │
+    ▼
+Orchestrator reasons: "I need to navigate ticketmaster.com,
+  search for the concert, select 2 tickets, fill payment form"
+    │
+    ▼
+Delegate to browser_agent (specialist with browser tools)
+    │
+    ▼
+┌─────────────────────────────────────────────────────────┐
+│  AgentEx Server                                           │
+│                                                            │
+│  BrowserAutomation Plugin (Wallaby + ChromeDriver)        │
+│  ├── browser_navigate(url)      → Wallaby.Browser.visit   │
+│  ├── browser_click(selector)    → Wallaby.Browser.click   │
+│  ├── browser_type(selector,text)→ Wallaby.Browser.fill_in │
+│  ├── browser_screenshot()       → take_screenshot → base64│
+│  ├── browser_extract(selector)  → Wallaby.Browser.text    │
+│  ├── browser_select(selector,v) → Wallaby.Browser.select  │
+│  ├── browser_wait(selector)     → Wallaby.Browser.assert  │
+│  └── browser_execute_js(script) → Wallaby.Browser.execute │
+│                                                            │
+│  Headless Chrome runs on SERVER                           │
+│  Screenshots streamed to user via LiveView/WebSocket      │
+│                                                            │
+│  ┌─────────────────────────────┐                          │
+│  │  Browser Session Manager    │                          │
+│  │  (GenServer per user)       │                          │
+│  │  ├── Session pool           │                          │
+│  │  ├── Cookie/auth management │                          │
+│  │  ├── Screenshot streaming   │                          │
+│  │  └── Timeout + cleanup      │                          │
+│  └─────────────────────────────┘                          │
+└─────────────────────────────────────────────────────────┘
+         │
+         │ LiveView WebSocket (screenshots + status)
+         ▼
+┌─────────────────────────────────────────────────────────┐
+│  User's Browser (LiveView)                                │
+│  ├── Real-time screenshot feed of agent's browser         │
+│  ├── "Agent is navigating ticketmaster.com..."            │
+│  ├── Confirmation prompts for sensitive actions           │
+│  │   (payment, login, personal data)                      │
+│  └── [Pause] [Cancel] [Take Over] controls                │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Use Cases
+
+| Use Case | Flow |
+|---|---|
+| **Ticket purchasing** | User: "Buy 2 tickets for BTS concert Saturday" → agent navigates ticket site, selects seats, fills checkout → user confirms payment |
+| **Form filling** | User: "Apply for my visa renewal" → agent navigates government site, fills form from user profile data → user reviews before submit |
+| **Price comparison** | User: "Find cheapest flight to Tokyo next week" → agent opens multiple airline sites in parallel, extracts prices → returns comparison |
+| **Social media** | User via WhatsApp: "Post this photo to my Instagram" → agent opens Instagram, uploads, adds caption → confirms |
+| **War tickets / flash sales** | Army of agents pre-positioned on ticket page, auto-refresh, instant purchase when available → webhook notification to user |
+
+### Implementation Steps
+
+```text
+8c-A: BrowserAutomation Plugin
+  │
+  ├─ lib/agent_ex/plugins/browser.ex — ToolPlugin behaviour
+  │   ├─ browser_navigate(url) → visit page, return title + screenshot
+  │   ├─ browser_click(selector) → click element, return screenshot
+  │   ├─ browser_type(selector, text) → fill input, return screenshot
+  │   ├─ browser_screenshot() → return current page screenshot (base64)
+  │   ├─ browser_extract(selector) → return text content of element
+  │   ├─ browser_select(selector, value) → select dropdown option
+  │   ├─ browser_wait(selector, timeout) → wait for element to appear
+  │   └─ browser_execute_js(script) → run JavaScript, return result
+  ├─ Tool kinds: navigate/click/type/select/execute_js = :write
+  │   screenshot/extract/wait = :read (observe only)
+  ├─ Uses Wallaby (already in deps) with headless Chrome
+  └─ Each agent gets an isolated browser session (GenServer)
+
+8c-B: Browser Session Manager + Resource Strategy
+  │
+  ├─ lib/agent_ex/browser/session_manager.ex — GenServer per user
+  │   ├─ Start/stop browser sessions on demand
+  │   ├─ Session pool with max concurrent browsers per user
+  │   ├─ Automatic cleanup on timeout (no zombie Chrome processes)
+  │   ├─ Cookie persistence across navigation steps
+  │   └─ Screenshot capture after every action (for UI streaming)
+  ├─ DynamicSupervisor for session processes
+  ├─ Configurable: max_sessions, session_timeout, viewport_size
+  │
+  ├─ Memory strategy (Chrome = 50-150MB per instance):
+  │   ├─ Tiered monitoring:
+  │   │   Phase 1: HTTP pollers (Req.get, <1MB each) — watch for availability
+  │   │   Phase 2: Target found → spawn Chrome → navigate + purchase
+  │   │   100 HTTP watchers + 1 Chrome = ~250MB vs 15GB for 100 Chrome
+  │   ├─ Browser pool with GenStage backpressure:
+  │   │   Fixed pool of N Chrome instances shared across agents
+  │   │   Agents queue for browser access via demand-driven dispatch
+  │   │   Reuses Phase 5f ConsumerSupervisor pattern
+  │   ├─ Remote Chrome (horizontal scaling):
+  │   │   Connect to Selenium Grid / browserless.io over network
+  │   │   BEAM manages agents locally, Chrome runs on separate nodes
+  │   │   Config: browser_backend: :local | {:remote, "ws://chrome:4444"}
+  │   └─ Resource limits per user:
+  │       max_concurrent_browsers: 5 (configurable per project)
+  │       max_http_watchers: 100
+  │       session_timeout: 30 minutes (auto-cleanup)
+
+8c-C: Screenshot Streaming UI
+  │
+  ├─ LiveComponent: BrowserView — shows real-time agent browser
+  │   ├─ Screenshot updates via PubSub (same pattern as agent tree)
+  │   ├─ URL bar showing current page
+  │   ├─ Status: navigating / clicking / typing / waiting
+  │   ├─ [Pause] [Cancel] [Take Over] controls
+  │   └─ Confirmation modal for sensitive actions (payment, login)
+  ├─ Wire into ChatLive: show BrowserView when browser tools active
+  └─ Responsive: works on mobile (user watches agent work)
+
+8c-D: Browser Agent Template
+  │
+  ├─ System agent: "browser_agent" — specialist for web automation
+  │   ├─ Tools: browser_* plugin tools only
+  │   ├─ System prompt: navigate pages step by step, screenshot after
+  │   │   each action, extract data before proceeding
+  │   ├─ Constraints: always screenshot before clicking buttons,
+  │   │   never submit payment without user confirmation
+  │   └─ Model: Sonnet (needs vision for screenshot analysis)
+  ├─ Orchestrator can delegate: "buy tickets on ticketmaster.com"
+  └─ Agent reasons about page content from screenshots + extracted text
+
+8c-E: Safety & Confirmation
+  │
+  ├─ Sensitive action detection: payment forms, login pages, personal data
+  ├─ User confirmation required before: form submit, payment, login
+  ├─ Rate limiting: max actions per minute to avoid bot detection
+  ├─ CAPTCHA handling: pause and ask user to solve manually
+  └─ Session isolation: each user's browser is completely separate
+```
+
+### Messaging Integration (WhatsApp / Telegram)
+
+For the ticket war / flash sale use case, agents can be triggered via
+messaging webhooks:
+
+```text
+WhatsApp → Webhook Controller → EventLoop.run(browser_agent)
+                                      │
+                                      ├── browser_navigate(ticket_site)
+                                      ├── browser_wait(".ticket-available")
+                                      ├── browser_click(".buy-now")
+                                      ├── browser_type("#quantity", "2")
+                                      ├── browser_screenshot() → send to WhatsApp
+                                      └── "Tickets secured! Confirm payment?"
+                                              │
+                                              ← User replies "yes" via WhatsApp
+                                              │
+                                      ├── browser_click("#confirm-payment")
+                                      └── "Done! 2 tickets purchased."
+```
+
+This requires Phase 6 (Triggers) for webhook integration.
+
+### Files
+
+| Action | File | Purpose |
+|---|---|---|
+| Create | `lib/agent_ex/plugins/browser.ex` | BrowserAutomation plugin (8 tools) |
+| Create | `lib/agent_ex/browser/session_manager.ex` | GenServer for browser session lifecycle |
+| Create | `lib/agent_ex_web/components/browser_view.ex` | Screenshot streaming LiveComponent |
+| Modify | `lib/agent_ex/application.ex` | Add BrowserSessionSupervisor |
+| Modify | `lib/agent_ex/defaults/agents.ex` | Add browser_agent system agent |
+| Modify | `lib/agent_ex_web/live/chat_live.ex` | Show BrowserView during browser tasks |
+| Modify | `mix.exs` | Wallaby already in deps (test only → also prod) |
+
+---
+
 ## File Manifest
 
 ### Summary
