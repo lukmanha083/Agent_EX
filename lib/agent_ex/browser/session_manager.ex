@@ -175,8 +175,10 @@ defmodule AgentEx.Browser.SessionManager do
       safe_browser_action(
         state.session,
         fn session ->
-          poll_for_element(session, selector, timeout)
-          {session, {:ok, "element #{selector} found"}}
+          case poll_for_element(session, selector, timeout) do
+            :found -> {session, {:ok, "element #{selector} found"}}
+            :timeout -> {session, {:error, :timeout}}
+          end
         end,
         timeout
       )
@@ -245,10 +247,11 @@ defmodule AgentEx.Browser.SessionManager do
   end
 
   defp safe_browser_action(session, fun, timeout \\ 30_000) do
-    task = Task.async(fn -> fun.(session) end)
+    task = Task.Supervisor.async_nolink(AgentEx.TaskSupervisor, fn -> fun.(session) end)
 
     case Task.yield(task, timeout) || Task.shutdown(task, :brutal_kill) do
       {:ok, result} -> result
+      {:exit, reason} -> {session, {:error, reason}}
       nil -> {session, {:error, :timeout}}
     end
   rescue

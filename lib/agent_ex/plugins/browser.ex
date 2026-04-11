@@ -155,8 +155,11 @@ defmodule AgentEx.Plugins.Browser do
       function: fn _args ->
         with_session(fn manager ->
           case SessionManager.screenshot(manager) do
-            {:ok, base64} ->
-              {:ok, "Screenshot captured (#{byte_size(base64 || "")} bytes base64)"}
+            {:ok, base64} when is_binary(base64) ->
+              {:ok, base64}
+
+            {:ok, nil} ->
+              {:error, "Failed to capture screenshot"}
 
             {:error, reason} ->
               {:error, "Screenshot failed: #{reason}"}
