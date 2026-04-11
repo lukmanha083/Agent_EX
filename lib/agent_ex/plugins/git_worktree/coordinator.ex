@@ -93,12 +93,12 @@ defmodule AgentEx.Plugins.GitWorktree.Coordinator do
   @impl true
   def init(opts) do
     repo_root = Keyword.fetch!(opts, :repo_root) |> Path.expand()
-    default_dir = Path.join(Path.dirname(repo_root), ".worktrees-#{Path.basename(repo_root)}")
-    worktrees_dir = Keyword.get(opts, :worktrees_dir, default_dir)
+    worktrees_dir = Keyword.get(opts, :worktrees_dir, Path.join(repo_root, ".worktrees"))
     base_branch = Keyword.get(opts, :base_branch)
     auto_cleanup = Keyword.get(opts, :auto_cleanup, true)
 
     File.mkdir_p!(worktrees_dir)
+    ensure_gitignored(repo_root, worktrees_dir)
 
     base_branch = base_branch || detect_base_branch(repo_root)
 
@@ -300,6 +300,30 @@ defmodule AgentEx.Plugins.GitWorktree.Coordinator do
           {:ok, branch} -> String.trim(branch)
           {:error, _} -> "main"
         end
+    end
+  end
+
+  # Ensure the worktrees directory is in .gitignore so `git add .` never
+  # picks up the embedded worktree repos inside the sandbox.
+  defp ensure_gitignored(repo_root, worktrees_dir) do
+    relative = Path.relative_to(worktrees_dir, repo_root)
+
+    # Only relevant when worktrees dir is inside the repo
+    if relative != worktrees_dir do
+      gitignore_path = Path.join(repo_root, ".gitignore")
+      entry = "/#{relative}"
+
+      existing =
+        case File.read(gitignore_path) do
+          {:ok, content} -> content
+          {:error, _} -> ""
+        end
+
+      unless String.contains?(existing, entry) do
+        # Append with a newline guard
+        separator = if existing != "" and not String.ends_with?(existing, "\n"), do: "\n", else: ""
+        File.write!(gitignore_path, existing <> separator <> entry <> "\n")
+      end
     end
   end
 
