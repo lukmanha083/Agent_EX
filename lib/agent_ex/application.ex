@@ -50,13 +50,17 @@ defmodule AgentEx.Application do
     case Supervisor.start_link(children, opts) do
       {:ok, pid} ->
         # Register system defaults after Repo is ready (non-blocking).
-        # Skip in test — sandbox mode prevents DB access from spawned tasks.
-        unless Application.get_env(:agent_ex, :skip_system_defaults) do
-          Task.Supervisor.start_child(AgentEx.TaskSupervisor, fn ->
+        # In test, the sandbox may reject the connection — catch and log.
+        Task.Supervisor.start_child(AgentEx.TaskSupervisor, fn ->
+          try do
             AgentEx.Defaults.register_system_agents()
             AgentEx.Defaults.register_system_mcp_servers()
-          end)
-        end
+          rescue
+            e ->
+              require Logger
+              Logger.debug("Defaults: boot registration skipped: #{Exception.message(e)}")
+          end
+        end)
 
         {:ok, pid}
 

@@ -6,8 +6,7 @@ config :bcrypt_elixir, :log_rounds, 1
 config :agent_ex,
   dets_dir: "priv/data/test",
   persistent_memory_sync_interval: :timer.seconds(1),
-  vault_key: "EMSRIAOwy6s+d17xQGXfmo0RIFF0omVEvGah1nOkAQ0=",
-  skip_system_defaults: true
+  vault_key: "EMSRIAOwy6s+d17xQGXfmo0RIFF0omVEvGah1nOkAQ0="
 
 # Test database (use sandbox for concurrent tests)
 config :agent_ex, AgentEx.Repo,
