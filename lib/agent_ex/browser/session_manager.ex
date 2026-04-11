@@ -100,9 +100,8 @@ defmodule AgentEx.Browser.SessionManager do
       safe_browser_action(state.session, fn session ->
         session = Wallaby.Browser.visit(session, url)
         title = Wallaby.Browser.page_title(session)
-        screenshot = take_screenshot_base64(session)
         current_url = Wallaby.Browser.current_url(session)
-        {session, {:ok, %{title: title, url: current_url, screenshot: screenshot}}}
+        {session, {:ok, %{title: title, url: current_url}}}
       end)
 
     handle_action_result(result, state)
@@ -113,8 +112,7 @@ defmodule AgentEx.Browser.SessionManager do
       safe_browser_action(state.session, fn session ->
         element = Wallaby.Browser.find(session, Wallaby.Query.css(selector))
         session = Wallaby.Browser.click(session, element)
-        screenshot = take_screenshot_base64(session)
-        {session, {:ok, %{action: "clicked #{selector}", screenshot: screenshot}}}
+        {session, {:ok, %{action: "clicked #{selector}"}}}
       end)
 
     handle_action_result(result, state)
@@ -124,8 +122,7 @@ defmodule AgentEx.Browser.SessionManager do
     result =
       safe_browser_action(state.session, fn session ->
         session = Wallaby.Browser.fill_in(session, Wallaby.Query.css(selector), with: text)
-        screenshot = take_screenshot_base64(session)
-        {session, {:ok, %{action: "typed into #{selector}", screenshot: screenshot}}}
+        {session, {:ok, %{action: "typed into #{selector}"}}}
       end)
 
     handle_action_result(result, state)
@@ -162,8 +159,7 @@ defmodule AgentEx.Browser.SessionManager do
           Wallaby.Browser.find(session, Wallaby.Query.option(value))
 
         session = Wallaby.Browser.click(session, option)
-        screenshot = take_screenshot_base64(session)
-        {session, {:ok, %{action: "selected #{value} in #{selector}", screenshot: screenshot}}}
+        {session, {:ok, %{action: "selected #{value} in #{selector}"}}}
       end)
 
     handle_action_result(result, state)

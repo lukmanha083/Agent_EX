@@ -227,7 +227,7 @@ defmodule AgentEx.Plugins.Browser do
       },
       function: fn args ->
         selector = args["selector"]
-        timeout = args["timeout"] || 10_000
+        timeout = min(args["timeout"] || 10_000, 60_000)
 
         with_session(fn manager ->
           case SessionManager.wait_for(manager, selector, timeout) do
@@ -270,27 +270,34 @@ defmodule AgentEx.Plugins.Browser do
   # Get or create a browser session for the current process.
   # Sessions are stored in the process dictionary for simplicity.
   defp with_session(fun) do
-    manager =
-      case Process.get(:browser_session) do
-        nil ->
-          {:ok, pid} = SessionManager.start_link()
-          Process.put(:browser_session, pid)
-          pid
-
-        pid ->
-          if Process.alive?(pid), do: pid, else: start_new_session()
-      end
-
-    fun.(manager)
+    case get_or_start_session() do
+      {:ok, manager} -> fun.(manager)
+      {:error, reason} -> {:error, "Browser session error: #{inspect(reason)}"}
+    end
   rescue
     e ->
       Logger.warning("Browser: session error: #{Exception.message(e)}")
       {:error, "Browser session error: #{Exception.message(e)}"}
   end
 
+  defp get_or_start_session do
+    case Process.get(:browser_session) do
+      pid when is_pid(pid) ->
+        if Process.alive?(pid), do: {:ok, pid}, else: start_new_session()
+
+      _ ->
+        start_new_session()
+    end
+  end
+
   defp start_new_session do
-    {:ok, pid} = SessionManager.start_link()
-    Process.put(:browser_session, pid)
-    pid
+    case SessionManager.start_link() do
+      {:ok, pid} ->
+        Process.put(:browser_session, pid)
+        {:ok, pid}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
   end
 end
