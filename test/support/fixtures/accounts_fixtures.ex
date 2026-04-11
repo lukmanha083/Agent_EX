@@ -43,6 +43,8 @@ defmodule AgentEx.AccountsFixtures do
 
   def project_fixture(user, attrs \\ %{}) do
     unique = System.unique_integer([:positive])
+    root = "/tmp/agent_ex_test/project_#{unique}"
+    File.mkdir_p!(root)
 
     {:ok, project} =
       AgentEx.Projects.create_project(
@@ -52,7 +54,7 @@ defmodule AgentEx.AccountsFixtures do
             name: "Test Project #{unique}",
             provider: "anthropic",
             model: "claude-sonnet-4-6",
-            root_path: "/tmp/agent_ex_test/project_#{unique}"
+            root_path: root
           },
           attrs
         )

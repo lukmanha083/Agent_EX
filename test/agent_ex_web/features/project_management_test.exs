@@ -34,11 +34,21 @@ defmodule AgentExWeb.Features.ProjectManagementTest do
 
   describe "project switching and isolation" do
     test "switching projects isolates conversations", %{session: session, user: user} do
+      root_a = "/tmp/agent_ex_test/project_a_#{System.unique_integer([:positive])}"
+      root_b = "/tmp/agent_ex_test/project_b_#{System.unique_integer([:positive])}"
+      File.mkdir_p!(root_a)
+      File.mkdir_p!(root_b)
+
+      on_exit(fn ->
+        File.rm_rf(root_a)
+        File.rm_rf(root_b)
+      end)
+
       {:ok, project_a} =
         Projects.create_project(%{
           user_id: user.id,
           name: "Project A",
-          root_path: "/tmp/agent_ex_test/project_a_#{System.unique_integer([:positive])}",
+          root_path: root_a,
           provider: "anthropic",
           model: "claude-sonnet-4-6"
         })
@@ -47,7 +57,7 @@ defmodule AgentExWeb.Features.ProjectManagementTest do
         Projects.create_project(%{
           user_id: user.id,
           name: "Project B",
-          root_path: "/tmp/agent_ex_test/project_b_#{System.unique_integer([:positive])}",
+          root_path: root_b,
           provider: "anthropic",
           model: "claude-sonnet-4-6"
         })
@@ -62,12 +72,7 @@ defmodule AgentExWeb.Features.ProjectManagementTest do
         })
 
       # Switch to Project A first
-      execute_script(session, """
-        const form = document.getElementById('desktop-project-form') || document.getElementById('mobile-project-form');
-        if (form) { form.action = '/projects/switch/#{project_a.id}'; form.submit(); }
-      """)
-
-      :timer.sleep(1000)
+      session = feature_switch_project(session, project_a)
 
       # Visit chat on Project A — should NOT see Project B's conversation
       session =
@@ -77,14 +82,8 @@ defmodule AgentExWeb.Features.ProjectManagementTest do
 
       refute page_source(session) =~ "B-only conversation"
 
-      # Switch to Project B via form submission
-      execute_script(session, """
-        const form = document.getElementById('desktop-project-form');
-        form.action = '/projects/switch/#{project_b.id}';
-        form.submit();
-      """)
-
-      :timer.sleep(1000)
+      # Switch to Project B
+      session = feature_switch_project(session, project_b)
 
       session = visit(session, "/chat")
       assert page_source(session) =~ "B-only conversation"
@@ -93,11 +92,15 @@ defmodule AgentExWeb.Features.ProjectManagementTest do
 
   describe "project deletion" do
     test "delete project shows success flash", %{session: session, user: user} do
+      root = "/tmp/agent_ex_test/temp_project_#{System.unique_integer([:positive])}"
+      File.mkdir_p!(root)
+      on_exit(fn -> File.rm_rf(root) end)
+
       {:ok, project} =
         Projects.create_project(%{
           user_id: user.id,
           name: "Temp Project",
-          root_path: "/tmp/agent_ex_test/temp_project_#{System.unique_integer([:positive])}",
+          root_path: root,
           provider: "anthropic",
           model: "claude-sonnet-4-6"
         })

@@ -9,24 +9,21 @@ defmodule AgentExWeb.Features.ImportAgentTest do
 
   setup %{session: session} do
     user = user_fixture()
+    root = "/tmp/agent_ex_test/import_test_#{System.unique_integer([:positive])}"
+    File.mkdir_p!(root)
+    on_exit(fn -> File.rm_rf(root) end)
 
     {:ok, project} =
       Projects.create_project(%{
         user_id: user.id,
         name: "Import Test",
-        root_path: "/tmp/import_test",
+        root_path: root,
         provider: "anthropic",
         model: "claude-sonnet-4-6"
       })
 
     session = feature_log_in_user(session, user)
-
-    execute_script(session, """
-      const form = document.getElementById('desktop-project-form') || document.getElementById('mobile-project-form');
-      if (form) { form.action = '/projects/switch/#{project.id}'; form.submit(); }
-    """)
-
-    :timer.sleep(1000)
+    session = feature_switch_project(session, project)
 
     {:ok, session: session, user: user, project: project}
   end

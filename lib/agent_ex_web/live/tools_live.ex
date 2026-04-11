@@ -2,6 +2,7 @@ defmodule AgentExWeb.ToolsLive do
   use AgentExWeb, :live_view
 
   alias AgentEx.{HttpTool, HttpToolStore}
+  alias AgentEx.MCP.Servers, as: McpServers
 
   import AgentExWeb.HttpToolComponents
   import AgentExWeb.ToolComponents
@@ -20,6 +21,11 @@ defmodule AgentExWeb.ToolsLive do
         do: HttpToolStore.list(user.id, project.id),
         else: []
 
+    builtin_mcp =
+      if project,
+        do: McpServers.list_all(project.id),
+        else: []
+
     {:ok,
      assign(socket,
        builtin_plugins: builtin,
@@ -36,7 +42,11 @@ defmodule AgentExWeb.ToolsLive do
        http_test_loading: false,
        http_test_ref: nil,
        http_test_pid: nil,
-       active_tab: "builtin"
+       active_tab: "builtin",
+       builtin_mcp_servers: builtin_mcp,
+       show_builtin_mcp_editor: false,
+       builtin_mcp_editing: nil,
+       builtin_mcp_form: empty_builtin_mcp_form()
      )}
   end
 
@@ -226,6 +236,119 @@ defmodule AgentExWeb.ToolsLive do
     end
   end
 
+  # --- Built-in MCP server events ---
+
+  def handle_event("new_builtin_mcp", _params, socket) do
+    {:noreply,
+     assign(socket,
+       show_builtin_mcp_editor: true,
+       builtin_mcp_editing: nil,
+       builtin_mcp_form: empty_builtin_mcp_form()
+     )}
+  end
+
+  def handle_event("edit_builtin_mcp", %{"id" => id}, socket) do
+    project_id = socket.assigns.current_project.id
+
+    case McpServers.get(id) do
+      nil ->
+        {:noreply, put_flash(socket, :error, "Server not found")}
+
+      %{system: true} ->
+        {:noreply, put_flash(socket, :error, "System servers cannot be modified")}
+
+      %{project_id: pid} when pid != project_id ->
+        {:noreply, put_flash(socket, :error, "Server not found")}
+
+      server ->
+        form = %{
+          "name" => server.name,
+          "url" => server.url,
+          "description" => server.description || "",
+          "provider" => server.provider,
+          "auth_token_key" => server.auth_token_key || ""
+        }
+
+        {:noreply,
+         assign(socket,
+           show_builtin_mcp_editor: true,
+           builtin_mcp_editing: server,
+           builtin_mcp_form: form
+         )}
+    end
+  end
+
+  def handle_event("close_builtin_mcp_editor", _params, socket) do
+    {:noreply, assign(socket, show_builtin_mcp_editor: false, builtin_mcp_editing: nil)}
+  end
+
+  def handle_event("save_builtin_mcp", params, socket) do
+    project_id = socket.assigns.current_project.id
+    attrs = build_builtin_mcp_attrs(params, project_id)
+
+    case socket.assigns.builtin_mcp_editing do
+      nil ->
+        do_save_builtin_mcp(McpServers.create(attrs), params, socket)
+
+      %{id: id} ->
+        case McpServers.get(id) do
+          nil ->
+            {:noreply, put_flash(socket, :error, "Server not found")}
+
+          %{system: true} ->
+            {:noreply, put_flash(socket, :error, "System servers cannot be modified")}
+
+          %{project_id: pid} when pid != project_id ->
+            {:noreply, put_flash(socket, :error, "Server not found")}
+
+          current ->
+            do_save_builtin_mcp(McpServers.update_server(current, attrs), params, socket)
+        end
+    end
+  end
+
+  def handle_event("delete_builtin_mcp", %{"id" => id}, socket) do
+    project_id = socket.assigns.current_project.id
+
+    case McpServers.get(id) do
+      nil ->
+        {:noreply, socket}
+
+      %{system: true} ->
+        {:noreply, put_flash(socket, :error, "System servers cannot be deleted")}
+
+      %{project_id: pid} when pid != project_id ->
+        {:noreply, socket}
+
+      server ->
+        case McpServers.delete(server) do
+          {:ok, _} ->
+            {:noreply,
+             socket
+             |> assign(builtin_mcp_servers: McpServers.list_all(project_id))
+             |> put_flash(:info, "Server deleted")}
+
+          {:error, _} ->
+            {:noreply, put_flash(socket, :error, "Failed to delete")}
+        end
+    end
+  end
+
+  def handle_event("toggle_builtin_mcp", %{"id" => id}, socket) do
+    project_id = socket.assigns.current_project.id
+
+    case McpServers.toggle(id, project_id) do
+      {:ok, _} ->
+        {:noreply, assign(socket, builtin_mcp_servers: McpServers.list_all(project_id))}
+
+      {:error, :system_protected} ->
+        {:noreply, put_flash(socket, :error, "System servers cannot be modified")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to toggle")}
+    end
+  end
+
   @impl true
   def handle_info({ref, result}, socket) when is_reference(ref) do
     if ref == socket.assigns[:http_test_ref] do
@@ -311,6 +434,67 @@ defmodule AgentExWeb.ToolsLive do
   end
 
   defp fill_test_headers(headers), do: headers
+
+  defp do_save_builtin_mcp({:ok, _}, _params, socket) do
+    project_id = socket.assigns.current_project.id
+    msg = if socket.assigns.builtin_mcp_editing, do: "Server updated", else: "Server added"
+
+    {:noreply,
+     socket
+     |> assign(
+       builtin_mcp_servers: McpServers.list_all(project_id),
+       show_builtin_mcp_editor: false,
+       builtin_mcp_editing: nil
+     )
+     |> put_flash(:info, msg)}
+  end
+
+  defp do_save_builtin_mcp({:error, %Ecto.Changeset{} = changeset}, params, socket) do
+    errors = Enum.map_join(changeset.errors, ", ", fn {field, {msg, _}} -> "#{field} #{msg}" end)
+
+    form = %{
+      "name" => params["name"] || "",
+      "url" => params["url"] || "",
+      "description" => params["description"] || "",
+      "provider" => params["provider"] || "anthropic",
+      "auth_token_key" => params["auth_token_key"] || ""
+    }
+
+    {:noreply,
+     socket
+     |> assign(builtin_mcp_form: form)
+     |> put_flash(:error, "Failed: #{errors}")}
+  end
+
+  defp do_save_builtin_mcp({:error, reason}, _params, socket) do
+    {:noreply, put_flash(socket, :error, "Failed: #{inspect(reason)}")}
+  end
+
+  defp build_builtin_mcp_attrs(params, project_id) do
+    %{
+      name: params["name"],
+      url: params["url"],
+      description: blank_to_nil(params["description"]),
+      provider: params["provider"] || "anthropic",
+      auth_token_key: blank_to_nil(params["auth_token_key"]),
+      project_id: project_id
+    }
+  end
+
+  defp empty_builtin_mcp_form do
+    %{
+      "name" => "",
+      "url" => "",
+      "description" => "",
+      "provider" => "anthropic",
+      "auth_token_key" => ""
+    }
+  end
+
+  defp blank_to_nil(nil), do: nil
+
+  defp blank_to_nil(s) when is_binary(s),
+    do: if(String.trim(s) == "", do: nil, else: String.trim(s))
 
   # --- Private helpers ---
 
