@@ -51,7 +51,8 @@ defmodule AgentEx.ToolAssembler do
     disabled = Keyword.get(opts, :disabled_builtins, [])
 
     # Full tool pool — specialist agents get assigned from this via tool_ids
-    available = available_tools(user_id, project_id, root_path)
+    run_id = Keyword.get(opts, :run_id)
+    available = available_tools(user_id, project_id, root_path, run_id)
 
     # Orchestrator gets a minimal set of read-only tools for observation.
     # Most work should be delegated to specialist agents.
@@ -76,7 +77,6 @@ defmodule AgentEx.ToolAssembler do
     memory_tool = orchestrator_memory_tool(root_path)
 
     # Task planning tools — orchestrator tracks work via a task list
-    run_id = Keyword.get(opts, :run_id)
     task_tools = if run_id, do: orchestrator_task_tools(run_id), else: []
 
     # Workflow tools — saved workflows exposed as callable tools
@@ -86,14 +86,13 @@ defmodule AgentEx.ToolAssembler do
         agent_runner: opts[:agent_runner]
       )
 
-    # Interaction tools — ask user questions + session todo checklist
+    # AskUser tool — allows orchestrator to ask the user a question via chat
     ask_user_tools = if run_id, do: ask_user_tool(run_id), else: []
-    todo_tools = if run_id, do: todo_tools(run_id), else: []
 
     read_tools ++
       provider_read ++
       delegate_tools ++
-      memory_tool ++ task_tools ++ workflow_tools ++ ask_user_tools ++ todo_tools
+      memory_tool ++ task_tools ++ workflow_tools ++ ask_user_tools
   end
 
   @doc "Build MCP server configs for server-side execution (Anthropic API)."
@@ -106,10 +105,11 @@ defmodule AgentEx.ToolAssembler do
   These are the tools that specialist agents can be given via `tool_ids`.
   The orchestrator never sees these directly.
   """
-  def available_tools(user_id, project_id, root_path \\ nil) do
+  def available_tools(user_id, project_id, root_path \\ nil, run_id \\ nil) do
     plugin_tools = init_builtin_plugins(root_path)
     http_tools = AgentBridge.http_api_tools(user_id, project_id)
-    plugin_tools ++ http_tools
+    todo = if run_id, do: todo_tools(run_id), else: []
+    plugin_tools ++ http_tools ++ todo
   end
 
   # The orchestrator's only write tool — save/read planning notes to .md files
