@@ -9,25 +9,21 @@ defmodule AgentExWeb.Features.ToolsMcpTest do
 
   setup %{session: session} do
     user = user_fixture()
+    root = "/tmp/agent_ex_test/tools_mcp_#{System.unique_integer([:positive])}"
+    File.mkdir_p!(root)
+    on_exit(fn -> File.rm_rf(root) end)
 
     {:ok, project} =
       Projects.create_project(%{
         user_id: user.id,
         name: "Tools Project",
-        root_path: "/tmp/agent_ex_test/tools_mcp_#{System.unique_integer([:positive])}",
+        root_path: root,
         provider: "anthropic",
         model: "claude-sonnet-4-6"
       })
 
     session = feature_log_in_user(session, user)
-
-    # Switch to the test project
-    execute_script(session, """
-      const form = document.getElementById('desktop-project-form') || document.getElementById('mobile-project-form');
-      if (form) { form.action = '/projects/switch/#{project.id}'; form.submit(); }
-    """)
-
-    :timer.sleep(1000)
+    session = feature_switch_project(session, project)
 
     {:ok, session: session, user: user, project: project}
   end
@@ -37,8 +33,8 @@ defmodule AgentExWeb.Features.ToolsMcpTest do
       session
       |> resize_window(1280, 900)
       |> visit("/tools")
-      # Click MCP Servers tab (SaladUI renders as button with text)
-      |> click(button("MCP Servers"))
+      # Click MCP (Client) tab (SaladUI renders as button with text)
+      |> click(button("MCP (Client)"))
       # Open the MCP connect dialog
       |> click(button("Connect"))
       |> assert_has(css("[data-testid='mcp-dialog']"))
@@ -62,7 +58,7 @@ defmodule AgentExWeb.Features.ToolsMcpTest do
       session
       |> resize_window(1280, 900)
       |> visit("/tools")
-      |> click(button("MCP Servers"))
+      |> click(button("MCP (Client)"))
       |> click(button("Connect"))
       |> assert_has(css("[data-testid='mcp-dialog']"))
       |> fill_in(css("[data-testid='mcp-dialog'] input[name='name']"), with: "sqlite-server")

@@ -156,9 +156,9 @@ defmodule AgentEx.Defaults.Agents do
       ## Example: test todo.py
       → editor_read(path: "todo.py")
       → filesystem_write_file(path: "tests/test_todo.py", content: "...complete test file...")
-      → shell_run_command(command: "uv add --dev pytest")
-      → shell_run_command(command: "uv run pytest tests/test_todo.py -v")
-      → Report: "8 passed, 0 failed"
+      → shell_run_command(command: "uv add --dev pytest mypy ruff")
+      → shell_run_command(command: "uv run pytest tests/test_todo.py -v && uv run mypy --strict todo.py && uv run ruff check .")
+      → Report: "8 passed, mypy clean, ruff clean"
 
       NEVER call editor_edit/editor_append in a loop. Max 5 tool calls total.
       """,
