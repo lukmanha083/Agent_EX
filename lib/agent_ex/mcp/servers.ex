@@ -105,10 +105,16 @@ defmodule AgentEx.MCP.Servers do
     Repo.delete(server)
   end
 
-  @doc "Toggle enabled/disabled for a server."
-  def toggle(id) do
+  @doc "Toggle enabled/disabled for a project-owned, non-system server."
+  def toggle(id, project_id) do
     case get(id) do
       nil ->
+        {:error, :not_found}
+
+      %{system: true} ->
+        {:error, :system_protected}
+
+      %{project_id: pid} when pid != project_id ->
         {:error, :not_found}
 
       server ->

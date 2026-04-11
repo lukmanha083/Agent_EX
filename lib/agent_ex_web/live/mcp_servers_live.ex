@@ -153,6 +153,10 @@ defmodule AgentExWeb.McpServersLive do
   end
 
   @impl true
+  def handle_event("new_server", _params, socket) do
+    {:noreply, assign(socket, show_editor: true, editing: nil, form: empty_form())}
+  end
+
   def handle_event("edit_server", %{"id" => id}, socket) do
     case Servers.get(id) do
       nil ->
@@ -183,20 +187,26 @@ defmodule AgentExWeb.McpServersLive do
 
   def handle_event("save_server", params, socket) do
     project_id = socket.assigns.project.id
+    attrs = build_server_attrs(params, project_id)
 
-    editing = socket.assigns.editing
+    case socket.assigns.editing do
+      nil ->
+        handle_save_result(Servers.create(attrs), params, socket)
 
-    if editing && editing.system do
-      {:noreply, put_flash(socket, :error, "System servers cannot be modified")}
-    else
-      attrs = build_server_attrs(params, project_id)
+      %{id: id} ->
+        case Servers.get(id) do
+          nil ->
+            {:noreply, put_flash(socket, :error, "Server not found")}
 
-      result =
-        if editing,
-          do: Servers.update_server(editing, attrs),
-          else: Servers.create(attrs)
+          %{system: true} ->
+            {:noreply, put_flash(socket, :error, "System servers cannot be modified")}
 
-      handle_save_result(result, params, socket)
+          %{project_id: pid} when pid != project_id ->
+            {:noreply, put_flash(socket, :error, "Server not found")}
+
+          current ->
+            handle_save_result(Servers.update_server(current, attrs), params, socket)
+        end
     end
   end
 
@@ -230,24 +240,15 @@ defmodule AgentExWeb.McpServersLive do
   def handle_event("toggle_server", %{"id" => id}, socket) do
     project_id = socket.assigns.project.id
 
-    case Servers.get(id) do
-      nil ->
-        {:noreply, socket}
+    case Servers.toggle(id, project_id) do
+      {:ok, _} ->
+        {:noreply, assign(socket, servers: Servers.list_all(project_id))}
 
-      %{system: true} ->
+      {:error, :system_protected} ->
         {:noreply, put_flash(socket, :error, "System servers cannot be modified")}
 
-      %{project_id: pid} when pid != project_id ->
-        {:noreply, socket}
-
-      _server ->
-        case Servers.toggle(id) do
-          {:ok, _} ->
-            {:noreply, assign(socket, servers: Servers.list_all(project_id))}
-
-          {:error, _} ->
-            {:noreply, put_flash(socket, :error, "Failed to toggle")}
-        end
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to toggle")}
     end
   end
 
