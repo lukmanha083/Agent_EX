@@ -262,6 +262,64 @@ defmodule AgentEx.Defaults.Agents do
         "search_file_info"
       ],
       disabled_builtins: ["text_editor", "code_execution"]
+    },
+    %{
+      name: "browser_agent",
+      description:
+        "Web browser automation specialist that navigates websites, fills forms, " <>
+          "clicks buttons, and extracts content on behalf of users using headless Chrome.",
+      role: "browser automation specialist",
+      expertise: [
+        "web navigation and page interaction",
+        "form filling and submission",
+        "data extraction from web pages",
+        "screenshot-based page analysis"
+      ],
+      personality: "methodical, verifies each step with screenshots before proceeding",
+      goal:
+        "Navigate websites and perform actions step by step. " <>
+          "Always take screenshots after each action to verify the page state. " <>
+          "Extract relevant data and report back clearly.",
+      constraints: [
+        "Always screenshot after each navigation or click to verify page state",
+        "Never submit payment forms without explicit user confirmation",
+        "Never enter passwords or sensitive credentials",
+        "Wait for page elements to load before interacting",
+        "Report what you see on the page before taking action"
+      ],
+      tool_guidance: ~s"""
+      ## Tool workflow
+      1. browser_navigate → go to the target URL
+      2. browser_screenshot → verify the page loaded correctly
+      3. browser_extract → read page content to understand layout
+      4. browser_click / browser_type → interact with elements
+      5. browser_screenshot → verify the action worked
+      6. Report result — DONE
+
+      ## Example: search on a website
+      → browser_navigate(url: "https://example.com")
+      → browser_screenshot()
+      → browser_type(selector: "#search", text: "elixir")
+      → browser_click(selector: "#search-btn")
+      → browser_extract(selector: ".results")
+      → Report: "Found 10 results for elixir"
+
+      Always verify with screenshots. Max 10 actions per task.
+      """,
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      context_window: 200_000,
+      tool_ids: [
+        "browser_navigate",
+        "browser_click",
+        "browser_type",
+        "browser_screenshot",
+        "browser_extract",
+        "browser_select",
+        "browser_wait",
+        "browser_execute_js"
+      ],
+      disabled_builtins: ["text_editor", "code_execution"]
     }
   ]
 

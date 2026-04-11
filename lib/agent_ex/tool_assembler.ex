@@ -22,7 +22,8 @@ defmodule AgentEx.ToolAssembler do
     AgentEx.Plugins.TextEditor,
     AgentEx.Plugins.WebFetch,
     AgentEx.Plugins.SystemInfo,
-    AgentEx.Plugins.Diff
+    AgentEx.Plugins.Diff,
+    AgentEx.Plugins.Browser
   ]
 
   @doc """
