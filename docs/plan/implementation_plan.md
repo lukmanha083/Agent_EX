@@ -6609,6 +6609,53 @@ Delegate to browser_agent (specialist with browser tools)
   │       max_http_watchers: 100
   │       session_timeout: 30 minutes (auto-cleanup)
 
+8c-B2: Browser Session Supervision (DynamicSupervisor)
+  │
+  ├─ Problem: SessionManager started via start_link without supervision.
+  │   When the agent task (ToolCallerLoop) exits, the SessionManager
+  │   GenServer is orphaned — Chrome process leaks (50-150MB each).
+  │   Process dictionary storage means sessions can't be tracked globally.
+  │
+  ├─ Solution: supervised sessions with automatic cleanup
+  │
+  │   Application Supervisor
+  │   └── AgentEx.Browser.SessionSupervisor (DynamicSupervisor)
+  │         ├── SessionManager #1 {user_1, task_abc} → monitored
+  │         ├── SessionManager #2 {user_1, task_def} → monitored
+  │         └── SessionManager #3 {user_2, task_ghi} → monitored
+  │
+  ├─ Implementation:
+  │   ├─ Add AgentEx.Browser.SessionSupervisor (DynamicSupervisor) to
+  │   │   application.ex supervision tree
+  │   ├─ SessionManager: register in Registry keyed by {user_id, task_id}
+  │   │   so sessions are discoverable and enforceable per-user
+  │   ├─ SessionManager.init: Process.monitor(caller_pid) — when the
+  │   │   ToolCallerLoop process exits, SessionManager receives :DOWN
+  │   │   and self-terminates (cleaning up Chrome)
+  │   ├─ Browser plugin with_session: start under supervisor instead of
+  │   │   bare start_link. Lookup existing session by key first.
+  │   ├─ Idle timeout: SessionManager self-terminates after 5 min idle
+  │   │   (same pattern as WorkingMemory.Server)
+  │   └─ Per-user limits: SessionSupervisor rejects start_child when
+  │       user has >= max_concurrent_browsers active sessions
+  │
+  ├─ Same pattern as:
+  │   ├─ AgentEx.Specialist.DelegationSupervisor (Phase 5f)
+  │   ├─ AgentEx.Memory.WorkingMemory.Supervisor (Tier 1)
+  │   └─ AgentEx.PluginSupervisor (stateful plugins)
+  │
+  ├─ Files:
+  │   ├─ Create: lib/agent_ex/browser/session_supervisor.ex
+  │   ├─ Modify: lib/agent_ex/application.ex (add to supervision tree)
+  │   ├─ Modify: lib/agent_ex/browser/session_manager.ex (register, monitor, idle timeout)
+  │   └─ Modify: lib/agent_ex/plugins/browser.ex (start under supervisor, lookup by key)
+  │
+  └─ Lifecycle:
+      Agent task starts → browser tool called → session started under supervisor
+      → registered as {user_id, task_id} → agent task finishes
+      → ToolCallerLoop exits → SessionManager receives :DOWN → Wallaby.end_session
+      → Chrome process killed → SessionSupervisor removes child → clean
+
 8c-C: Screenshot Streaming UI
   │
   ├─ LiveComponent: BrowserView — shows real-time agent browser
