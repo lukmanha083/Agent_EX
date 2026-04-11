@@ -82,17 +82,24 @@
       <!-- Pipeline stages (non-orchestration) -->
       <.pipeline_stages :if={@agent_tree == %{}} stages={@stages} />
 
-      <!-- Todo checklist (live updates from agent) -->
-      <div :if={@todo_items != []} class="px-4 py-2">
+      <!-- Todo checklist (live updates from specialist agent) -->
+      <div :if={@todo_items != ""} class="px-4 py-2">
         <div class="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3">
           <div class="flex items-center gap-2 mb-2">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4 text-emerald-400">
               <path fill-rule="evenodd" d="M6 4.75A.75.75 0 0 1 6.75 4h10.5a.75.75 0 0 1 0 1.5H6.75A.75.75 0 0 1 6 4.75ZM6 10a.75.75 0 0 1 .75-.75h10.5a.75.75 0 0 1 0 1.5H6.75A.75.75 0 0 1 6 10Zm0 5.25a.75.75 0 0 1 .75-.75h10.5a.75.75 0 0 1 0 1.5H6.75a.75.75 0 0 1-.75-.75ZM1.99 4.75a1 1 0 0 1 1-1h.01a1 1 0 0 1 0 2h-.01a1 1 0 0 1-1-1Zm1 5.25a1 1 0 0 1 1-1h.01a1 1 0 0 1 0 2h-.01a1 1 0 0 1-1-1Zm0 5.25a1 1 0 0 1 1-1h.01a1 1 0 0 1 0 2h-.01a1 1 0 0 1-1-1Z" clip-rule="evenodd" />
             </svg>
-            <span class="text-xs font-medium text-emerald-400">Agent Checklist</span>
+            <span class="text-xs font-medium text-emerald-400">Specialist Checklist</span>
           </div>
-          <div class="space-y-1">
-            <p :for={item <- @todo_items} class="text-xs text-emerald-200/80 font-mono"><%= item %></p>
+          <div class="space-y-0.5">
+            <p :for={line <- String.split(@todo_items, "\n", trim: true)} class={[
+              "text-xs font-mono",
+              cond do
+                String.contains?(line, "[x]") -> "text-emerald-400"
+                String.contains?(line, "[~]") -> "text-amber-400"
+                true -> "text-gray-400"
+              end
+            ]}><%= line %></p>
           </div>
         </div>
       </div>

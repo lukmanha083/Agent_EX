@@ -287,9 +287,12 @@ defmodule AgentEx.ToolAssembler do
       {:stateful, tools, child_spec} ->
         case DynamicSupervisor.start_child(AgentEx.PluginSupervisor, child_spec) do
           {:ok, _pid} ->
+            # Find the list tool to query full state after each write
+            list_tool = Enum.find(tools, &(&1.name == "list"))
+
             tools
             |> ToolPlugin.prefix_tools("todo")
-            |> Enum.map(&broadcast_todo_writes(&1, run_id))
+            |> Enum.map(&broadcast_todo_writes(&1, run_id, list_tool))
 
           {:error, reason} ->
             Logger.warning("ToolAssembler: failed to start Todo server: #{inspect(reason)}")
@@ -301,9 +304,9 @@ defmodule AgentEx.ToolAssembler do
     end
   end
 
-  defp broadcast_todo_writes(%Tool{kind: :read} = tool, _run_id), do: tool
+  defp broadcast_todo_writes(%Tool{kind: :read} = tool, _run_id, _list_tool), do: tool
 
-  defp broadcast_todo_writes(%Tool{kind: :write} = tool, run_id) do
+  defp broadcast_todo_writes(%Tool{kind: :write} = tool, run_id, list_tool) do
     original_fn = tool.function
 
     %{
@@ -313,7 +316,14 @@ defmodule AgentEx.ToolAssembler do
 
           case result do
             {:ok, msg} ->
-              broadcast(run_id, :todo_updated, %{message: msg})
+              # Query full list state for the UI
+              items =
+                case Tool.execute(list_tool, %{}) do
+                  {:ok, list} -> list
+                  _ -> ""
+                end
+
+              broadcast(run_id, :todo_updated, %{action: msg, items: items})
               result
 
             _ ->

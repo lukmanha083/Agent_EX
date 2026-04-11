@@ -59,7 +59,7 @@ defmodule AgentExWeb.ChatLive do
          agent_tree_budget: nil,
          pending_question: nil,
          question_reply_to: nil,
-         todo_items: []
+         todo_items: ""
        )}
     end
   end
@@ -101,7 +101,7 @@ defmodule AgentExWeb.ChatLive do
        agent_tree_budget: nil,
        pending_question: nil,
        question_reply_to: nil,
-       todo_items: []
+       todo_items: ""
      )}
   end
 
@@ -201,7 +201,7 @@ defmodule AgentExWeb.ChatLive do
        agent_tree_budget: nil,
        pending_question: nil,
        question_reply_to: nil,
-       todo_items: []
+       todo_items: ""
      )}
   end
 
@@ -308,7 +308,8 @@ defmodule AgentExWeb.ChatLive do
   end
 
   defp handle_run_event(%Event{type: :todo_updated} = event, socket) do
-    items = socket.assigns.todo_items ++ [event.data.message]
+    # items is the full formatted checklist from the Todo server
+    items = event.data[:items] || ""
     {:noreply, assign(socket, todo_items: items)}
   end
 
