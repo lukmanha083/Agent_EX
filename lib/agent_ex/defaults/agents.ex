@@ -183,7 +183,12 @@ defmodule AgentEx.Defaults.Agents do
         "browser_screenshot",
         "browser_extract",
         "browser_select",
-        "browser_wait"
+        "browser_wait",
+        "todo_add",
+        "todo_list",
+        "todo_update",
+        "todo_delete",
+        "ask_advisor"
       ],
       disabled_builtins: ["text_editor", "code_execution"]
     }

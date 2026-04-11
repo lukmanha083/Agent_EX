@@ -74,6 +74,13 @@ defmodule AgentEx.AgentStore do
     |> Enum.map(&Schema.to_config/1)
   end
 
+  @doc "Delete system agents whose names are not in the given list."
+  @spec delete_stale_system([String.t()]) :: {non_neg_integer(), nil}
+  def delete_stale_system(current_names) when is_list(current_names) do
+    from(a in Schema, where: a.system == true and a.name not in ^current_names)
+    |> Repo.delete_all()
+  end
+
   @doc """
   Save a system agent (upsert by name). Used at app boot to register defaults.
   System agents have nil project_id/user_id and system=true.
