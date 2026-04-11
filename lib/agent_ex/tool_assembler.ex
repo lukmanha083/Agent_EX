@@ -10,8 +10,20 @@ defmodule AgentEx.ToolAssembler do
   4. Agent delegate tools (from AgentBridge)
   """
 
-  alias AgentEx.{AgentBridge, AgentConfig, AgentStore, ProviderTools, ToolPlugin}
+  alias AgentEx.{
+    AgentBridge,
+    AgentConfig,
+    AgentStore,
+    Message,
+    ModelClient,
+    ProviderTools,
+    Tool,
+    ToolPlugin
+  }
+
+  alias AgentEx.EventLoop.{Event, RunRegistry}
   alias AgentEx.MCP.Servers, as: McpServers
+  alias AgentEx.Plugins.{AskUser, Todo}
 
   require Logger
 
@@ -49,7 +61,8 @@ defmodule AgentEx.ToolAssembler do
     disabled = Keyword.get(opts, :disabled_builtins, [])
 
     # Full tool pool — specialist agents get assigned from this via tool_ids
-    available = available_tools(user_id, project_id, root_path)
+    run_id = Keyword.get(opts, :run_id)
+    available = available_tools(user_id, project_id, root_path, run_id, model_client)
 
     # Orchestrator gets a minimal set of read-only tools for observation.
     # Most work should be delegated to specialist agents.
@@ -74,7 +87,6 @@ defmodule AgentEx.ToolAssembler do
     memory_tool = orchestrator_memory_tool(root_path)
 
     # Task planning tools — orchestrator tracks work via a task list
-    run_id = Keyword.get(opts, :run_id)
     task_tools = if run_id, do: orchestrator_task_tools(run_id), else: []
 
     # Workflow tools — saved workflows exposed as callable tools
@@ -84,7 +96,13 @@ defmodule AgentEx.ToolAssembler do
         agent_runner: opts[:agent_runner]
       )
 
-    read_tools ++ provider_read ++ delegate_tools ++ memory_tool ++ task_tools ++ workflow_tools
+    # AskUser tool — allows orchestrator to ask the user a question via chat
+    ask_user_tools = if run_id, do: ask_user_tool(run_id), else: []
+
+    read_tools ++
+      provider_read ++
+      delegate_tools ++
+      memory_tool ++ task_tools ++ workflow_tools ++ ask_user_tools
   end
 
   @doc "Build MCP server configs for server-side execution (Anthropic API)."
@@ -97,10 +115,12 @@ defmodule AgentEx.ToolAssembler do
   These are the tools that specialist agents can be given via `tool_ids`.
   The orchestrator never sees these directly.
   """
-  def available_tools(user_id, project_id, root_path \\ nil) do
+  def available_tools(user_id, project_id, root_path \\ nil, run_id \\ nil, model_client \\ nil) do
     plugin_tools = init_builtin_plugins(root_path)
     http_tools = AgentBridge.http_api_tools(user_id, project_id)
-    plugin_tools ++ http_tools
+    todo = if run_id, do: todo_tools(run_id), else: []
+    advisor = if model_client, do: [advisor_tool(model_client)], else: []
+    plugin_tools ++ http_tools ++ todo ++ advisor
   end
 
   # The orchestrator's only write tool — save/read planning notes to .md files
@@ -247,6 +267,153 @@ defmodule AgentEx.ToolAssembler do
     end
   end
 
+  @ask_user_timeout 300_000
+
+  defp ask_user_tool(run_id) do
+    case AskUser.init(%{
+           "handler" => fn question ->
+             caller = self()
+             event = Event.new(:question_asked, run_id, %{question: question, reply_to: caller})
+             RunRegistry.add_event(run_id, event)
+             Phoenix.PubSub.broadcast(AgentEx.PubSub, "run:#{run_id}", event)
+
+             receive do
+               {:user_answer, answer} -> {:ok, answer}
+             after
+               @ask_user_timeout -> {:error, "No answer received within 5 minutes"}
+             end
+           end
+         }) do
+      {:ok, tools} -> ToolPlugin.prefix_tools("ask_user", tools)
+      _ -> []
+    end
+  end
+
+  defp todo_tools(run_id) do
+    case Todo.init(%{}) do
+      {:stateful, tools, child_spec} ->
+        case DynamicSupervisor.start_child(AgentEx.PluginSupervisor, child_spec) do
+          {:ok, pid} ->
+            # Track the server PID for cleanup when the run ends
+            register_todo_cleanup(run_id, pid)
+
+            # Find the list tool to query full state after each write
+            list_tool = Enum.find(tools, &(&1.name == "list"))
+
+            tools
+            |> ToolPlugin.prefix_tools("todo")
+            |> Enum.map(&broadcast_todo_writes(&1, run_id, list_tool))
+
+          {:error, reason} ->
+            Logger.warning("ToolAssembler: failed to start Todo server: #{inspect(reason)}")
+            []
+        end
+
+      _ ->
+        []
+    end
+  end
+
+  @todo_cleanup_table :agent_ex_todo_cleanup
+
+  defp register_todo_cleanup(run_id, pid) do
+    try do
+      :ets.new(@todo_cleanup_table, [:named_table, :public, :set])
+    rescue
+      ArgumentError -> :ok
+    end
+
+    :ets.insert(@todo_cleanup_table, {run_id, pid})
+  end
+
+  @doc "Clean up Todo server for a completed run. Called by EventLoop."
+  def cleanup_todo(run_id) do
+    if :ets.info(@todo_cleanup_table) != :undefined do
+      case :ets.lookup(@todo_cleanup_table, run_id) do
+        [{^run_id, pid}] ->
+          Todo.cleanup(pid)
+          DynamicSupervisor.terminate_child(AgentEx.PluginSupervisor, pid)
+          :ets.delete(@todo_cleanup_table, run_id)
+
+        [] ->
+          :ok
+      end
+    end
+  end
+
+  defp broadcast_todo_writes(%Tool{kind: :read} = tool, _run_id, _list_tool), do: tool
+
+  defp broadcast_todo_writes(%Tool{kind: :write} = tool, run_id, list_tool) do
+    original_fn = tool.function
+
+    %{
+      tool
+      | function: fn args ->
+          result = original_fn.(args)
+
+          case result do
+            {:ok, msg} ->
+              # Query full list state for the UI
+              items =
+                case Tool.execute(list_tool, %{}) do
+                  {:ok, list} -> list
+                  _ -> ""
+                end
+
+              broadcast(run_id, :todo_updated, %{action: msg, items: items})
+              result
+
+            _ ->
+              result
+          end
+        end
+    }
+  end
+
+  @advisor_system """
+  You are a senior technical advisor. A specialist agent is asking for your guidance.
+  Give concise, actionable advice. Focus on architecture decisions, best practices,
+  and project-specific context. Be direct — the agent will act on your advice immediately.
+  """
+
+  defp advisor_tool(%ModelClient{} = client) do
+    Tool.new(
+      name: "ask_advisor",
+      description:
+        "Ask the orchestrator for technical guidance when unsure about approach, " <>
+          "architecture, or implementation decisions. Use this before making big " <>
+          "decisions — not for trivial questions.",
+      parameters: %{
+        "type" => "object",
+        "properties" => %{
+          "question" => %{
+            "type" => "string",
+            "description" => "Your technical question or decision you need guidance on"
+          }
+        },
+        "required" => ["question"]
+      },
+      kind: :read,
+      function: fn %{"question" => question} ->
+        messages = [
+          Message.system(@advisor_system),
+          Message.user(question)
+        ]
+
+        case ModelClient.create(client, messages, max_tokens: 1024) do
+          {:ok, response} -> {:ok, response.content}
+          {:error, reason} -> {:error, "Advisor unavailable: #{inspect(reason)}"}
+        end
+      end
+    )
+  end
+
+  defp broadcast(run_id, type, data) do
+    event = Event.new(type, run_id, data)
+    RunRegistry.add_event(run_id, event)
+    Phoenix.PubSub.broadcast(AgentEx.PubSub, "run:#{run_id}", event)
+  end
+
   defp validate_md_filename(filename) do
     cond do
       not String.ends_with?(filename, ".md") ->
@@ -308,24 +475,40 @@ defmodule AgentEx.ToolAssembler do
         end)
 
       """
-      You are an AI orchestrator. You reason, plan, delegate, and synthesize — never act directly.
+      You are an AI orchestrator and generalist reviewer. You reason, plan, delegate,
+      review, and correct — adapting your expertise to match each specialist's domain.
 
       ## Specialists
       #{agent_descriptions}
 
       ## How you work
-      1. Reason about the user's request — what needs to be done and in what order
-      2. Break it into tasks with create_task — one task per unit of work
-      3. Delegate each task to the best specialist — include clear instructions
-      4. Track progress with update_task after each delegation completes
-      5. If a specialist reports failures (test failures, review issues), reason about
-         what went wrong and delegate a fix to the appropriate specialist
-      6. Synthesize the final result when all tasks are done
+      1. **Plan** — reason about the request, break into tasks with create_task
+      2. **Delegate** — assign each task to the best specialist with clear instructions
+         and acceptance criteria
+      3. **Review** — when a specialist reports back, switch to reviewer mode:
+         - Read the actual files they created/modified (use editor_read, search_grep)
+         - Verify the work meets the acceptance criteria you set
+         - Check for correctness, completeness, and quality
+         - Think like a domain expert for that specialist's area
+      4. **Correct** — if the review finds issues:
+         - Be specific: cite file:line, explain what's wrong and why
+         - Re-delegate to the same specialist with your corrections
+         - The specialist will fix and report back — review again
+      5. **Accept** — only mark a task completed when your review passes
+      6. **Synthesize** — summarize the final result when all tasks are done
+
+      ## Review mindset
+      When reviewing, adapt your expertise to the domain:
+      - Python agent → think like a senior Python developer and security auditor
+      - Browser agent → think like a QA tester verifying page behavior
+      - Computer use agent → think like a sysadmin checking for correctness
+      Never rubber-stamp results. Actually read the files and verify.
 
       ## Delegation principles
+      - Include acceptance criteria: "Done when tests pass and ruff check is clean"
       - Tell specialists to use filesystem_write_file for creating/modifying files
       - Tell specialists to verify their work with shell_run_command
-      - Include the WHAT and WHY in delegation — the specialist knows HOW
+      - Include the WHAT and WHY — the specialist knows HOW
       - The user expects working files on disk, not code displayed in chat
 
       ## Answer directly (no delegation) for

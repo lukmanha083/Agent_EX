@@ -27,7 +27,9 @@ defmodule AgentEx.Defaults do
   Capability embeddings are computed separately via CapabilityIndex.
   """
   def register_system_agents do
-    Enum.each(Agents.templates(), fn template ->
+    templates = Agents.templates()
+
+    Enum.each(templates, fn template ->
       config =
         template
         |> Map.put_new(:provider, "anthropic")
@@ -43,6 +45,14 @@ defmodule AgentEx.Defaults do
           Logger.warning("Defaults: failed to register '#{template.name}': #{inspect(reason)}")
       end
     end)
+
+    # Remove system agents no longer in the templates list
+    current_names = Enum.map(templates, & &1.name)
+
+    case AgentStore.delete_stale_system(current_names) do
+      {0, _} -> :ok
+      {n, _} -> Logger.info("Defaults: removed #{n} stale system agent(s)")
+    end
 
     :ok
   end

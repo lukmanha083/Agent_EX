@@ -17,6 +17,9 @@ defmodule AgentEx.EventLoop.Event do
           | :fan_out_complete
           | :pipeline_complete
           | :pipeline_error
+          # Interaction events
+          | :question_asked
+          | :todo_updated
           # Agent tree events (orchestration)
           | :agent_spawn
           | :agent_tool_call

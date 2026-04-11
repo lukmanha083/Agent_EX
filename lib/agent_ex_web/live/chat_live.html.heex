@@ -82,13 +82,63 @@
       <!-- Pipeline stages (non-orchestration) -->
       <.pipeline_stages :if={@agent_tree == %{}} stages={@stages} />
 
+      <!-- Todo checklist (live updates from specialist agent) -->
+      <div :if={@todo_items != ""} class="px-4 py-2">
+        <div class="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3">
+          <div class="flex items-center gap-2 mb-2">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4 text-emerald-400">
+              <path fill-rule="evenodd" d="M6 4.75A.75.75 0 0 1 6.75 4h10.5a.75.75 0 0 1 0 1.5H6.75A.75.75 0 0 1 6 4.75ZM6 10a.75.75 0 0 1 .75-.75h10.5a.75.75 0 0 1 0 1.5H6.75A.75.75 0 0 1 6 10Zm0 5.25a.75.75 0 0 1 .75-.75h10.5a.75.75 0 0 1 0 1.5H6.75a.75.75 0 0 1-.75-.75ZM1.99 4.75a1 1 0 0 1 1-1h.01a1 1 0 0 1 0 2h-.01a1 1 0 0 1-1-1Zm1 5.25a1 1 0 0 1 1-1h.01a1 1 0 0 1 0 2h-.01a1 1 0 0 1-1-1Zm0 5.25a1 1 0 0 1 1-1h.01a1 1 0 0 1 0 2h-.01a1 1 0 0 1-1-1Z" clip-rule="evenodd" />
+            </svg>
+            <span class="text-xs font-medium text-emerald-400">Specialist Checklist</span>
+          </div>
+          <div class="space-y-0.5">
+            <p :for={line <- String.split(@todo_items, "\n", trim: true)} class={[
+              "text-xs font-mono",
+              cond do
+                String.contains?(line, "[x]") -> "text-emerald-400"
+                String.contains?(line, "[~]") -> "text-amber-400"
+                true -> "text-gray-400"
+              end
+            ]}><%= line %></p>
+          </div>
+        </div>
+      </div>
+
       <!-- Thinking indicator -->
       <.thinking_indicator active={@thinking} />
     </div>
 
     <!-- Input area -->
     <div class="border-t border-gray-800 bg-gray-900/50 p-3">
-      <form phx-submit="send" class="flex gap-2">
+      <!-- Agent question prompt -->
+      <div :if={@pending_question} class="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+        <div class="flex items-start gap-2 mb-2">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5">
+            <path fill-rule="evenodd" d="M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-7-4a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM9 9a.75.75 0 0 0 0 1.5h.253a.25.25 0 0 1 .244.304l-.459 2.066A1.75 1.75 0 0 0 10.747 15H11a.75.75 0 0 0 0-1.5h-.253a.25.25 0 0 1-.244-.304l.459-2.066A1.75 1.75 0 0 0 9.253 9H9Z" clip-rule="evenodd" />
+          </svg>
+          <p class="text-sm text-amber-200"><%= @pending_question %></p>
+        </div>
+        <form phx-submit="submit_answer" class="flex gap-2">
+          <label for="answer_input" class="sr-only">Your answer</label>
+          <input
+            id="answer_input"
+            type="text"
+            name="answer"
+            placeholder="Type your answer..."
+            autocomplete="off"
+            autofocus
+            class="flex-1 bg-gray-800 border border-amber-500/30 text-white rounded-lg px-3 md:px-4 py-2.5 text-sm placeholder-gray-500 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 min-h-[44px]"
+          />
+          <.button type="submit" class="min-h-[44px] bg-amber-600 hover:bg-amber-500" aria-label="Submit answer">
+            Reply
+          </.button>
+          <.button variant="destructive" type="button" phx-click="cancel" class="min-h-[44px]" aria-label="Cancel">
+            Cancel
+          </.button>
+        </form>
+      </div>
+      <!-- Normal message input -->
+      <form :if={!@pending_question} phx-submit="send" class="flex gap-2">
         <label for="message_input" class="sr-only">Message</label>
         <input
           id="message_input"
