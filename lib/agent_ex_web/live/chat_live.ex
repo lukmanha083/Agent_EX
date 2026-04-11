@@ -56,7 +56,10 @@ defmodule AgentExWeb.ChatLive do
          agent_tree_stats: %{completed: 0, total: 0},
          agent_logs: %{},
          expanded_agent: nil,
-         agent_tree_budget: nil
+         agent_tree_budget: nil,
+         pending_question: nil,
+         question_reply_to: nil,
+         todo_items: []
        )}
     end
   end
@@ -95,7 +98,10 @@ defmodule AgentExWeb.ChatLive do
        run_id: nil,
        agent_tree: %{},
        agent_tree_stats: %{completed: 0, total: 0},
-       agent_tree_budget: nil
+       agent_tree_budget: nil,
+       pending_question: nil,
+       question_reply_to: nil,
+       todo_items: []
      )}
   end
 
@@ -162,6 +168,23 @@ defmodule AgentExWeb.ChatLive do
 
   def handle_event("send", _params, socket), do: {:noreply, socket}
 
+  def handle_event("submit_answer", %{"answer" => raw_answer}, socket) do
+    answer = String.trim(raw_answer)
+
+    if answer != "" and socket.assigns.question_reply_to do
+      send(socket.assigns.question_reply_to, {:user_answer, answer})
+
+      {:noreply,
+       assign(socket,
+         pending_question: nil,
+         question_reply_to: nil,
+         thinking: true
+       )}
+    else
+      {:noreply, socket}
+    end
+  end
+
   def handle_event("cancel", _params, socket) do
     socket = cancel_active_run(socket)
 
@@ -175,7 +198,10 @@ defmodule AgentExWeb.ChatLive do
        stages: [],
        agent_tree: %{},
        agent_tree_stats: %{completed: 0, total: 0},
-       agent_tree_budget: nil
+       agent_tree_budget: nil,
+       pending_question: nil,
+       question_reply_to: nil,
+       todo_items: []
      )}
   end
 
@@ -271,6 +297,20 @@ defmodule AgentExWeb.ChatLive do
   end
 
   # -- Run event dispatch --
+
+  defp handle_run_event(%Event{type: :question_asked} = event, socket) do
+    {:noreply,
+     assign(socket,
+       pending_question: event.data.question,
+       question_reply_to: event.data.reply_to,
+       thinking: false
+     )}
+  end
+
+  defp handle_run_event(%Event{type: :todo_updated} = event, socket) do
+    items = socket.assigns.todo_items ++ [event.data.message]
+    {:noreply, assign(socket, todo_items: items)}
+  end
 
   defp handle_run_event(%Event{type: :think_start}, socket) do
     {:noreply, assign(socket, thinking: true)}

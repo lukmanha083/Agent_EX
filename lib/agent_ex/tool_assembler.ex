@@ -10,8 +10,10 @@ defmodule AgentEx.ToolAssembler do
   4. Agent delegate tools (from AgentBridge)
   """
 
-  alias AgentEx.{AgentBridge, AgentConfig, AgentStore, ProviderTools, ToolPlugin}
+  alias AgentEx.{AgentBridge, AgentConfig, AgentStore, ProviderTools, Tool, ToolPlugin}
+  alias AgentEx.EventLoop.Event
   alias AgentEx.MCP.Servers, as: McpServers
+  alias AgentEx.Plugins.{AskUser, Todo}
 
   require Logger
 
@@ -84,7 +86,14 @@ defmodule AgentEx.ToolAssembler do
         agent_runner: opts[:agent_runner]
       )
 
-    read_tools ++ provider_read ++ delegate_tools ++ memory_tool ++ task_tools ++ workflow_tools
+    # Interaction tools — ask user questions + session todo checklist
+    ask_user_tools = if run_id, do: ask_user_tool(run_id), else: []
+    todo_tools = if run_id, do: todo_tools(run_id), else: []
+
+    read_tools ++
+      provider_read ++
+      delegate_tools ++
+      memory_tool ++ task_tools ++ workflow_tools ++ ask_user_tools ++ todo_tools
   end
 
   @doc "Build MCP server configs for server-side execution (Anthropic API)."
@@ -245,6 +254,77 @@ defmodule AgentEx.ToolAssembler do
           {:error, :not_found} -> {:error, "Task ##{args["task_id"]} not found"}
         end
     end
+  end
+
+  @ask_user_timeout 300_000
+
+  defp ask_user_tool(run_id) do
+    case AskUser.init(%{
+           "handler" => fn question ->
+             caller = self()
+
+             Phoenix.PubSub.broadcast(
+               AgentEx.PubSub,
+               "run:#{run_id}",
+               Event.new(:question_asked, run_id, %{question: question, reply_to: caller})
+             )
+
+             receive do
+               {:user_answer, answer} -> {:ok, answer}
+             after
+               @ask_user_timeout -> {:error, "No answer received within 5 minutes"}
+             end
+           end
+         }) do
+      {:ok, tools} -> ToolPlugin.prefix_tools("ask_user", tools)
+      _ -> []
+    end
+  end
+
+  defp todo_tools(run_id) do
+    case Todo.init(%{}) do
+      {:stateful, tools, child_spec} ->
+        case DynamicSupervisor.start_child(AgentEx.PluginSupervisor, child_spec) do
+          {:ok, _pid} ->
+            tools
+            |> ToolPlugin.prefix_tools("todo")
+            |> Enum.map(&broadcast_todo_writes(&1, run_id))
+
+          {:error, reason} ->
+            Logger.warning("ToolAssembler: failed to start Todo server: #{inspect(reason)}")
+            []
+        end
+
+      _ ->
+        []
+    end
+  end
+
+  defp broadcast_todo_writes(%Tool{kind: :read} = tool, _run_id), do: tool
+
+  defp broadcast_todo_writes(%Tool{kind: :write} = tool, run_id) do
+    original_fn = tool.function
+
+    %{
+      tool
+      | function: fn args ->
+          result = original_fn.(args)
+
+          case result do
+            {:ok, msg} ->
+              broadcast(run_id, :todo_updated, %{message: msg})
+              result
+
+            _ ->
+              result
+          end
+        end
+    }
+  end
+
+  defp broadcast(run_id, type, data) do
+    event = Event.new(type, run_id, data)
+    Phoenix.PubSub.broadcast(AgentEx.PubSub, "run:#{run_id}", event)
   end
 
   defp validate_md_filename(filename) do
