@@ -22,6 +22,7 @@ defmodule AgentEx.Plugins.Browser do
   def manifest do
     %{
       name: "browser",
+      version: "1.0.0",
       description: "Headless browser automation (navigate, click, type, screenshot)",
       config_schema: [
         enable_js: [type: :boolean, default: false, doc: "Enable execute_js tool (disabled by default for security)"]
