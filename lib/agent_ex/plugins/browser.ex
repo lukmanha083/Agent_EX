@@ -13,6 +13,7 @@ defmodule AgentEx.Plugins.Browser do
   @behaviour AgentEx.ToolPlugin
 
   alias AgentEx.Browser.SessionManager
+  alias AgentEx.NetworkPolicy
   alias AgentEx.Tool
 
   require Logger
@@ -22,12 +23,14 @@ defmodule AgentEx.Plugins.Browser do
     %{
       name: "browser",
       description: "Headless browser automation (navigate, click, type, screenshot)",
-      config_schema: []
+      config_schema: [
+        enable_js: [type: :boolean, default: false, doc: "Enable execute_js tool (disabled by default for security)"]
+      ]
     }
   end
 
   @impl true
-  def init(_config) do
+  def init(config) do
     tools = [
       navigate_tool(),
       click_tool(),
@@ -35,9 +38,15 @@ defmodule AgentEx.Plugins.Browser do
       screenshot_tool(),
       extract_tool(),
       select_tool(),
-      wait_tool(),
-      execute_js_tool()
+      wait_tool()
     ]
+
+    tools =
+      if config[:enable_js] == true do
+        tools ++ [execute_js_tool()]
+      else
+        tools
+      end
 
     {:ok, tools}
   end
@@ -57,15 +66,17 @@ defmodule AgentEx.Plugins.Browser do
         "required" => ["url"]
       },
       function: fn %{"url" => url} ->
-        with_session(fn manager ->
-          case SessionManager.navigate(manager, url) do
-            {:ok, result} ->
-              {:ok, "Navigated to #{result.url}\nTitle: #{result.title}"}
+        with :ok <- validate_navigate_url(url) do
+          with_session(fn manager ->
+            case SessionManager.navigate(manager, url) do
+              {:ok, result} ->
+                {:ok, "Navigated to #{result.url}\nTitle: #{result.title}"}
 
-            {:error, reason} ->
-              {:error, "Navigation failed: #{reason}"}
-          end
-        end)
+              {:error, reason} ->
+                {:error, "Navigation failed: #{reason}"}
+            end
+          end)
+        end
       end
     )
   end
@@ -263,6 +274,23 @@ defmodule AgentEx.Plugins.Browser do
         end)
       end
     )
+  end
+
+  # -- URL validation --
+
+  @blocked_schemes ~w(file chrome chrome-extension)
+
+  defp validate_navigate_url(url) do
+    case URI.parse(url) do
+      %URI{scheme: scheme} when scheme in @blocked_schemes ->
+        {:error, "Blocked scheme: #{scheme}:// is not allowed"}
+
+      _ ->
+        case NetworkPolicy.validate(url) do
+          :ok -> :ok
+          {:error, reason} -> {:error, "Blocked URL: #{reason}"}
+        end
+    end
   end
 
   # -- Session management --
